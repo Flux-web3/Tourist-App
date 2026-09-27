@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme - warm cream */
+    --bg: #FBF9F4;
+    --surface: #FFFFFF;
+    --elevated: #FFFFFF;
+    --text-primary: #1E2A38;
+    --text-secondary: #4A5568;
+    --text-muted: #8A8A8A;
+    --border: #E8E4DC;
+    --primary: #E07A5F;
+    --primary-hover: #C8674E;
+    --accent: #3D5A80;
+    --success: #2A9D8F;
+    --warning: #E9C46A;
+    --error: #E63946;
+    --info: #4895EF;
+    --ai-draft: #8B7AB8;
+    --est-cost: #E9C46A;
+    --actual-spend: #E07A5F;
+    --disabled: #C0C0C0;
+    --focus: #3D5A80;
+    --shadow: 0 1px 3px rgba(30, 42, 56, 0.08), 0 1px 2px rgba(30, 42, 56, 0.04);
+    --shadow-md: 0 4px 12px rgba(30, 42, 56, 0.1), 0 2px 4px rgba(30, 42, 56, 0.06);
+    --shadow-lg: 0 10px 30px rgba(30, 42, 56, 0.12), 0 4px 8px rgba(30, 42, 56, 0.08);
+  }
+
+  .dark {
+    /* Dark theme */
+    --bg: #121820;
+    --surface: #18202B;
+    --elevated: #1E2633;
+    --text-primary: #F3F1EC;
+    --text-secondary: #B0B8C4;
+    --text-muted: #7A8290;
+    --border: #2B384A;
+    --primary: #E07A5F;
+    --primary-hover: #EC8B70;
+    --accent: #6B8DAD;
+    --success: #2A9D8F;
+    --warning: #E9C46A;
+    --error: #E63946;
+    --info: #4895EF;
+    --ai-draft: #A89BD0;
+    --est-cost: #E9C46A;
+    --actual-spend: #E07A5F;
+    --disabled: #4A5568;
+    --focus: #6B8DAD;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.4), 0 4px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  /* Focus styles */
+  *:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+  }
+}
+
+@layer utilities {
+  .bg-app { background-color: var(--bg); }
+  .bg-surface { background-color: var(--surface); }
+  .bg-elevated { background-color: var(--elevated); }
+  .text-primary-c { color: var(--text-primary); }
+  .text-secondary-c { color: var(--text-secondary); }
+  .text-muted-c { color: var(--text-muted); }
+  .border-app { border-color: var(--border); }
+  .bg-primary-c { background-color: var(--primary); }
+  .text-primary-action { color: var(--primary); }
+  .bg-accent-c { background-color: var(--accent); }
+  .text-accent-c { color: var(--accent); }
+  .bg-success-c { background-color: var(--success); }
+  .text-success-c { color: var(--success); }
+  .bg-warning-c { background-color: var(--warning); }
+  .text-warning-c { color: var(--warning); }
+  .bg-error-c { background-color: var(--error); }
+  .text-error-c { color: var(--error); }
+  .bg-info-c { background-color: var(--info); }
+  .text-info-c { color: var(--info); }
+  .text-ai-draft { color: var(--ai-draft); }
+  .bg-ai-draft-c { background-color: var(--ai-draft); }
+  .text-est-cost { color: var(--est-cost); }
+  .text-actual-spend { color: var(--actual-spend); }
+  .bg-disabled-c { background-color: var(--disabled); }
+  .shadow-app { box-shadow: var(--shadow); }
+  .shadow-app-md { box-shadow: var(--shadow-md); }
+  .shadow-app-lg { box-shadow: var(--shadow-lg); }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease forwards;
+  }
+  .animate-slide-up {
+    animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .animate-slide-down {
+    animation: slideDown 0.3s ease forwards;
+  }
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease forwards;
+  }
+  .animate-pulse-soft {
+    animation: pulseSoft 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulseSoft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
