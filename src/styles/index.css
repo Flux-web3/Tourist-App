@@ -351,6 +351,19 @@
 }
 
 @layer components {
+  /*
+    Hidden until the icon font is usable - see the note in index.html. The box
+    is kept so nothing reflows when the glyphs arrive. Tests and any environment
+    without the Font Loading API get the class immediately.
+  */
+  .material-symbols-outlined {
+    visibility: hidden;
+  }
+
+  :root.symbols-ready .material-symbols-outlined {
+    visibility: visible;
+  }
+
   .material-symbols-outlined {
     font-family: var(--font-symbol);
     font-weight: normal;

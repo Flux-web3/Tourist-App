@@ -18,16 +18,37 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
-    <!--
-      `display=block`, not `swap`: Material Symbols are rendered as ligature
-      text ("account_balance_wallet"), so with `swap` a slow or blocked font
-      request paints the literal icon names all over the UI before the font
-      arrives. `block` keeps that space blank while it loads.
-    -->
     <link
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=block"
       rel="stylesheet"
     />
+    <script>
+      /*
+        Material Symbols draws its icons from ligature TEXT: the markup really
+        says "account_balance_wallet" and the font turns it into a glyph. Until
+        that font arrives, every icon in the product renders as its own name in
+        words. `display=block` shortens that window but cannot close it, and if
+        the font never arrives — blocked network, strict proxy, offline — the
+        words stay forever.
+
+        So icons stay hidden until the font is actually usable. `visibility`
+        rather than `display` keeps each icon's box, so nothing reflows when
+        they appear. If the font never loads the icons simply stay blank, which
+        is far better than a screen full of snake_case, and every icon-only
+        control already carries its own screen-reader label.
+      */
+      ;(function () {
+        var reveal = function () {
+          document.documentElement.classList.add('symbols-ready')
+        }
+        try {
+          if (!document.fonts || !document.fonts.load) return reveal()
+          document.fonts.load('24px "Material Symbols Outlined"').then(reveal, reveal)
+        } catch (error) {
+          reveal()
+        }
+      })()
+    </script>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Tourist" />
     <meta property="og:url" content="https://tourist-app-nu-six.vercel.app/" />
