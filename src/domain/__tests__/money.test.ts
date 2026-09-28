@@ -1,0 +1,508 @@
+import { describe, expect, it } from 'vitest'
+import {
+  CURRENCIES,
+  CURRENCY_SYMBOLS,
+  formatMoney,
+  formatMoneyCompact,
+  fromCents,
+  sumAmounts,
+  summariseBudget,
+  toCents,
+} from '@/domain/money'
+import type { CurrencyCode } from '@/domain/types'
+
+const WITH_CENTS: Record<CurrencyCode, string> = {
+  EUR: '€1,234.50 EUR',
+  USD: '$1,234.50 USD',
+  GBP: '£1,234.50 GBP',
+  NGN: '₦1,234.50 NGN',
+  JPY: '¥1,234.50 JPY',
+}
+
+const WITHOUT_CENTS: Record<CurrencyCode, string> = {
+  EUR: '€1,235 EUR',
+  USD: '$1,235 USD',
+  GBP: '£1,235 GBP',
+  NGN: '₦1,235 NGN',
+  JPY: '¥1,235 JPY',
+}
+
+const SYMBOL_ONLY: Record<CurrencyCode, string> = {
+  EUR: '€1,234.50',
+  USD: '$1,234.50',
+  GBP: '£1,234.50',
+  NGN: '₦1,234.50',
+  JPY: '¥1,234.50',
+}
+
+const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
+  EUR: '€0.00 EUR',
+  USD: '$0.00 USD',
+  GBP: '£0.00 GBP',
+  NGN: '₦0.00 NGN',
+  JPY: '¥0.00 JPY',
+}
+
+const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
+  EUR: '-€1,234.50 EUR',
+  USD: '-$1,234.50 USD',
+  GBP: '-£1,234.50 GBP',
+  NGN: '-₦1,234.50 NGN',
+  JPY: '-¥1,234.50 JPY',
+}
+
+const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
+  EUR: '€2,500 EUR',
+  USD: '$2,500 USD',
+  GBP: '£2,500 GBP',
+  NGN: '₦2,500 NGN',
+  JPY: '¥2,500 JPY',
+}
+
+describe('CURRENCIES', () => {
+  it('exposes exactly the five supported currency codes', () => {
+    expect([...CURRENCIES]).toEqual(['EUR', 'USD', 'GBP', 'NGN', 'JPY'])
+  })
+
+  it('has a symbol entry for every supported currency', () => {
+    for (const currency of CURRENCIES) {
+      expect(CURRENCY_SYMBOLS[currency]).toBeTypeOf('string')
+      expect(CURRENCY_SYMBOLS[currency].length).toBeGreaterThan(0)
+    }
+  })
+
+  it('exposes the expected symbols', () => {
+    expect(CURRENCY_SYMBOLS).toEqual({
+      EUR: '€',
+      USD: '$',
+      GBP: '£',
+      NGN: '₦',
+      JPY: '¥',
+    })
+  })
+})
+
+describe('toCents', () => {
+  it('converts whole major units to cents', () => {
+    expect(toCents(24)).toBe(2400)
+  })
+
+  it('converts fractional major units to cents', () => {
+    expect(toCents(24.5)).toBe(2450)
+  })
+
+  it('converts zero to zero', () => {
+    expect(toCents(0)).toBe(0)
+  })
+
+  it('rounds to the nearest whole cent', () => {
+    expect(toCents(1.239)).toBe(124)
+    expect(toCents(1.234)).toBe(123)
+  })
+
+  it('neutralises 0.1 + 0.2 float drift', () => {
+    expect(0.1 + 0.2).not.toBe(0.3)
+    expect(toCents(0.1 + 0.2)).toBe(30)
+  })
+
+  it('rounds a half cent away from zero instead of following the float representation', () => {
+    expect(1.005 * 100).toBe(100.49999999999999)
+    expect(toCents(1.005)).toBe(101)
+  })
+
+  it('rounds a positive half cent up regardless of the float representation', () => {
+    expect(toCents(1.015)).toBe(102)
+    expect(toCents(0.145)).toBe(15)
+    expect(toCents(2.675)).toBe(268)
+    expect(toCents(1.235)).toBe(124)
+  })
+
+  it('rounds a negative half cent away from zero symmetrically', () => {
+    expect(-1.005 * 100).toBe(-100.49999999999999)
+    expect(toCents(-1.005)).toBe(-101)
+    expect(toCents(-0.145)).toBe(-15)
+  })
+
+  it('keeps the sign of a negative amount', () => {
+    expect(toCents(-1.239)).toBe(-124)
+    expect(toCents(-1.234)).toBe(-123)
+  })
+
+  it('converts an exact cent value', () => {
+    expect(toCents(19.99)).toBe(1999)
+  })
+
+  it('never produces a negative zero', () => {
+    expect(Object.is(toCents(-0), 0)).toBe(true)
+    expect(Object.is(toCents(-0.001), 0)).toBe(true)
+    expect(Object.is(toCents(-0.004), 0)).toBe(true)
+    expect(Object.is(fromCents(-0), 0)).toBe(true)
+  })
+
+  it('handles negative amounts symmetrically', () => {
+    expect(toCents(-24.5)).toBe(-2450)
+    expect(toCents(-0.1)).toBe(-10)
+  })
+
+  it('handles large amounts without precision loss', () => {
+    expect(toCents(1_000_000)).toBe(100_000_000)
+    expect(toCents(1e9)).toBe(100_000_000_000)
+  })
+
+  it('returns 0 for NaN', () => {
+    expect(toCents(Number.NaN)).toBe(0)
+  })
+
+  it('returns 0 for Infinity', () => {
+    expect(toCents(Number.POSITIVE_INFINITY)).toBe(0)
+  })
+
+  it('returns 0 for -Infinity', () => {
+    expect(toCents(Number.NEGATIVE_INFINITY)).toBe(0)
+  })
+
+  it('rounds every half cent away from zero across a sweep of tricky values', () => {
+    expect(toCents(0.005)).toBe(1)
+    expect(toCents(0.015)).toBe(2)
+    expect(toCents(0.025)).toBe(3)
+    expect(toCents(0.125)).toBe(13)
+    expect(toCents(0.375)).toBe(38)
+    expect(toCents(-0.005)).toBe(-1)
+    expect(toCents(-0.125)).toBe(-13)
+  })
+})
+
+describe('fromCents', () => {
+  it('converts cents to major units', () => {
+    expect(fromCents(2450)).toBe(24.5)
+  })
+
+  it('converts zero cents to zero', () => {
+    expect(fromCents(0)).toBe(0)
+  })
+
+  it('converts negative cents to a negative amount', () => {
+    expect(fromCents(-2450)).toBe(-24.5)
+  })
+
+  it('round-trips through toCents', () => {
+    expect(fromCents(toCents(19.99))).toBe(19.99)
+  })
+
+  it('returns 0 for non-finite cents', () => {
+    expect(fromCents(Number.NaN)).toBe(0)
+    expect(fromCents(Number.POSITIVE_INFINITY)).toBe(0)
+    expect(fromCents(Number.NEGATIVE_INFINITY)).toBe(0)
+  })
+
+  it('round-trips every cent-exact value back to itself', () => {
+    for (const value of [
+      0,
+      0.01,
+      0.07,
+      0.1,
+      0.29,
+      0.3,
+      0.7,
+      1.05,
+      1.5,
+      2.5,
+      19.99,
+      24.5,
+      100,
+      123.45,
+      1234.56,
+      1000,
+      1e6,
+      1e9,
+      -0.01,
+      -0.07,
+      -2.5,
+      -19.99,
+      -24.5,
+      -123.45,
+    ]) {
+      expect(fromCents(toCents(value))).toBe(value)
+    }
+  })
+})
+
+describe('sumAmounts', () => {
+  it('returns 0 for an empty array', () => {
+    expect(sumAmounts([])).toBe(0)
+  })
+
+  it('sums whole amounts', () => {
+    expect(sumAmounts([10, 20, 30])).toBe(60)
+  })
+
+  it('sums fractional amounts without float drift', () => {
+    expect(sumAmounts([10, 20.5, 0.1, 0.2])).toBe(30.8)
+  })
+
+  it('sums three tenths to exactly 0.6', () => {
+    expect(0.1 + 0.2 + 0.3).not.toBe(0.6)
+    expect(sumAmounts([0.1, 0.2, 0.3])).toBe(0.6)
+  })
+
+  it('sums 19.99 and 0.01 to 20 without cent drift', () => {
+    expect(sumAmounts([19.99, 0.01])).toBe(20)
+  })
+
+  it('sums 1.005 and 2.005 to 3.02', () => {
+    expect(sumAmounts([1.005, 2.005])).toBe(3.02)
+  })
+
+  it('sums mixed signs to a negative total', () => {
+    expect(sumAmounts([-10, 4.5])).toBe(-5.5)
+  })
+
+  it('sums large amounts exactly', () => {
+    expect(sumAmounts([1e9, 1e9])).toBe(2_000_000_000)
+  })
+
+  it('treats non-finite entries as zero', () => {
+    expect(sumAmounts([10, Number.NaN, 5])).toBe(15)
+  })
+})
+
+describe('formatMoney', () => {
+  it('defaults to cents and the currency code', () => {
+    expect(formatMoney(1234.5, 'EUR')).toBe(WITH_CENTS.EUR)
+  })
+
+  for (const currency of CURRENCIES) {
+    it(`formats 1234.5 with cents and code for ${currency}`, () => {
+      expect(formatMoney(1234.5, currency, { showCents: true, showCode: true })).toBe(
+        WITH_CENTS[currency],
+      )
+    })
+
+    it(`formats 1234.5 without cents for ${currency}`, () => {
+      expect(formatMoney(1234.5, currency, { showCents: false })).toBe(WITHOUT_CENTS[currency])
+    })
+
+    it(`formats 1234.5 without the code for ${currency}`, () => {
+      expect(formatMoney(1234.5, currency, { showCode: false })).toBe(SYMBOL_ONLY[currency])
+    })
+
+    it(`formats zero with the code for ${currency}`, () => {
+      expect(formatMoney(0, currency)).toBe(ZERO_WITH_CODE[currency])
+    })
+
+    it(`formats a negative amount with the code for ${currency}`, () => {
+      expect(formatMoney(-1234.5, currency)).toBe(NEGATIVE_WITH_CODE[currency])
+    })
+  }
+
+  it('appends the currency code as a space-separated suffix', () => {
+    expect(formatMoney(1, 'USD')).toBe('$1.00 USD')
+  })
+
+  it('drops only the code suffix when showCode is false', () => {
+    for (const currency of CURRENCIES) {
+      expect(formatMoney(1234.5, currency, { showCode: false })).toBe(
+        formatMoney(1234.5, currency).replace(` ${currency}`, ''),
+      )
+    }
+  })
+
+  it('drops only the decimals when showCents is false', () => {
+    expect(formatMoney(1234.5, 'EUR', { showCents: false })).toBe('€1,235 EUR')
+  })
+
+  it('treats an empty options object as the defaults', () => {
+    expect(formatMoney(1234.5, 'GBP', {})).toBe(WITH_CENTS.GBP)
+  })
+
+  it('treats NaN as zero', () => {
+    expect(formatMoney(Number.NaN, 'EUR')).toBe('€0.00 EUR')
+  })
+
+  it('treats Infinity as zero', () => {
+    expect(formatMoney(Number.POSITIVE_INFINITY, 'EUR')).toBe('€0.00 EUR')
+  })
+
+  it('formats a large amount with thousands separators', () => {
+    expect(formatMoney(1_234_567.89, 'EUR')).toBe('€1,234,567.89 EUR')
+  })
+})
+
+describe('formatMoneyCompact', () => {
+  for (const currency of CURRENCIES) {
+    it(`formats 2500 without cents and with the code for ${currency}`, () => {
+      expect(formatMoneyCompact(2500, currency)).toBe(COMPACT_TWO_THOUSAND_FIVE_HUNDRED[currency])
+    })
+  }
+
+  it('matches formatMoney with showCents off and showCode on', () => {
+    for (const currency of CURRENCIES) {
+      expect(formatMoneyCompact(2500, currency)).toBe(
+        formatMoney(2500, currency, { showCents: false, showCode: true }),
+      )
+    }
+  })
+
+  it('rounds to whole currency units', () => {
+    expect(formatMoneyCompact(1234.5, 'EUR')).toBe('€1,235 EUR')
+  })
+
+  it('keeps a negative sign', () => {
+    expect(formatMoneyCompact(-2500, 'USD')).toBe('-$2,500 USD')
+  })
+})
+
+describe('summariseBudget', () => {
+  it('computes remaining as tripBudget minus actualSpent', () => {
+    const summary = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(summary.remaining).toBe(2349.5)
+  })
+
+  it('sums every itinerary estimate as a projection', () => {
+    const summary = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(117.75)
+  })
+
+  it('sums logged expenses as the settled figure', () => {
+    const summary = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(summary.actualSpent).toBe(150.5)
+  })
+
+  it('computes estimateVariance as itineraryEstimate minus actualSpent', () => {
+    const summary = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(summary.estimateVariance).toBe(-32.75)
+  })
+
+  it('reports a negative remaining when over budget', () => {
+    const summary = summariseBudget({
+      tripBudget: 100,
+      itineraryEstimates: [10, 20],
+      expenseAmounts: [150],
+      currency: 'GBP',
+    })
+    expect(summary.remaining).toBe(-50)
+  })
+
+  it('flags an over-budget trip', () => {
+    const summary = summariseBudget({
+      tripBudget: 100,
+      itineraryEstimates: [10, 20],
+      expenseAmounts: [150],
+      currency: 'GBP',
+    })
+    expect(summary.isOverBudget).toBe(true)
+  })
+
+  it('does not flag a trip that is exactly on budget', () => {
+    const summary = summariseBudget({
+      tripBudget: 100,
+      itineraryEstimates: [],
+      expenseAmounts: [40, 60],
+      currency: 'EUR',
+    })
+    expect(summary.remaining).toBe(0)
+    expect(summary.isOverBudget).toBe(false)
+  })
+
+  it('does not flag a trip with budget to spare', () => {
+    const summary = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60],
+      expenseAmounts: [100],
+      currency: 'EUR',
+    })
+    expect(summary.isOverBudget).toBe(false)
+  })
+
+  it('returns zeroes for empty estimates and expenses', () => {
+    const summary = summariseBudget({
+      tripBudget: 0,
+      itineraryEstimates: [],
+      expenseAmounts: [],
+      currency: 'JPY',
+    })
+    expect(summary).toEqual({
+      tripBudget: 0,
+      itineraryEstimate: 0,
+      actualSpent: 0,
+      remaining: 0,
+      estimateVariance: 0,
+      isOverBudget: false,
+      currency: 'JPY',
+    })
+  })
+
+  it('is cent-safe when the budget itself is float-drifted', () => {
+    const summary = summariseBudget({
+      tripBudget: 0.1 + 0.2,
+      itineraryEstimates: [],
+      expenseAmounts: [0.1, 0.2],
+      currency: 'USD',
+    })
+    expect(summary.tripBudget).toBe(0.3)
+    expect(summary.actualSpent).toBe(0.3)
+    expect(summary.remaining).toBe(0)
+  })
+
+  it('flags a trip that is over budget by half a cent', () => {
+    const summary = summariseBudget({
+      tripBudget: 10,
+      itineraryEstimates: [],
+      expenseAmounts: [10.005],
+      currency: 'EUR',
+    })
+    expect(summary.remaining).toBe(-0.01)
+    expect(summary.isOverBudget).toBe(true)
+  })
+
+  it('does not flag a trip that is half a cent under budget', () => {
+    const summary = summariseBudget({
+      tripBudget: 10,
+      itineraryEstimates: [],
+      expenseAmounts: [9.995],
+      currency: 'EUR',
+    })
+    expect(summary.remaining).toBe(0)
+    expect(summary.isOverBudget).toBe(false)
+  })
+
+  it('normalises the trip budget to whole cents', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000.005,
+      itineraryEstimates: [],
+      expenseAmounts: [],
+      currency: 'NGN',
+    })
+    expect(summary.tripBudget).toBe(1000.01)
+  })
+
+  it('passes the currency through unchanged', () => {
+    const summary = summariseBudget({
+      tripBudget: 10,
+      itineraryEstimates: [],
+      expenseAmounts: [],
+      currency: 'JPY',
+    })
+    expect(summary.currency).toBe('JPY')
+  })
+})

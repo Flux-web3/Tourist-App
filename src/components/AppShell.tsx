@@ -1,0 +1,154 @@
+import { NavLink, useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { PROTOTYPE_LABEL } from '@/lib/labels'
+import { useAppState } from '@/state/useTourist'
+import { ThemeToggle } from './ThemeToggle'
+import { Icon } from './ui/Icon'
+
+const TRIP_PATH = /^\/trips\/([^/?#]+)/
+
+function useTripContextId(): string | null {
+  const { pathname } = useLocation()
+  return TRIP_PATH.exec(pathname)?.[1] ?? null
+}
+
+function Brand() {
+  return (
+    <NavLink to="/trips" className="flex items-center gap-2 rounded-control">
+      <span className="grid h-9 w-9 place-items-center rounded-control bg-navy text-btn-primary-fg">
+        <Icon name="travel_explore" size={20} />
+      </span>
+      <span className="text-headline-sm">Tourist</span>
+    </NavLink>
+  )
+}
+
+function navClass({ isActive }: { isActive: boolean }): string {
+  return [
+    'rounded-control px-3 py-2 text-label-lg transition-colors',
+    isActive ? 'bg-surface-high text-ink' : 'text-ink-muted hover:bg-surface-low hover:text-ink',
+  ].join(' ')
+}
+
+function MobileTab({
+  to,
+  label,
+  icon,
+  end = false,
+}: {
+  to: string
+  label: string
+  icon: string
+  end?: boolean
+}) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        [
+          'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-label-sm',
+          isActive ? 'text-terracotta' : 'text-ink-subtle',
+        ].join(' ')
+      }
+    >
+      <Icon name={icon} size={20} />
+      {label}
+    </NavLink>
+  )
+}
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const state = useAppState()
+  const location = useLocation()
+  const tripId = useTripContextId()
+  const trip = state.trips.find((candidate) => candidate.id === tripId) ?? null
+  const exploreHref = trip ? `/trips/${trip.id}/explore` : '/explore'
+  const onWelcome = location.pathname === '/'
+
+  return (
+    <div className="flex min-h-dvh flex-col bg-canvas">
+      <a href="#main-content" className="skip-link text-label-lg">
+        Skip to main content
+      </a>
+
+      <header className="sticky top-0 z-30 border-b border-line bg-canvas/85 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <Brand />
+
+          <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
+            <NavLink to="/trips" className={navClass} end>
+              Trips
+            </NavLink>
+            <NavLink to={exploreHref} className={navClass}>
+              Explore
+            </NavLink>
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:block">
+              <ThemeToggle />
+            </div>
+            <span
+              className="hidden items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-3 py-1.5 text-label-md text-ink-muted sm:inline-flex"
+              title={PROTOTYPE_LABEL.localOnly}
+            >
+              <Icon name={state.user.isGuest ? 'person_outline' : 'person'} size={16} />
+              {state.user.isGuest ? PROTOTYPE_LABEL.guest : state.user.name}
+            </span>
+          </div>
+        </div>
+
+        {trip ? (
+          <nav
+            aria-label="Trip sections"
+            className="mx-auto hidden max-w-6xl items-center gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:flex"
+          >
+            <span className="mr-2 max-w-56 truncate text-label-md text-ink-subtle">{trip.name}</span>
+            <NavLink to={`/trips/${trip.id}`} end className={navClass}>
+              Overview
+            </NavLink>
+            <NavLink to={`/trips/${trip.id}/itinerary`} className={navClass}>
+              Itinerary
+            </NavLink>
+            <NavLink to={`/trips/${trip.id}/explore`} className={navClass}>
+              Explore
+            </NavLink>
+            <NavLink to={`/trips/${trip.id}/budget`} className={navClass}>
+              Budget
+            </NavLink>
+          </nav>
+        ) : null}
+      </header>
+
+      <main id="main-content" className={`mx-auto w-full max-w-6xl flex-1 px-4 py-6 ${onWelcome ? '' : 'pb-28 md:pb-12'}`}>
+        {children}
+      </main>
+
+      <footer
+        className={`border-t border-line px-4 py-4 text-body-sm text-ink-subtle ${onWelcome ? '' : 'pb-24 md:pb-4'}`}
+      >
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
+          <p>Tourist prototype. Trips, plans and expenses stay on this device.</p>
+          <p className="tnum">Itinerary drafts and prices are estimates, not bookings.</p>
+        </div>
+      </footer>
+
+      <nav
+        aria-label="Primary"
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 backdrop-blur md:hidden"
+      >
+        <MobileTab to="/trips" label="Trips" icon="luggage" end />
+        <MobileTab
+          to={trip ? `/trips/${trip.id}` : '/trips'}
+          label="Overview"
+          icon="dashboard"
+          end={!trip}
+        />
+        <MobileTab to={trip ? `/trips/${trip.id}/itinerary` : '/trips'} label="Itinerary" icon="calendar_month" />
+        <MobileTab to={exploreHref} label="Explore" icon="explore" />
+        <MobileTab to={trip ? `/trips/${trip.id}/budget` : '/trips'} label="Budget" icon="account_balance_wallet" />
+      </nav>
+    </div>
+  )
+}

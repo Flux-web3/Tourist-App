@@ -1,0 +1,387 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Warm Editorial Companion - design tokens
+   Source of truth: Stitch export DESIGN.md (warm_editorial_companion_2),
+   cross-checked against warm_editorial_companion_1.
+   Light values are declared in :root; dark values override every token on
+   [data-theme='dark'] so runtime theme switching never needs a reload.
+--------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces - sunlit linen canvas, white resting cards, stone hairlines */
+  --canvas: #fbf9f4;
+  --surface: #ffffff;
+  --surface-low: #f5f3ee;
+  --surface-high: #f0eee9;
+  --surface-bright: #fdfcf9;
+  --border: #e5e0d8;
+  --border-strong: #d5cebe;
+
+  /* Ink */
+  --ink: #1b1c19;
+  --ink-muted: #44474c;
+  --ink-subtle: #75777c;
+  --ink-inverse: #f2f1ec;
+
+  /* Brand roles */
+  --navy: #1e2a38;
+  --navy-hover: #2a3a4d;
+  --terracotta: #c85a3d;
+  --terracotta-hover: #b44f34;
+  --sage: #5a7a68;
+  --sage-ink: #264835;
+
+  /* Primary / secondary / tertiary action surfaces */
+  --btn-primary: #1e2a38;
+  --btn-primary-fg: #ffffff;
+  --btn-primary-hover: #2a3a4d;
+  --btn-accent: #c85a3d;
+  --btn-accent-fg: #ffffff;
+  --btn-accent-hover: #b44f34;
+
+  /* AI draft / generated estimate */
+  --ai-bg: #fdf6ee;
+  --ai-ink: #b45309;
+  --ai-border: #e8d7c3;
+
+  /* Catalog integrity (curated demo data) */
+  --catalog-bg: #f4f1eb;
+  --catalog-ink: #5c6470;
+  --catalog-border: #e2ded6;
+
+  /* Financial partitioning */
+  --planned-bg: #f1f3f5;
+  --planned-ink: #1e2a38;
+  --planned-border: #d5cebe;
+  --actual-bg: #eef4f0;
+  --actual-ink: #264835;
+  --actual-border: #b7cebe;
+
+  /* Feedback */
+  --danger: #ba1a1a;
+  --danger-ink: #93000a;
+  --danger-bg: #ffdad6;
+  --focus: #1e2a38;
+
+  /* Elevation */
+  --shadow-card: 0 1px 3px rgba(30, 42, 56, 0.04), 0 1px 2px -1px rgba(30, 42, 56, 0.03);
+  --shadow-raised: 0 8px 24px -4px rgba(30, 42, 56, 0.07), 0 4px 8px -2px rgba(30, 42, 56, 0.03);
+  --shadow-overlay: 0 12px 32px -4px rgba(0, 0, 0, 0.24);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Layered nautical twilight - never pure black */
+  --canvas: #121820;
+  --surface: #1e2633;
+  --surface-low: #18202b;
+  --surface-high: #263040;
+  --surface-bright: #303d50;
+  --border: #2b384a;
+  --border-strong: #36465d;
+
+  --ink: #f3f1ec;
+  --ink-muted: #a8b2c0;
+  --ink-subtle: #8591a2;
+  --ink-inverse: #18202b;
+
+  --navy: #d7e3f6;
+  --navy-hover: #e4e0d6;
+  --terracotta: #e58b73;
+  --terracotta-hover: #ee9c87;
+  --sage: #9ed2b3;
+  --sage-ink: #9ed2b3;
+
+  /* Dark mode flips primary controls to warm off-white with deep navy text */
+  --btn-primary: #f3f1ec;
+  --btn-primary-fg: #121820;
+  --btn-primary-hover: #e4e0d6;
+  --btn-accent: #e58b73;
+  --btn-accent-fg: #18202b;
+  --btn-accent-hover: #ee9c87;
+
+  --ai-bg: #2b2219;
+  --ai-ink: #f6ad55;
+  --ai-border: #4d3a27;
+
+  --catalog-bg: #1b232e;
+  --catalog-ink: #9aa5b5;
+  --catalog-border: #2c3746;
+
+  --planned-bg: #1a232f;
+  --planned-ink: #d7e3f6;
+  --planned-border: #2b384a;
+  --actual-bg: #15241d;
+  --actual-ink: #9ed2b3;
+  --actual-border: #2a4435;
+
+  --danger: #ffb4ab;
+  --danger-ink: #ffdad6;
+  --danger-bg: #93000a;
+  --focus: #f3f1ec;
+
+  --shadow-card: none;
+  --shadow-raised: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 12px 32px -4px rgba(0, 0, 0, 0.55);
+}
+
+@theme inline {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-symbol: 'Material Symbols Outlined', 'Material Symbols', sans-serif;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-low: var(--surface-low);
+  --color-surface-high: var(--surface-high);
+  --color-surface-bright: var(--surface-bright);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-inverse: var(--ink-inverse);
+
+  --color-navy: var(--navy);
+  --color-navy-hover: var(--navy-hover);
+  --color-terracotta: var(--terracotta);
+  --color-terracotta-hover: var(--terracotta-hover);
+  --color-sage: var(--sage);
+  --color-sage-ink: var(--sage-ink);
+
+  --color-btn-primary: var(--btn-primary);
+  --color-btn-primary-fg: var(--btn-primary-fg);
+  --color-btn-primary-hover: var(--btn-primary-hover);
+  --color-btn-accent: var(--btn-accent);
+  --color-btn-accent-fg: var(--btn-accent-fg);
+  --color-btn-accent-hover: var(--btn-accent-hover);
+
+  --color-ai-bg: var(--ai-bg);
+  --color-ai-ink: var(--ai-ink);
+  --color-ai-border: var(--ai-border);
+
+  --color-catalog-bg: var(--catalog-bg);
+  --color-catalog-ink: var(--catalog-ink);
+  --color-catalog-border: var(--catalog-border);
+
+  --color-planned-bg: var(--planned-bg);
+  --color-planned-ink: var(--planned-ink);
+  --color-planned-border: var(--planned-border);
+  --color-actual-bg: var(--actual-bg);
+  --color-actual-ink: var(--actual-ink);
+  --color-actual-border: var(--actual-border);
+
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-bg: var(--danger-bg);
+  --color-focus: var(--focus);
+
+  --radius-control: 0.625rem;
+  --radius-badge: 0.5rem;
+  --radius-card: 1rem;
+  --radius-sheet: 1.5rem;
+  --radius-pill: 9999px;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+  --shadow-overlay: var(--shadow-overlay);
+
+  --text-display: 2.5rem;
+  --text-display--line-height: 3rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 700;
+
+  --text-headline-lg: 2rem;
+  --text-headline-lg--line-height: 2.5rem;
+  --text-headline-lg--letter-spacing: -0.015em;
+  --text-headline-lg--font-weight: 600;
+
+  --text-headline-md: 1.375rem;
+  --text-headline-md--line-height: 1.875rem;
+  --text-headline-md--letter-spacing: -0.01em;
+  --text-headline-md--font-weight: 600;
+
+  --text-headline-sm: 1.125rem;
+  --text-headline-sm--line-height: 1.625rem;
+  --text-headline-sm--font-weight: 600;
+
+  --text-body-lg: 1.0625rem;
+  --text-body-lg--line-height: 1.625rem;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-md: 0.9375rem;
+  --text-body-md--line-height: 1.4375rem;
+  --text-body-md--font-weight: 400;
+
+  --text-body-sm: 0.8125rem;
+  --text-body-sm--line-height: 1.1875rem;
+  --text-body-sm--letter-spacing: 0.005em;
+  --text-body-sm--font-weight: 400;
+
+  --text-label-lg: 0.875rem;
+  --text-label-lg--line-height: 1.25rem;
+  --text-label-lg--letter-spacing: 0.01em;
+  --text-label-lg--font-weight: 600;
+
+  --text-label-md: 0.75rem;
+  --text-label-md--line-height: 1rem;
+  --text-label-md--letter-spacing: 0.02em;
+  --text-label-md--font-weight: 600;
+
+  --text-label-sm: 0.6875rem;
+  --text-label-sm--line-height: 0.875rem;
+  --text-label-sm--letter-spacing: 0.04em;
+  --text-label-sm--font-weight: 600;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--ink);
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Money, dates, durations and counts must align in columns. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Scrollbars stay visible: the Stitch export hid them, which broke usability. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--ink-subtle);
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+@layer components {
+  .material-symbols-outlined {
+    font-family: var(--font-symbol);
+    font-weight: normal;
+    font-style: normal;
+    font-size: 1.5rem;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'liga';
+  }
+
+  .surface-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-raised {
+    background-color: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-raised);
+  }
+
+  /* Fallback wash used behind editorial photography that fails to load. */
+  .image-fallback {
+    background-image: linear-gradient(135deg, var(--surface-low) 0%, var(--surface-high) 55%, var(--ai-bg) 100%);
+  }
+
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100;
+  }
+
+  .skip-link:focus {
+    left: 1rem;
+    top: 1rem;
+    padding: 0.625rem 1rem;
+    background-color: var(--btn-primary);
+    color: var(--btn-primary-fg);
+    border-radius: var(--radius-control);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

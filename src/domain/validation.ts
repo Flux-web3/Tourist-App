@@ -1,0 +1,104 @@
+import { CURRENCIES } from './money'
+import { parseISODate, todayISO, tripLengthInDays } from './format'
+import type { TripDraft, TripDraftErrors } from './types'
+
+export const TRIP_LIMITS = {
+  maxNameLength: 80,
+  maxDays: 30,
+  minDays: 1,
+  maxTravelers: 12,
+  minTravelers: 1,
+  maxBudget: 1_000_000,
+} as const
+
+export const TRAVEL_PACES = [
+  { value: 'relaxed', label: 'Relaxed', hint: 'One anchor a day, plenty of breathing room' },
+  { value: 'balanced', label: 'Balanced', hint: 'Two or three anchors a day' },
+  { value: 'packed', label: 'Packed', hint: 'Fill every usable hour' },
+] as const
+
+export function suggestTripName(destination: string, startISO: string): string {
+  const place = destination.trim()
+  if (!place) return 'Untitled trip'
+  if (!parseISODate(startISO)) return `Trip to ${place}`
+  const month = new Intl.DateTimeFormat('en-GB', { month: 'long', timeZone: 'UTC' }).format(
+    new Date(`${startISO}T00:00:00Z`),
+  )
+  return `${place} in ${month}`
+}
+
+export function validateTripDraft(draft: TripDraft): { errors: TripDraftErrors; isValid: boolean } {
+  const errors: TripDraftErrors = {}
+
+  const name = typeof draft.name === 'string' ? draft.name : ''
+  if (name.length > TRIP_LIMITS.maxNameLength) {
+    errors.name = `Keep the name to ${TRIP_LIMITS.maxNameLength} characters or fewer.`
+  }
+
+  if (draft.destination.trim().length < 2) {
+    errors.destination = 'Enter a destination with at least 2 characters.'
+  }
+
+  if (draft.origin.trim().length < 2) {
+    errors.origin = 'Enter where you are travelling from.'
+  }
+
+  const start = parseISODate(draft.startDate)
+  if (!start) {
+    errors.startDate = 'Choose a start date.'
+  } else if (draft.startDate < todayISO()) {
+    errors.startDate = 'Start date cannot be in the past.'
+  }
+
+  const end = parseISODate(draft.endDate)
+  if (!end) {
+    errors.endDate = 'Choose an end date.'
+  } else if (start && draft.endDate < draft.startDate) {
+    errors.endDate = 'End date must be on or after the start date.'
+  } else if (start && end) {
+    const length = tripLengthInDays(draft.startDate, draft.endDate)
+    if (length < TRIP_LIMITS.minDays) {
+      errors.endDate = 'A trip must be at least 1 day.'
+    } else if (length > TRIP_LIMITS.maxDays) {
+      errors.endDate = `Keep trips to ${TRIP_LIMITS.maxDays} days or fewer.`
+    }
+  }
+
+  if (!Number.isInteger(draft.travelers) || draft.travelers < TRIP_LIMITS.minTravelers) {
+    errors.travelers = 'At least 1 traveller is required.'
+  } else if (draft.travelers > TRIP_LIMITS.maxTravelers) {
+    errors.travelers = `Up to ${TRIP_LIMITS.maxTravelers} travellers.`
+  }
+
+  if (!Number.isFinite(draft.budget) || draft.budget <= 0) {
+    errors.budget = 'Enter a budget greater than 0.'
+  } else if (draft.budget > TRIP_LIMITS.maxBudget) {
+    errors.budget = 'That budget looks unrealistic. Enter a lower amount.'
+  }
+
+  if (!CURRENCIES.includes(draft.currency)) {
+    errors.currency = 'Choose a supported currency.'
+  }
+
+  if (draft.interests.length === 0) {
+    errors.interests = 'Choose at least one interest so the draft matches you.'
+  }
+
+  return { errors, isValid: Object.keys(errors).length === 0 }
+}
+
+export function createEmptyDraft(): TripDraft {
+  return {
+    name: '',
+    origin: '',
+    destination: '',
+    startDate: '',
+    endDate: '',
+    travelers: 2,
+    budget: 2500,
+    currency: 'EUR',
+    interests: [],
+    pace: 'balanced',
+    notes: '',
+  }
+}
