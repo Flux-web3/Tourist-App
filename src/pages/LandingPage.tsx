@@ -4,7 +4,7 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
-import { Card, CardTitle } from '@/components/ui/Card'
+import { Card } from '@/components/ui/Card'
 import { Icon, MediaFrame } from '@/components/ui/Icon'
 import { EXPERIENCES } from '@/data/experiences'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
@@ -12,12 +12,25 @@ import { useTourist } from '@/state/useTourist'
 
 const FEATURED = EXPERIENCES[0]
 
-const AREAS = [
+const STEPS = [
   {
-    icon: 'luggage',
-    name: 'Trips',
-    description: 'Every journey you are planning, in one list, on this device.',
+    title: 'Answer a few questions',
+    description:
+      'Where you are going, when, who is coming, what you enjoy, and the ceiling you will accept.',
   },
+  {
+    title: 'Argue with the draft',
+    description:
+      'Tourist drafts a day-by-day plan and prices every stop. Move it, rewrite it, or throw a stop away.',
+  },
+  {
+    title: 'Keep the trip honest',
+    description:
+      'Log what you really pay as you go, and keep the details you need on the day in your trip notes.',
+  },
+] as const
+
+const AREAS = [
   {
     icon: 'calendar_month',
     name: 'Itinerary',
@@ -25,15 +38,15 @@ const AREAS = [
       'A day-by-day draft you can reorder, rewrite or replace. Regenerating never discards your own edits.',
   },
   {
-    icon: 'explore',
-    name: 'Explore',
-    description: 'A curated Paris catalog with every price labelled as an estimate.',
-  },
-  {
     icon: 'account_balance_wallet',
     name: 'Budget',
     description:
-      'Your own ceiling, an AI draft estimate and what you actually spent, kept as three separate figures.',
+      'Your ceiling, the draft estimate and what you actually spent, kept as three separate figures.',
+  },
+  {
+    icon: 'explore',
+    name: 'Explore',
+    description: 'A curated Paris guide you can drop into any day, with every price marked as an estimate.',
   },
   {
     icon: 'sticky_note_2',
@@ -41,22 +54,10 @@ const AREAS = [
     description:
       'Your own record: flight references, key codes, bookings. Pinned, editable, and never regenerated.',
   },
-] as const
-
-const STEPS = [
   {
-    title: 'Answer a few questions',
-    description: 'Where you are going, when, who is coming, what you enjoy and the ceiling you will accept.',
-  },
-  {
-    title: 'Argue with the draft',
-    description:
-      'Tourist drafts a day-by-day plan and prices every stop. Move it, rewrite it or throw a stop away.',
-  },
-  {
-    title: 'Keep the trip honest',
-    description:
-      'Log what you really pay as you go, and keep the details you need on the day in your trip notes.',
+    icon: 'luggage',
+    name: 'Trips',
+    description: 'Every journey you are planning, in one list, on this device.',
   },
 ] as const
 
@@ -66,7 +67,6 @@ const DEMO_FACTS = [
   { term: 'Travellers', value: '2' },
   { term: 'Pace', value: 'Balanced' },
   { term: 'Trip Budget', value: '€2,500' },
-  { term: 'Already includes', value: 'A drafted itinerary, logged expenses and trip notes' },
 ] as const
 
 const NOT_ABILITIES = [
@@ -212,99 +212,84 @@ export default function LandingPage() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <div className="hidden sm:block">
-              <ThemeToggle />
-            </div>
+            <ThemeToggle />
             <LandingMenu />
           </div>
         </div>
       </header>
 
       <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 md:py-12">
-        <div className="flex flex-col gap-10 md:gap-14">
-          <section className="flex flex-col gap-5">
-            <p className="text-label-sm uppercase tracking-widest text-terracotta">
-              Editorial field companion
-            </p>
-            <h1 className="max-w-3xl text-display">
-              Plan the trip first. Then plan the days inside it.
-            </h1>
-            <p className="max-w-2xl text-body-lg text-ink-muted">
-              Tourist turns a handful of honest answers into a first itinerary you can argue with, then
-              keeps track of what the trip actually costs. Curated guides, drafted plans, your own spending
-              and your own notes, in one place.
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <ButtonLink to="/welcome" size="lg" icon={<Icon name="add_location_alt" size={20} />}>
-                Plan your trip
-              </ButtonLink>
-              <Button
-                size="lg"
-                variant="secondary"
-                loading={loadingDemo}
-                loadingLabel="Loading the demo"
-                icon={<Icon name="auto_stories" size={20} />}
-                onClick={startDemo}
-              >
-                Try the demo
-              </Button>
-            </div>
-            <p className="text-body-sm text-ink-subtle">
-              Nothing here books anything. Drafts, prices and estimates are labelled as such throughout.
-            </p>
-            {returningTraveller ? (
-              <p className="text-body-sm text-ink-muted">
-                You already have {state.trips.length === 1 ? 'a trip' : `${state.trips.length} trips`} on
-                this device.{' '}
-                <Link to="/trips" className="underline underline-offset-2 hover:text-ink">
-                  Open your trips
-                </Link>
-                .
+        <div className="flex flex-col gap-12 md:gap-16">
+          {/*
+            Hero and photograph share a row on desktop so the first screen shows
+            the promise and the place at once, and stack on a phone.
+          */}
+          <section className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+            <div className="flex flex-col gap-5">
+              <p className="text-label-sm uppercase tracking-widest text-terracotta">
+                AI travel companion
               </p>
-            ) : null}
-          </section>
-
-          <figure className="flex flex-col gap-2">
-            <MediaFrame
-              src={FEATURED.imageUrl}
-              alt={FEATURED.imageAlt}
-              ratio="16 / 9"
-              rounded="rounded-sheet"
-            />
-            <figcaption className="text-body-sm text-ink-subtle">
-              {FEATURED.name}, {FEATURED.neighborhood}.{' '}
-              {credit ? (
-                <>
-                  Photo by{' '}
-                  <a
-                    href={credit.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline underline-offset-2 hover:text-ink"
-                  >
-                    {credit.author}
-                  </a>{' '}
-                  ({credit.license}).
-                </>
+              <h1 className="text-display">Plan the trip first. Then plan the days inside it.</h1>
+              <p className="max-w-xl text-body-lg text-ink-muted">
+                Answer a handful of honest questions and Tourist drafts a day-by-day itinerary you
+                can argue with — then keeps track of what the trip actually costs.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <ButtonLink to="/welcome" size="lg" icon={<Icon name="add_location_alt" size={20} />}>
+                  Plan your trip
+                </ButtonLink>
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  loading={loadingDemo}
+                  loadingLabel="Loading the demo"
+                  icon={<Icon name="auto_stories" size={20} />}
+                  onClick={startDemo}
+                >
+                  Try the demo
+                </Button>
+              </div>
+              <p className="text-body-sm text-ink-subtle">
+                No account, no email. Drafts, prices and estimates are labelled as such throughout.
+              </p>
+              {returningTraveller ? (
+                <p className="text-body-sm text-ink-muted">
+                  You already have {state.trips.length === 1 ? 'a trip' : `${state.trips.length} trips`}{' '}
+                  on this device.{' '}
+                  <Link to="/trips" className="underline underline-offset-2 hover:text-ink">
+                    Open your trips
+                  </Link>
+                  .
+                </p>
               ) : null}
-            </figcaption>
-          </figure>
+            </div>
 
-          <section aria-labelledby="areas-heading" className="flex flex-col gap-5">
-            <h2 id="areas-heading" className="text-headline-lg">
-              What you get
-            </h2>
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {AREAS.map((area) => (
-                <Card as="article" key={area.name} className="flex flex-col gap-2">
-                  <span className="grid h-9 w-9 place-items-center rounded-control bg-surface-high text-navy">
-                    <Icon name={area.icon} size={18} />
-                  </span>
-                  <h3 className="text-label-lg text-ink">{area.name}</h3>
-                  <p className="text-body-sm text-ink-muted">{area.description}</p>
-                </Card>
-              ))}
-            </ul>
+            <figure className="flex flex-col gap-2">
+              <MediaFrame
+                src={FEATURED.imageUrl}
+                alt={FEATURED.imageAlt}
+                ratio="4 / 3"
+                rounded="rounded-sheet"
+                loading="eager"
+              />
+              <figcaption className="text-body-sm text-ink-subtle">
+                {FEATURED.name}, {FEATURED.neighborhood}.{' '}
+                {credit ? (
+                  <>
+                    Photo by{' '}
+                    <a
+                      href={credit.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2 hover:text-ink"
+                    >
+                      {credit.author}
+                    </a>{' '}
+                    ({credit.license}).
+                  </>
+                ) : null}
+              </figcaption>
+            </figure>
           </section>
 
           <section aria-labelledby="steps-heading" className="flex flex-col gap-5">
@@ -327,35 +312,36 @@ export default function LandingPage() {
             </ol>
           </section>
 
-          <section aria-labelledby="demo-heading" className="flex flex-col gap-4">
+          <section aria-labelledby="areas-heading" className="flex flex-col gap-5">
+            <h2 id="areas-heading" className="text-headline-lg">
+              What you get
+            </h2>
+            {/* `li` wrappers: a Card renders an <article>, which is not a legal child of <ul>. */}
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {AREAS.map((area) => (
+                <li key={area.name} className="contents">
+                  <Card as="article" className="flex flex-col gap-2">
+                    <span className="grid h-9 w-9 place-items-center rounded-control bg-surface-high text-navy">
+                      <Icon name={area.icon} size={18} />
+                    </span>
+                    <h3 className="text-label-lg text-ink">{area.name}</h3>
+                    <p className="text-body-sm text-ink-muted">{area.description}</p>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section aria-labelledby="demo-heading" className="grid gap-4 lg:grid-cols-2">
             <Card className="flex flex-col gap-4">
-              <CardTitle
-                id="demo-heading"
-                hint="The demo is the same code path a real trip uses, with sample data already in it."
-                action={
-                  <Button
-                    variant="secondary"
-                    icon={<Icon name="auto_stories" size={18} />}
-                    loading={loadingDemo}
-                    loadingLabel="Loading the demo"
-                    onClick={startDemo}
-                  >
-                    Try the demo
-                  </Button>
-                }
-              >
-                The demo is a real trip
-              </CardTitle>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="catalog" icon={<Icon name="auto_awesome" size={14} />}>
-                  Drafted itinerary
-                </Badge>
-                <Badge tone="catalog" icon={<Icon name="lock_open" size={14} />}>
-                  {PROTOTYPE_LABEL.noAccount}
-                </Badge>
-                <Badge tone="catalog" icon={<Icon name="smartphone" size={14} />}>
-                  {PROTOTYPE_LABEL.localOnly}
-                </Badge>
+              <div>
+                <h2 id="demo-heading" className="text-headline-sm">
+                  The demo is a real trip
+                </h2>
+                <p className="mt-1 text-body-sm text-ink-subtle">
+                  The same code path a real trip uses, with sample data already in it. It is added
+                  alongside anything you already have and never overwrites your own trips.
+                </p>
               </div>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 {DEMO_FACTS.map((fact) => (
@@ -363,42 +349,60 @@ export default function LandingPage() {
                     <dt className="text-label-sm uppercase tracking-wider text-ink-subtle">
                       {fact.term}
                     </dt>
-                    <dd className="text-body-md text-ink">{fact.value}</dd>
+                    <dd className="tnum text-body-md text-ink">{fact.value}</dd>
                   </div>
                 ))}
               </dl>
-              <p className="text-body-sm text-ink-subtle">
-                The demo adds a sample trip alongside anything you already have. It does not sign you in and
-                it does not overwrite your own trips.
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="catalog" icon={<Icon name="lock_open" size={14} />}>
+                  {PROTOTYPE_LABEL.noAccount}
+                </Badge>
+                <Badge tone="catalog" icon={<Icon name="smartphone" size={14} />}>
+                  {PROTOTYPE_LABEL.localOnly}
+                </Badge>
+              </div>
+              <div>
+                <Button
+                  variant="secondary"
+                  icon={<Icon name="auto_stories" size={18} />}
+                  loading={loadingDemo}
+                  loadingLabel="Loading the demo"
+                  onClick={startDemo}
+                >
+                  Try the demo
+                </Button>
+              </div>
             </Card>
-          </section>
 
-          <section aria-labelledby="honesty-heading" className="flex flex-col gap-4">
-            <h2 id="honesty-heading" className="text-headline-lg">
-              What this prototype will not tell you
-            </h2>
-            <Card as="aside" className="flex flex-col gap-3">
-              <p className="flex items-center gap-2 text-label-lg text-ink">
-                <Icon name="science" size={18} className="text-ink-subtle" />
-                Read this before you rely on a number
-              </p>
+            {/*
+              Kept as a plain, visible list rather than folded away. On the
+              product screens this kind of copy was crowding out the trip and
+              has moved into disclosures, but on the front door being straight
+              about the limits is the pitch, not an interruption.
+            */}
+            <Card as="aside" aria-labelledby="honesty-heading" className="flex flex-col gap-3">
+              <h2 id="honesty-heading" className="text-headline-sm">
+                What Tourist does not do
+              </h2>
               <ul className="flex list-none flex-col gap-2">
                 {NOT_ABILITIES.map((line) => (
                   <li key={line} className="flex items-start gap-2 text-body-sm text-ink-muted">
-                    <Icon name="check" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+                    <Icon name="remove" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
                     {line}
                   </li>
                 ))}
               </ul>
               <p className="text-body-sm text-ink-subtle">
-                Every figure in the app is labelled by where it came from: your own budget, an AI draft, a
-                curated guide, the catalog demo, or an expense you logged yourself.
+                Every figure in the app says where it came from: your own budget, a draft estimate, a
+                curated guide, or an expense you logged yourself.
               </p>
             </Card>
           </section>
 
-          <section aria-labelledby="start-heading" className="flex flex-col gap-4 rounded-card border border-line-strong bg-surface-low p-6 sm:p-8">
+          <section
+            aria-labelledby="start-heading"
+            className="flex flex-col gap-4 rounded-card border border-line-strong bg-surface-low p-6 sm:p-8"
+          >
             <h2 id="start-heading" className="text-headline-lg">
               Start with the trip, not the app
             </h2>
