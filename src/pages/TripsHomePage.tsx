@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, PageHeader } from '@/components/ui/Card'
+import { TripCover } from '@/components/ui/TripCover'
 import { Dialog } from '@/components/ui/Dialog'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
@@ -49,6 +50,15 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
   return (
     <li className="list-none">
       <Card as="article" className="flex h-full flex-col gap-3">
+        {/*
+          Trips go wherever the traveller types and Tourist has photographs of
+          exactly one city, so this is a drawing seeded from the destination
+          rather than a stock photo implying knowledge the product lacks. Same
+          destination, same cover, which is what makes a trip recognisable in a
+          list at a glance.
+        */}
+        <TripCover destination={trip.destination} ratio="21 / 9" className="-mx-1 -mt-1" />
+
         <div className="flex flex-col gap-2">
           <div className="min-w-0">
             <h2 className="text-headline-md">{trip.name}</h2>
