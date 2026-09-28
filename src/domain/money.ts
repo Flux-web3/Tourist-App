@@ -63,6 +63,37 @@ export function formatMoneyCompact(amount: number, currency: CurrencyCode): stri
   return formatMoney(amount, currency, { showCents: false, showCode: true })
 }
 
+function hasFractionalPart(amount: number): boolean {
+  return toCents(amount) % 100 !== 0
+}
+
+/**
+ * Display form for a figure shown inside a screen that already states its
+ * currency: symbol only, and cents only when they carry information.
+ *
+ * `\u20ac2,500` rather than `\u20ac2,500.00 EUR`. The currency code is disclosed once
+ * per screen instead of being repeated against every number, which is what
+ * made the earlier budget and itinerary screens read like a ledger.
+ */
+export function formatAmount(amount: number, currency: CurrencyCode): string {
+  const safe = Number.isFinite(amount) ? amount : 0
+  return formatMoney(safe, currency, { showCents: hasFractionalPart(safe), showCode: false })
+}
+
+/**
+ * Display form for the price of a single stop. Zero reads as `Free`, because
+ * `\u20ac0.00` against a public park looks like missing data rather than a fact.
+ */
+export function formatPrice(
+  amount: number,
+  currency: CurrencyCode,
+  options: { freeLabel?: string } = {},
+): string {
+  const { freeLabel = 'Free' } = options
+  if (!Number.isFinite(amount) || toCents(amount) === 0) return freeLabel
+  return formatAmount(amount, currency)
+}
+
 export interface BudgetSummary {
   /** The traveller's own ceiling for the trip. */
   tripBudget: number

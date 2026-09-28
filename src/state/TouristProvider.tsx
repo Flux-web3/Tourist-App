@@ -67,7 +67,12 @@ export function TouristProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const loaded = services.persistence.load()
-    const base = loaded ?? createDemoState()
+    /**
+     * A first-time traveller starts empty. The demo trip is only ever added by
+     * an explicit "Try the demo", never silently: sample data presented as the
+     * traveller's own would be the one dishonest thing in the product.
+     */
+    const base = loaded ?? createEmptyState()
     const initial: PersistedState = { ...base, themePreference: readThemePreference() }
     dispatch({ type: 'hydrate', state: initial })
     if (!loaded) services.persistence.save(initial)

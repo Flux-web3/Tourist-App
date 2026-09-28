@@ -86,9 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="flex items-center gap-2">
-            <div className="hidden sm:block">
-              <ThemeToggle />
-            </div>
+            <ThemeToggle />
             <span
               className="hidden items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-3 py-1.5 text-label-md text-ink-muted sm:inline-flex"
               title={PROTOTYPE_LABEL.localOnly}
@@ -124,10 +122,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : null}
       </header>
 
-      <main id="main-content" className={`mx-auto w-full max-w-6xl flex-1 px-4 py-6 ${onEntry ? '' : 'pb-28 md:pb-12'}`}>
+      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         {children}
       </main>
 
+      {/*
+        Only the last element needs to clear the fixed bottom navigation. Main
+        used to carry the same allowance, which opened a dead band between the
+        page and the footer on every mobile screen.
+      */}
       <footer
         className={`border-t border-line px-4 py-4 text-body-sm text-ink-subtle ${onEntry ? '' : 'pb-24 md:pb-4'}`}
       >
@@ -138,13 +141,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       </footer>
 
       <nav
-        aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 backdrop-blur md:hidden"
+        aria-label="Sections"
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
         {trip ? (
           <>
             <MobileTab to={`/trips/${trip.id}`} label="Overview" icon="dashboard" end />
             <MobileTab to={`/trips/${trip.id}/itinerary`} label="Itinerary" icon="calendar_month" />
+            <MobileTab to={`/trips/${trip.id}/explore`} label="Explore" icon="explore" />
             <MobileTab to={`/trips/${trip.id}/budget`} label="Budget" icon="account_balance_wallet" />
             <MobileTab to={`/trips/${trip.id}/notes`} label="Notes" icon="sticky_note_2" />
           </>

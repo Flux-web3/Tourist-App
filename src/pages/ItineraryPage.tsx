@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import { GenerationPanel, PrototypeFailureSwitch } from '@/components/GenerationPanel'
+import { DraftProvenanceNote, GenerationPanel } from '@/components/GenerationPanel'
 import { ItineraryItemCard } from '@/components/ItineraryItemCard'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -427,12 +427,12 @@ export default function ItineraryPage() {
             >
               Regenerate itinerary
             </Button>
-            <PrototypeFailureSwitch tripId={trip.id} />
           </>
         }
       />
 
       <GenerationPanel trip={trip} days={days} />
+      <DraftProvenanceNote />
 
       <section aria-label="Plan summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <StatTile

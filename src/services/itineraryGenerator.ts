@@ -656,12 +656,32 @@ export function summariseDraft(days: readonly ItineraryDay[]): {
 }
 
 /** Human summary line used by the itinerary screen header. */
+function minutesToTime(total: number): string {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(total)))
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`
+}
+
+/**
+ * One line summarising a whole plan.
+ *
+ * The daily window is the earliest start and the latest finish across every
+ * stop. It previously compared the first day's opening stop with the *last*
+ * day's opening stop, which on a typical draft rendered as "8:00 AM - 8:00 AM"
+ * and told the traveller nothing.
+ */
 export function describePlan(trip: Trip, days: readonly ItineraryDay[]): string {
   const { itemCount } = summariseDraft(days)
-  const first = days[0]?.items[0]
-  const last = days[days.length - 1]?.items[0]
-  const window = `${formatTime(first?.startTime ?? '09:00')} - ${formatTime(last?.startTime ?? '18:00')}`
-  return `${days.length} days in ${trip.destination} · ${itemCount} planned stops · ${window}`
+  const items = days.flatMap((day) => day.items)
+  const dayLabel = `${days.length} ${days.length === 1 ? 'day' : 'days'} in ${trip.destination}`
+  const stopLabel = `${itemCount} planned ${itemCount === 1 ? 'stop' : 'stops'}`
+  if (items.length === 0) return `${dayLabel} · ${stopLabel}`
+
+  const starts = items.map((item) => timeToMinutes(item.startTime))
+  const ends = items.map((item) => timeToMinutes(item.endTime ?? item.startTime))
+  const window = `${formatTime(minutesToTime(Math.min(...starts)))} - ${formatTime(
+    minutesToTime(Math.max(...ends)),
+  )}`
+  return `${dayLabel} · ${stopLabel} · ${window}`
 }
 
 export function extendTripByDays(trip: Trip, extraDays: number): Trip {

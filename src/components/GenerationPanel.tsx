@@ -1,40 +1,23 @@
 import { useMemo } from 'react'
 import { Alert } from '@/components/ui/Alert'
 import { Button, Spinner } from '@/components/ui/Button'
+import { Disclosure } from '@/components/ui/Disclosure'
 import { Icon } from '@/components/ui/Icon'
-import { SegmentedControl } from '@/components/ui/SegmentedControl'
-import { formatMoney } from '@/domain/money'
+import { formatAmount } from '@/domain/money'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { summariseDraft } from '@/services'
 import { useGeneration, useTourist } from '@/state/useTourist'
 import type { ItineraryDay, Trip } from '@/domain/types'
 
-const FAILURE_OPTIONS: ReadonlyArray<{ value: 'safe' | 'fail'; label: string }> = [
-  { value: 'safe', label: 'No failure' },
-  { value: 'fail', label: 'Fail next run' },
-]
-
-const FAILURE_LABEL = 'Simulate a failure on the next generation (prototype)'
-
-export function PrototypeFailureSwitch({ tripId }: { tripId: string }) {
-  const { actions } = useTourist()
-  const generation = useGeneration(tripId)
-
-  return (
-    <div className="flex flex-col items-start gap-1.5 rounded-control border border-line-strong bg-surface-low px-3 py-2">
-      <span className="text-label-sm uppercase tracking-wider text-ink-subtle">Prototype</span>
-      <SegmentedControl
-        size="sm"
-        label={FAILURE_LABEL}
-        value={generation.shouldFail ? 'fail' : 'safe'}
-        onChange={(value) => actions.setSimulateFailure(tripId, value === 'fail')}
-        options={FAILURE_OPTIONS}
-      />
-      <span className="max-w-56 text-body-sm text-ink-muted">{FAILURE_LABEL}</span>
-    </div>
-  )
-}
-
+/**
+ * Generation status for one trip.
+ *
+ * This deliberately renders nothing at rest. An idle draft needs no commentary,
+ * and the previous always-on status card plus explainer pushed the itinerary
+ * itself below the fold. Errors and fresh successes still announce themselves,
+ * and the standing explanation of where drafts come from now lives in a
+ * `Disclosure` beside the regenerate control.
+ */
 export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay[] }) {
   const { actions } = useTourist()
   const generation = useGeneration(trip.id)
@@ -47,34 +30,24 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
       return 'The itinerary draft could not be generated. The plan you already had is untouched.'
     }
     if (generation.status === 'success') return 'Your itinerary draft is ready.'
-    if (draft.itemCount > 0) return 'This plan is saved on this device. Nothing is being generated right now.'
-    return 'No draft has been generated for this trip yet.'
+    return ''
   })()
 
   return (
-    <div className="flex flex-col gap-3">
-      <div
-        role="status"
-        aria-live="polite"
-        className="flex items-center gap-2 rounded-control border border-line bg-surface px-4 py-3"
-      >
-        {loading ? (
-          <Spinner size={18} className="text-ink-muted" />
-        ) : (
-          <Icon
-            name={generation.status === 'error' ? 'error_outline' : 'auto_awesome'}
-            size={18}
-            className={generation.status === 'error' ? 'text-danger' : 'text-ink-subtle'}
-          />
-        )}
-        <p className="min-w-0 text-body-md text-ink-muted">{liveMessage}</p>
-      </div>
+    <div className="flex flex-col gap-3 empty:hidden">
+      {/* Always mounted so assistive tech hears the change, visually empty at rest. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {liveMessage}
+      </p>
 
       {loading ? (
-        <p className="text-body-sm text-ink-subtle">
-          The days and stops already on screen stay exactly where they are while the new draft is
-          prepared.
-        </p>
+        <div className="flex items-center gap-2 rounded-control border border-line bg-surface px-4 py-3">
+          <Spinner size={18} className="text-ink-muted" />
+          <p className="min-w-0 text-body-md text-ink-muted">
+            Drafting your itinerary. The days and stops already on screen stay exactly where they
+            are.
+          </p>
+        </div>
       ) : null}
 
       {generation.status === 'error' ? (
@@ -104,16 +77,38 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
         <Alert tone="success" title="Your draft is ready">
           {`${draft.dayCount} ${draft.dayCount === 1 ? 'day' : 'days'} · ${
             draft.itemCount
-          } ${draft.itemCount === 1 ? 'stop' : 'stops'} · ${formatMoney(
+          } ${draft.itemCount === 1 ? 'stop' : 'stops'} · ${formatAmount(
             draft.estimate,
             trip.currency,
           )} estimated. Every stop stays editable, and anything you add is kept through the next regeneration.`}
         </Alert>
       ) : null}
-
-      <Alert tone="prototype" title="These drafts come from a local prototype generator">
-        {`Not a live AI service. The plan is assembled in your browser by a deterministic mock with realistic latency, drawing on the ${PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue, so nothing leaves this device and every draft is reproducible. Treat each price as an estimate: ${PROTOTYPE_LABEL.informationMayChange.toLowerCase()}.`}
-      </Alert>
     </div>
+  )
+}
+
+/**
+ * The standing explanation of where a draft comes from, as one openable line.
+ *
+ * The claim stays on screen; the reasoning is one tap away.
+ */
+export function DraftProvenanceNote() {
+  return (
+    <Disclosure
+      tone="ai"
+      icon="auto_awesome"
+      summary={
+        <>
+          <strong className="font-semibold">AI draft.</strong> Assembled on this device, not booked.
+        </>
+      }
+    >
+      Not a live AI service. The plan is put together in your browser by a deterministic generator
+      drawing on the {PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue, so nothing leaves
+      this device and the same trip always produces the same draft. Every price is an estimate:{' '}
+      {PROTOTYPE_LABEL.informationMayChange.toLowerCase()}. Regenerating replaces AI suggestions but
+      always keeps stops you added yourself, anything from the curated guide, and anything you have
+      edited.
+    </Disclosure>
   )
 }

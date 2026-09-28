@@ -33,12 +33,14 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: 'Tourist' })).toHaveAttribute('href', '/trips')
   })
 
-  it('renders the desktop and mobile primary navigation with the same label', () => {
+  it('gives the desktop and mobile navigation distinct landmark names', () => {
     renderShell('/trips', createEmptyState())
 
-    const navs = screen.getAllByRole('navigation', { name: 'Primary' })
-    expect(navs).toHaveLength(2)
-    for (const nav of navs) {
+    // Two landmarks sharing the name "Primary" gave screen-reader users no way
+    // to tell them apart in a landmark list.
+    const desktop = screen.getByRole('navigation', { name: 'Primary' })
+    const mobile = screen.getByRole('navigation', { name: 'Sections' })
+    for (const nav of [desktop, mobile]) {
       expect(within(nav).getByRole('link', { name: 'Trips' })).toHaveAttribute('href', '/trips')
     }
   })
@@ -55,7 +57,8 @@ describe('AppShell', () => {
   it('marks the current section so the traveller knows where they are', () => {
     renderShell('/trips', createEmptyState())
 
-    const [desktop, mobile] = screen.getAllByRole('navigation', { name: 'Primary' })
+    const desktop = screen.getByRole('navigation', { name: 'Primary' })
+    const mobile = screen.getByRole('navigation', { name: 'Sections' })
     expect(within(desktop).getByRole('link', { name: 'Trips' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -128,8 +131,9 @@ describe('AppShell', () => {
     it('scopes every Explore entry point to the trip', () => {
       renderShell(`/trips/${TEST_TRIP_ID}/itinerary`, demoStateFor())
 
+      // Header nav, trip sections nav, and the mobile tab bar.
       const exploreLinks = screen.getAllByRole('link', { name: 'Explore' })
-      expect(exploreLinks).toHaveLength(2)
+      expect(exploreLinks).toHaveLength(3)
       for (const link of exploreLinks) {
         expect(link).toHaveAttribute('href', `/trips/${TEST_TRIP_ID}/explore`)
       }
@@ -138,7 +142,11 @@ describe('AppShell', () => {
     it('points the mobile tab bar at the trip screens', () => {
       renderShell(`/trips/${TEST_TRIP_ID}/budget`, demoStateFor())
 
-      const mobile = screen.getAllByRole('navigation', { name: 'Primary' })[1]
+      const mobile = screen.getByRole('navigation', { name: 'Sections' })
+      expect(within(mobile).getByRole('link', { name: 'Explore' })).toHaveAttribute(
+        'href',
+        `/trips/${TEST_TRIP_ID}/explore`,
+      )
       expect(within(mobile).getByRole('link', { name: 'Overview' })).toHaveAttribute(
         'href',
         `/trips/${TEST_TRIP_ID}`,
@@ -173,7 +181,7 @@ describe('AppShell', () => {
     it('offers only real destinations on the mobile tab bar outside a trip', () => {
       renderShell('/trips', demoStateFor())
 
-      const mobile = screen.getAllByRole('navigation', { name: 'Primary' })[1]
+      const mobile = screen.getByRole('navigation', { name: 'Sections' })
       const tabs = within(mobile).getAllByRole('link')
       expect(tabs.map((tab) => tab.getAttribute('href'))).toEqual(['/trips', '/explore', '/trips/new'])
       expect(within(mobile).queryByRole('link', { name: 'Itinerary' })).not.toBeInTheDocument()

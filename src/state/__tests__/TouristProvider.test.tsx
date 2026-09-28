@@ -199,13 +199,33 @@ afterEach(() => {
 })
 
 describe('TouristProvider session', () => {
-  it('hydrates the demo trip when the store is empty', () => {
+  it('starts a first-time traveller empty rather than seeding the demo trip', () => {
     vi.useFakeTimers({ now: FIXED_NOW })
     renderProvider()
     const state = ctx().state
     expect(ctx().hydrated).toBe(true)
     expect(state.hydrated).toBe(true)
     expect(state.user.isGuest).toBe(true)
+    // Sample data must never arrive unasked: it would be indistinguishable
+    // from the traveller's own trip.
+    expect(state.hasDemoData).toBe(false)
+    expect(state.trips).toEqual([])
+    expect(state.daysByTrip).toEqual({})
+    expect(state.expensesByTrip).toEqual({})
+    expect(state.notesByTrip).toEqual({})
+    expect(readStored().trips).toEqual([])
+  })
+
+  it('adds the demo trip only when the traveller explicitly asks for it', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    renderProvider()
+    expect(ctx().state.trips).toEqual([])
+
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+
+    const state = ctx().state
     expect(state.hasDemoData).toBe(true)
     expect(state.trips).toHaveLength(1)
     expect(state.trips[0].name).toBe('Paris in the Spring')
