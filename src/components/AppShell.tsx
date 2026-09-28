@@ -14,7 +14,9 @@ function useTripContextId(): string | null {
 
 function Brand() {
   return (
-    <NavLink to="/trips" className="flex items-center gap-2 rounded-control">
+    // `end` matters: without it react-router marks the logo aria-current="page"
+    // on every /trips/* route and screen readers announce it as the current page.
+    <NavLink to="/trips" end className="flex items-center gap-2 rounded-control">
       <span className="grid h-9 w-9 place-items-center rounded-control bg-navy text-btn-primary-fg">
         <Icon name="travel_explore" size={20} />
       </span>
@@ -102,7 +104,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             aria-label="Trip sections"
             className="mx-auto hidden max-w-6xl items-center gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:flex"
           >
-            <span className="mr-2 max-w-56 truncate text-label-md text-ink-subtle">{trip.name}</span>
+            <span className="mr-2 max-w-56 truncate text-label-md text-ink-subtle" title={trip.name}>
+              {trip.name}
+            </span>
             <NavLink to={`/trips/${trip.id}`} end className={navClass}>
               Overview
             </NavLink>
@@ -140,6 +144,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </footer>
 
+      {/*
+        Not rendered on the entry screen, which also drops its bottom
+        clearance. When the nav rendered there anyway it sat on top of the
+        footer and the last card. (A `hidden` attribute would not do: the
+        `flex` utility outranks Tailwind's low-specificity `[hidden]` rule.)
+      */}
+      {onEntry ? null : (
       <nav
         aria-label="Sections"
         className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
@@ -160,6 +171,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </>
         )}
       </nav>
+      )}
     </div>
   )
 }

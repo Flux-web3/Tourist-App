@@ -78,7 +78,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
       <div
-        className="absolute inset-0 bg-[color-mix(in_srgb,var(--ink)_45%,transparent)]"
+        className="absolute inset-0 bg-scrim"
         onClick={() => onCloseRef.current()}
         aria-hidden="true"
       />
@@ -107,7 +107,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
           <button
             type="button"
             onClick={onClose}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
           >
             <Icon name="close" size={20} />
             <span className="sr-only">Close dialog</span>

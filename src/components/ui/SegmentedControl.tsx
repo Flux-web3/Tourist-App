@@ -48,9 +48,20 @@ export function SegmentedControl<T extends string>({
             />
             <label
               htmlFor={id}
-              className={`flex cursor-pointer items-center gap-1.5 rounded-pill font-semibold capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
-                size === 'sm' ? 'px-2.5 py-1 text-label-sm' : 'px-3 py-1.5 text-label-md'
-              } ${checked ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:text-ink'}`}
+              /*
+                The selected pill used to be `bg-surface shadow-card`. In dark
+                mode that is 1.08:1 against the track and the card shadow is
+                nearly nothing, so the selected option was invisible — on the
+                control that switches the theme. `surface-bright` plus a real
+                border reads in both themes.
+              */
+              className={`flex min-h-9 cursor-pointer items-center gap-1.5 rounded-pill border font-semibold capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
+                size === 'sm' ? 'px-3 py-1 text-label-sm' : 'px-3.5 py-1.5 text-label-md'
+              } ${
+                checked
+                  ? 'border-line-strong bg-surface-bright text-ink shadow-card'
+                  : 'border-transparent text-ink-muted hover:text-ink'
+              }`}
             >
               {option.icon ? (
                 <span className="material-symbols-outlined" style={{ fontSize: size === 'sm' ? 14 : 16 }} aria-hidden="true">
@@ -72,7 +83,12 @@ export interface TabOption {
   count?: number
 }
 
-/** Tabs with arrow-key navigation and a real tabpanel relationship. */
+/**
+ * Tabs with arrow-key navigation.
+ *
+ * No `aria-controls` on the tabs: `TabPanel` renders no matching id, and a
+ * dangling reference is worse for assistive tech than none at all.
+ */
 export function Tabs({
   label,
   value,
@@ -116,7 +132,6 @@ export function Tabs({
             role="tab"
             type="button"
             aria-selected={selected}
-            aria-controls={`${name}-panel-${option.value}`}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-label-lg transition-colors ${

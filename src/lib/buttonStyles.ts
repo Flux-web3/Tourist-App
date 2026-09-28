@@ -10,8 +10,13 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   danger: 'bg-transparent text-danger border border-danger/40 hover:bg-danger-bg',
 }
 
+/**
+ * `sm` is 44px, not the 36px it used to be. It is the size used for the
+ * actions on every repeated record — itinerary stops, expense rows, notes —
+ * which are exactly the controls a traveller taps one-handed on a phone.
+ */
 const SIZE_CLASS: Record<ButtonSize, string> = {
-  sm: 'min-h-9 px-3 text-label-md gap-1.5',
+  sm: 'min-h-11 px-3 text-label-md gap-1.5',
   md: 'min-h-11 px-4 text-label-lg gap-2',
   lg: 'min-h-12 px-6 text-body-lg gap-2',
 }

@@ -34,7 +34,7 @@ export function Alert({ tone = 'info', title, children, action, className = '' }
     >
       <div className="min-w-0 flex-1">
         <p className="text-label-lg">{title}</p>
-        {children ? <div className="mt-1 text-body-sm opacity-90">{children}</div> : null}
+        {children ? <div className="mt-1 text-body-sm">{children}</div> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

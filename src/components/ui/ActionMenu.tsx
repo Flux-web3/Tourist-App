@@ -35,6 +35,7 @@ export function ActionMenu({
   align?: 'start' | 'end'
 }) {
   const [open, setOpen] = useState(false)
+  const [dropUp, setDropUp] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
@@ -74,7 +75,10 @@ export function ActionMenu({
         event.preventDefault()
         focusable[focusable.length - 1].focus()
       } else if (event.key === 'Tab') {
-        close(false)
+        // Closing without moving focus would unmount the focused row and drop
+        // focus to <body>. Park it back on the trigger instead.
+        event.preventDefault()
+        close(true)
       }
     }
 
@@ -102,7 +106,18 @@ export function ActionMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        onClick={() => (open ? close(false) : setOpen(true))}
+        onClick={() => {
+          if (open) {
+            close(false)
+            return
+          }
+          // Open upwards when there is not enough room below, so the last stop
+          // in a long itinerary does not drop its menu off the viewport.
+          const box = triggerRef.current?.getBoundingClientRect()
+          const needed = Math.min(items.length, 5) * 44 + 16
+          setDropUp(Boolean(box && window.innerHeight - box.bottom < needed && box.top > needed))
+          setOpen(true)
+        }}
         className="grid h-11 w-11 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
       >
         <Icon name="more_horiz" size={20} />
@@ -115,15 +130,16 @@ export function ActionMenu({
           id={menuId}
           role="menu"
           aria-label={label}
-          className={`surface-raised absolute z-40 mt-1 flex min-w-48 flex-col p-1 ${
+          className={`surface-raised absolute z-40 flex min-w-48 flex-col p-1 ${
             align === 'end' ? 'right-0' : 'left-0'
-          }`}
+          } ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           {items.map((item) => (
             <button
               key={item.label}
               type="button"
               role="menuitem"
+              tabIndex={-1}
               disabled={item.disabled}
               onClick={() => {
                 close(true)

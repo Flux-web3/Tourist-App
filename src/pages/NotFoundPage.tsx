@@ -5,6 +5,7 @@ export default function NotFoundPage() {
   return (
     <EmptyState
       icon="explore_off"
+      headingLevel={1}
       title="That page is not part of this trip"
       description="The link may be out of date. Your trips and itinerary are still where you left them."
       action={

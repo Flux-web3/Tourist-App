@@ -106,7 +106,39 @@ describe('NumberField', () => {
     expect(screen.getByText('EUR')).toBeInTheDocument()
   })
 
-  it('reports numbers and falls back to zero when cleared', async () => {
+  it('can be emptied while typing and reports zero until a number is entered', async () => {
+    const user = userEvent.setup()
+    const seen: number[] = []
+
+    function ControlledNumber() {
+      const [value, setValue] = useState(2)
+      return (
+        <NumberField
+          label="Travellers"
+          value={value}
+          onValueChange={(next) => {
+            seen.push(next)
+            setValue(next)
+          }}
+        />
+      )
+    }
+    render(<ControlledNumber />)
+
+    const input = screen.getByRole('spinbutton', { name: 'Travellers' })
+
+    // The box stays empty rather than refilling itself with "0", which is what
+    // used to force a select-all before any edit.
+    await user.clear(input)
+    expect(input).toHaveValue(null)
+    expect(seen.at(-1)).toBe(0)
+
+    await user.type(input, '4')
+    expect(input).toHaveValue(4)
+    expect(seen.at(-1)).toBe(4)
+  })
+
+  it('re-syncs with the committed value on blur', async () => {
     const user = userEvent.setup()
 
     function ControlledNumber() {
@@ -117,10 +149,9 @@ describe('NumberField', () => {
 
     const input = screen.getByRole('spinbutton', { name: 'Travellers' })
     await user.clear(input)
-    expect(input).toHaveValue(0)
+    await user.tab()
 
-    await user.type(input, '4')
-    expect(input).toHaveValue(4)
+    expect(input).toHaveValue(0)
   })
 
   it('reports the parsed number without waiting for a re-render', async () => {

@@ -23,14 +23,28 @@
   /* Ink */
   --ink: #1b1c19;
   --ink-muted: #44474c;
-  --ink-subtle: #75777c;
+  /*
+    Was #75777c, which measured 4.26 / 4.48 / 4.04 / 3.86 against the four
+    light surfaces and so failed WCAG AA on every one of them, across the ~80
+    captions, hints and empty-state descriptions that use it. #6a6c71 measures
+    4.99 / 5.25 / 4.74 / 4.53.
+  */
+  --ink-subtle: #6a6c71;
   --ink-inverse: #f2f1ec;
 
   /* Brand roles */
   --navy: #1e2a38;
   --navy-hover: #2a3a4d;
-  --terracotta: #c85a3d;
-  --terracotta-hover: #b44f34;
+  /*
+    The accent carries small text: page eyebrows at 11px, the active mobile tab
+    label, the accent badge and the required-field marker. At #c85a3d it
+    measured 4.00 on canvas and 4.21 on white, failing AA as body text. This is
+    the value that was already sitting in the palette as --terracotta-hover:
+    4.86 on canvas, 5.11 on white, and white-on-terracotta still 5.11 for the
+    filled states.
+  */
+  --terracotta: #b44f34;
+  --terracotta-hover: #a8492f;
   --sage: #5a7a68;
   --sage-ink: #264835;
 
@@ -64,7 +78,11 @@
   --danger: #ba1a1a;
   --danger-ink: #93000a;
   --danger-bg: #ffdad6;
+  /* Was spelled `border-danger/40` at eight call sites. */
+  --danger-line: #e0a9a5;
   --focus: #1e2a38;
+  /* Modal backdrop. Was inlined as a color-mix in Dialog.tsx. */
+  --scrim: rgba(27, 28, 25, 0.45);
 
   /* Elevation */
   --shadow-card: 0 1px 3px rgba(30, 42, 56, 0.04), 0 1px 2px -1px rgba(30, 42, 56, 0.03);
@@ -81,8 +99,15 @@
   --surface-low: #18202b;
   --surface-high: #263040;
   --surface-bright: #303d50;
-  --border: #2b384a;
-  --border-strong: #36465d;
+  /*
+    Dark cards used to have no edge at all: --surface sits only 1.17:1 from
+    --canvas, the old --border #2b384a only 1.50:1, and --shadow-card was
+    `none`, so every Card, StatTile and itinerary stop dissolved into the page.
+    These lift the hairline to 2.38:1 and the strong line to 3.77:1 against the
+    canvas, which is what actually draws the containers.
+  */
+  --border: #44566f;
+  --border-strong: #5b7597;
 
   --ink: #f3f1ec;
   --ink-muted: #a8b2c0;
@@ -122,9 +147,11 @@
   --danger: #ffb4ab;
   --danger-ink: #ffdad6;
   --danger-bg: #93000a;
+  --danger-line: #b3564e;
   --focus: #f3f1ec;
+  --scrim: rgba(0, 0, 0, 0.6);
 
-  --shadow-card: none;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
   --shadow-overlay: 0 12px 32px -4px rgba(0, 0, 0, 0.55);
 }
@@ -178,7 +205,9 @@
   --color-danger: var(--danger);
   --color-danger-ink: var(--danger-ink);
   --color-danger-bg: var(--danger-bg);
+  --color-danger-line: var(--danger-line);
   --color-focus: var(--focus);
+  --color-scrim: var(--scrim);
 
   --radius-control: 0.625rem;
   --radius-badge: 0.5rem;
@@ -272,10 +301,13 @@
     font-feature-settings: 'tnum' 1;
   }
 
+  /*
+    No `border-radius` here: it used to square off the corners of any focusable
+    that did not set its own radius, which is not this rule's job.
+  */
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-    border-radius: 4px;
   }
 
   /* Scrollbars stay visible: the Stitch export hid them, which broke usability. */
@@ -383,5 +415,25 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+
+  /*
+    The blanket rule above froze the busy spinner into a static partial arc for
+    the whole of a generation, which reads as a hung app rather than as reduced
+    motion. A slow opacity pulse conveys "still working" without the spin.
+  */
+  .animate-spin {
+    animation: reduced-motion-pulse 1.6s ease-in-out infinite !important;
+    border-top-color: currentColor !important;
+  }
+
+  @keyframes reduced-motion-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
   }
 }

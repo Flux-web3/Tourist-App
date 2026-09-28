@@ -39,19 +39,19 @@ export function Disclosure({
     <details className={`group rounded-control border ${TONE_CLASS[tone]} ${className}`}>
       <summary
         className={
-          'flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-body-sm ' +
+          'flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-body-sm ' +
           'rounded-control [&::-webkit-details-marker]:hidden'
         }
       >
-        {icon ? <Icon name={icon} size={16} className="shrink-0 opacity-80" /> : null}
+        {icon ? <Icon name={icon} size={16} className="shrink-0" /> : null}
         <span className="min-w-0 flex-1">{summary}</span>
         <Icon
           name="expand_more"
           size={18}
-          className="shrink-0 opacity-70 transition-transform duration-150 group-open:rotate-180"
+          className="shrink-0 transition-transform duration-150 group-open:rotate-180"
         />
       </summary>
-      <div className="px-3 pb-3 pt-0 text-body-sm opacity-90">{children}</div>
+      <div className="px-3 pb-3 pt-0 text-body-sm">{children}</div>
     </details>
   )
 }

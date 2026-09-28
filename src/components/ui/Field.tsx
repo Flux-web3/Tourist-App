@@ -1,7 +1,8 @@
-import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
+/** `min-h-11` keeps every control on the 44px touch floor; `py-2.5` left them at 43. */
 const CONTROL_CLASS =
-  'w-full rounded-control border border-line-strong bg-surface px-3 py-2.5 text-body-md text-ink placeholder:text-ink-subtle transition-colors focus:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus disabled:bg-surface-low disabled:text-ink-subtle'
+  'w-full min-h-11 rounded-control border border-line-strong bg-surface px-3 py-2.5 text-body-md text-ink placeholder:text-ink-subtle transition-colors focus:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus disabled:bg-surface-low disabled:text-ink-subtle'
 
 function describedBy(id: string, hint?: string, error?: string): string | undefined {
   const ids = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean)
@@ -169,6 +170,14 @@ export function NumberField({
 }: NumberFieldProps) {
   const generated = useId()
   const fieldId = id ?? generated
+  /**
+   * The input keeps its own text while it is being edited, so the field can be
+   * empty mid-typing. Mapping an empty input straight to `0` meant the box
+   * refilled itself with "0" the moment you cleared it, and changing a budget
+   * required select-all-then-type.
+   */
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? (Number.isFinite(value) ? String(value) : '')
   return (
     <FieldShell id={fieldId} label={label} hint={hint} error={error} required={rest.required} className={className}>
       <div className="relative">
@@ -182,10 +191,16 @@ export function NumberField({
           id={fieldId}
           type="number"
           inputMode="decimal"
-          value={Number.isFinite(value) ? value : ''}
+          value={shown}
           onChange={(event) => {
             const next = event.target.value
-            onValueChange(next === '' ? 0 : Number(next))
+            setDraft(next)
+            const parsed = Number(next)
+            onValueChange(next.trim() === '' || Number.isNaN(parsed) ? 0 : parsed)
+          }}
+          onBlur={(event) => {
+            setDraft(null)
+            rest.onBlur?.(event)
           }}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy(fieldId, hint, error)}
@@ -267,7 +282,7 @@ export function RadioChipGroup<T extends string>({
               />
               <label
                 htmlFor={id}
-                className={`flex cursor-pointer flex-col rounded-control border px-3 py-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
+                className={`flex min-h-11 cursor-pointer flex-col justify-center rounded-control border px-3 py-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
                   checked
                     ? 'border-navy bg-navy text-ink-inverse'
                     : 'border-line-strong bg-surface text-ink hover:bg-surface-low'
@@ -348,7 +363,7 @@ export function CheckboxChipGroup<T extends string>({
               />
               <label
                 htmlFor={id}
-                className={`cursor-pointer rounded-pill border px-3 py-1.5 text-label-lg capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
+                className={`inline-flex min-h-11 cursor-pointer items-center rounded-pill border px-4 text-label-lg capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
                   checked
                     ? 'border-terracotta bg-terracotta text-btn-accent-fg'
                     : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-low'

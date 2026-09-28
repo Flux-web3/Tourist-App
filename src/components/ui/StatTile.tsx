@@ -29,12 +29,17 @@ export function StatTile({
     <div
       className={`rounded-card border p-4 ${TONE_BORDER[tone]} ${tone === 'neutral' ? 'bg-surface' : ''} ${className}`}
     >
-      <div className="flex items-center gap-1.5 text-label-sm uppercase tracking-wider opacity-80">
+      {/*
+        No opacity on the label or caption: on a tinted tile the text colour is
+        already the tone's own ink, so dimming it to 80% dropped the AI tile
+        from 4.69:1 to 3.34:1 and pushed it below AA.
+      */}
+      <div className="flex items-center gap-1.5 text-label-sm uppercase tracking-wider">
         {icon}
         {label}
       </div>
       <p className="tnum mt-2 text-headline-md">{value}</p>
-      {caption ? <p className="mt-1 text-body-sm opacity-80">{caption}</p> : null}
+      {caption ? <p className="mt-1 text-body-sm">{caption}</p> : null}
     </div>
   )
 }
