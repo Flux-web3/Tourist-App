@@ -93,8 +93,8 @@
 [data-theme='dark'] {
   color-scheme: dark;
 
-  /* Layered nautical twilight - never pure black */
-  --canvas: #121820;
+  /* A true black page; the nautical-twilight surfaces layer on top of it. */
+  --canvas: #000000;
   --surface: #1e2633;
   --surface-low: #18202b;
   --surface-high: #263040;

@@ -153,7 +153,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {onEntry ? null : (
       <nav
         aria-label="Sections"
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-canvas/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
         {trip ? (
           <>
