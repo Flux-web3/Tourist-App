@@ -119,6 +119,24 @@ export interface Expense {
   updatedAt: string
 }
 
+/**
+ * A free-form note the traveller writes for themselves.
+ *
+ * Notes are deliberately their own record rather than a field on an itinerary
+ * item: they are never regenerated, replaced or re-costed, so anything the
+ * traveller writes here survives every draft change.
+ */
+export interface TripNote {
+  id: string
+  tripId: string
+  title: string
+  body: string
+  /** Pinned notes sort above the rest so they stay visible on a long trip. */
+  pinned: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 /** Curated demo catalogue record. Prices are estimates, never live quotes. */
 export interface Experience {
   id: string

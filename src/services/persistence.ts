@@ -15,6 +15,7 @@ import type {
   TravelInterest,
   TravelPace,
   Trip,
+  TripNote,
   TripStatus,
   User,
 } from '@/domain/types'
@@ -195,6 +196,24 @@ function isGenerationState(value: unknown): value is GenerationState {
   )
 }
 
+function isTripNote(value: unknown): value is TripNote {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.tripId) &&
+    isString(value.title) &&
+    isString(value.body) &&
+    typeof value.pinned === 'boolean' &&
+    isString(value.createdAt) &&
+    isString(value.updatedAt)
+  )
+}
+
+/**
+ * `notesByTrip` is deliberately accepted as absent. Snapshots written before
+ * notes existed must still load, otherwise every returning traveller would
+ * silently lose their trips and expenses to a validation failure.
+ */
 function isPersistedState(value: unknown): value is PersistedState {
   if (!isRecord(value)) return false
   return (
@@ -203,10 +222,16 @@ function isPersistedState(value: unknown): value is PersistedState {
     isArrayOf(value.trips, isTrip) &&
     isBucketOf(value.daysByTrip, isItineraryDay) &&
     isBucketOf(value.expensesByTrip, isExpense) &&
+    (value.notesByTrip === undefined || isBucketOf(value.notesByTrip, isTripNote)) &&
     isMapOf(value.generation, isGenerationState) &&
     isOneOf(value.themePreference, THEME_PREFERENCES) &&
     typeof value.hasDemoData === 'boolean'
   )
+}
+
+/** Fills in keys added after a snapshot was written, without touching real data. */
+function normaliseState(state: PersistedState): PersistedState {
+  return { ...state, notesByTrip: state.notesByTrip ?? {} }
 }
 
 export function createGuestUser(overrides: Partial<User> = {}): User {
@@ -227,6 +252,7 @@ export function createEmptyState(user: User = createGuestUser()): PersistedState
     trips: [],
     daysByTrip: {},
     expensesByTrip: {},
+    notesByTrip: {},
     generation: {},
     themePreference: 'system',
     hasDemoData: false,
@@ -243,7 +269,12 @@ function idleGeneration(): GenerationState {
   }
 }
 
-function buildDemoTrip(user: User): { trip: Trip; days: ItineraryDay[]; expenses: Expense[] } {
+function buildDemoTrip(user: User): {
+  trip: Trip
+  days: ItineraryDay[]
+  expenses: Expense[]
+  notes: TripNote[]
+} {
   const startDate = todayISO()
   const endDate = addDays(startDate, 6)
   const timestamp = nowISO()
@@ -332,17 +363,39 @@ function buildDemoTrip(user: User): { trip: Trip; days: ItineraryDay[]; expenses
     },
   ]
 
-  return { trip, days, expenses }
+  const notes: TripNote[] = [
+    {
+      id: createId('not'),
+      tripId: trip.id,
+      title: 'Flight reference',
+      body: 'PC 1044, departs 09:40 from LOS.\nSeat 14A and 14B. Two checked bags already paid for, so keep the allowance for souvenirs.',
+      pinned: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    {
+      id: createId('not'),
+      tripId: trip.id,
+      title: 'Before we go',
+      body: 'Notify the Le Marais apartment about the late arrival.\n\nTop up the metro card at the airport rather than in the city centre - it is cheaper and there is no queue.',
+      pinned: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  ]
+
+  return { trip, days, expenses, notes }
 }
 
 export function createDemoState(user: User = createGuestUser()): PersistedState {
-  const { trip, days, expenses } = buildDemoTrip(user)
+  const { trip, days, expenses, notes } = buildDemoTrip(user)
   return {
     version: STORAGE_VERSION,
     user,
     trips: [trip],
     daysByTrip: { [trip.id]: days },
     expensesByTrip: { [trip.id]: expenses },
+    notesByTrip: { [trip.id]: notes },
     generation: { [trip.id]: idleGeneration() },
     themePreference: 'system',
     hasDemoData: true,
@@ -361,7 +414,7 @@ export function createPersistenceService(): {
         const raw = window.localStorage.getItem(STORAGE_KEY)
         if (!raw) return null
         const parsed: unknown = JSON.parse(raw)
-        return isPersistedState(parsed) ? parsed : null
+        return isPersistedState(parsed) ? normaliseState(parsed) : null
       } catch {
         return null
       }
@@ -375,7 +428,7 @@ export function createPersistenceService(): {
         return
       }
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normaliseState(state)))
       } catch (error) {
         if (import.meta.env.DEV) {
           console.warn('[persistence] unable to save state', error)

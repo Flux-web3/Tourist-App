@@ -6,6 +6,7 @@ import CreateTripPage from '@/pages/CreateTripPage'
 import ExplorePage from '@/pages/ExplorePage'
 import ItineraryPage from '@/pages/ItineraryPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import NotesPage from '@/pages/NotesPage'
 import PlaceDetailsPage from '@/pages/PlaceDetailsPage'
 import TripOverviewPage from '@/pages/TripOverviewPage'
 import TripsHomePage from '@/pages/TripsHomePage'
@@ -24,6 +25,7 @@ export function App() {
             <Route path="/trips/:tripId/itinerary" element={<ItineraryPage />} />
             <Route path="/trips/:tripId/explore" element={<ExplorePage />} />
             <Route path="/trips/:tripId/budget" element={<BudgetPage />} />
+            <Route path="/trips/:tripId/notes" element={<NotesPage />} />
             <Route path="/explore" element={<ExplorePage />} />
             <Route path="/places/:experienceId" element={<PlaceDetailsPage />} />
             <Route path="*" element={<NotFoundPage />} />

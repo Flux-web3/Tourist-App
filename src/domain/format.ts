@@ -108,6 +108,24 @@ export function formatDuration(minutes: number): string {
   return `${hours} hr ${rest} min`
 }
 
+/**
+ * A full ISO timestamp to a readable local date and time, or `null` when the
+ * value is not a real date. Callers must handle the `null` case rather than
+ * rendering the raw string, so corrupt persistence never shows as "Invalid".
+ */
+export function formatDateTime(iso: string): string | null {
+  if (typeof iso !== 'string' || iso.trim().length === 0) return null
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return null
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed)
+}
+
 export function formatRelativeDay(dateISO: string, tripStartISO: string): string {
   const offset = differenceInDays(tripStartISO, dateISO)
   if (offset <= 0) return 'Day 1'

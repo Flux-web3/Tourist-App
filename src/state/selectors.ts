@@ -1,6 +1,6 @@
 import { estimateTotal } from '@/domain/itinerary'
 import { summariseBudget, type BudgetSummary } from '@/domain/money'
-import type { Expense, ItineraryDay, ItineraryItem, Trip } from '@/domain/types'
+import type { Expense, ItineraryDay, ItineraryItem, Trip, TripNote } from '@/domain/types'
 import type { PersistedState } from '@/services/contracts'
 
 export function selectTrip(state: PersistedState, tripId: string | undefined): Trip | null {
@@ -77,4 +77,17 @@ export function selectTripSummary(state: PersistedState, trip: Trip): {
 
 export function selectHasData(state: PersistedState): boolean {
   return state.trips.length > 0
+}
+
+/**
+ * Pinned notes first, then most recently touched. Ordering is stable because
+ * `updatedAt` falls back to `createdAt` and the id breaks exact ties.
+ */
+export function selectNotes(state: PersistedState, tripId: string | undefined): TripNote[] {
+  if (!tripId) return []
+  return [...(state.notesByTrip?.[tripId] ?? [])].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    const byTime = b.updatedAt.localeCompare(a.updatedAt)
+    return byTime !== 0 ? byTime : b.id.localeCompare(a.id)
+  })
 }

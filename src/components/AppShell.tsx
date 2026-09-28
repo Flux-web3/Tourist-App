@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tripId = useTripContextId()
   const trip = state.trips.find((candidate) => candidate.id === tripId) ?? null
   const exploreHref = trip ? `/trips/${trip.id}/explore` : '/explore'
-  const onWelcome = location.pathname === '/'
+  const onEntry = location.pathname === '/welcome'
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -117,16 +117,19 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to={`/trips/${trip.id}/budget`} className={navClass}>
               Budget
             </NavLink>
+            <NavLink to={`/trips/${trip.id}/notes`} className={navClass}>
+              Notes
+            </NavLink>
           </nav>
         ) : null}
       </header>
 
-      <main id="main-content" className={`mx-auto w-full max-w-6xl flex-1 px-4 py-6 ${onWelcome ? '' : 'pb-28 md:pb-12'}`}>
+      <main id="main-content" className={`mx-auto w-full max-w-6xl flex-1 px-4 py-6 ${onEntry ? '' : 'pb-28 md:pb-12'}`}>
         {children}
       </main>
 
       <footer
-        className={`border-t border-line px-4 py-4 text-body-sm text-ink-subtle ${onWelcome ? '' : 'pb-24 md:pb-4'}`}
+        className={`border-t border-line px-4 py-4 text-body-sm text-ink-subtle ${onEntry ? '' : 'pb-24 md:pb-4'}`}
       >
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
           <p>Tourist prototype. Trips, plans and expenses stay on this device.</p>
@@ -138,16 +141,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         aria-label="Primary"
         className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 backdrop-blur md:hidden"
       >
-        <MobileTab to="/trips" label="Trips" icon="luggage" end />
-        <MobileTab
-          to={trip ? `/trips/${trip.id}` : '/trips'}
-          label="Overview"
-          icon="dashboard"
-          end={!trip}
-        />
-        <MobileTab to={trip ? `/trips/${trip.id}/itinerary` : '/trips'} label="Itinerary" icon="calendar_month" />
-        <MobileTab to={exploreHref} label="Explore" icon="explore" />
-        <MobileTab to={trip ? `/trips/${trip.id}/budget` : '/trips'} label="Budget" icon="account_balance_wallet" />
+        {trip ? (
+          <>
+            <MobileTab to={`/trips/${trip.id}`} label="Overview" icon="dashboard" end />
+            <MobileTab to={`/trips/${trip.id}/itinerary`} label="Itinerary" icon="calendar_month" />
+            <MobileTab to={`/trips/${trip.id}/budget`} label="Budget" icon="account_balance_wallet" />
+            <MobileTab to={`/trips/${trip.id}/notes`} label="Notes" icon="sticky_note_2" />
+          </>
+        ) : (
+          <>
+            <MobileTab to="/trips" label="Trips" icon="luggage" end />
+            <MobileTab to="/explore" label="Explore" icon="explore" />
+            <MobileTab to="/trips/new" label="New trip" icon="add_circle" />
+          </>
+        )}
       </nav>
     </div>
   )

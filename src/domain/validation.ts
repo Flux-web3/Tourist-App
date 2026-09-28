@@ -11,6 +11,19 @@ export const TRIP_LIMITS = {
   maxBudget: 1_000_000,
 } as const
 
+export const NOTE_LIMITS = {
+  maxTitleLength: 80,
+  maxBodyLength: 2000,
+  minBodyLength: 1,
+} as const
+
+export interface NoteDraft {
+  title: string
+  body: string
+}
+
+export type NoteDraftErrors = Partial<Record<keyof NoteDraft, string>>
+
 export const TRAVEL_PACES = [
   { value: 'relaxed', label: 'Relaxed', hint: 'One anchor a day, plenty of breathing room' },
   { value: 'balanced', label: 'Balanced', hint: 'Two or three anchors a day' },
@@ -101,4 +114,30 @@ export function createEmptyDraft(): TripDraft {
     pace: 'balanced',
     notes: '',
   }
+}
+
+/**
+ * A note needs a body, but the title is optional: a first line of the body is
+ * enough to identify it, and forcing a title makes quick notes a chore.
+ */
+export function validateNoteDraft(draft: NoteDraft): { errors: NoteDraftErrors; isValid: boolean } {
+  const errors: NoteDraftErrors = {}
+
+  const title = typeof draft.title === 'string' ? draft.title : ''
+  if (title.length > NOTE_LIMITS.maxTitleLength) {
+    errors.title = `Keep the title to ${NOTE_LIMITS.maxTitleLength} characters or fewer.`
+  }
+
+  const body = typeof draft.body === 'string' ? draft.body : ''
+  if (body.trim().length < NOTE_LIMITS.minBodyLength) {
+    errors.body = 'Write something before saving the note.'
+  } else if (body.length > NOTE_LIMITS.maxBodyLength) {
+    errors.body = `Keep notes to ${NOTE_LIMITS.maxBodyLength} characters or fewer.`
+  }
+
+  return { errors, isValid: Object.keys(errors).length === 0 }
+}
+
+export function createEmptyNoteDraft(): NoteDraft {
+  return { title: '', body: '' }
 }

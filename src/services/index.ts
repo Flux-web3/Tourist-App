@@ -1,10 +1,11 @@
 import { createAnalyticsService } from './analytics'
 import { expenseService } from './expenseService'
 import { itineraryService } from './itineraryService'
+import { createNoteService } from './noteService'
 import { placeService } from './placeService'
 import { createPersistenceService } from './persistence'
 import { tripService } from './tripService'
-import type { AnalyticsService, ExpenseService, ItineraryService, PersistenceService, PlaceService, TripService } from './contracts'
+import type { AnalyticsService, ExpenseService, ItineraryService, NoteService, PersistenceService, PlaceService, TripService } from './contracts'
 
 /**
  * Composition root. Swap an implementation here and the whole app follows the
@@ -16,6 +17,7 @@ export interface Services {
   itinerary: ItineraryService
   places: PlaceService
   expenses: ExpenseService
+  notes: NoteService
   persistence: PersistenceService
   analytics: AnalyticsService
 }
@@ -26,6 +28,7 @@ export function createServices(): Services {
     itinerary: itineraryService,
     places: placeService,
     expenses: expenseService,
+    notes: createNoteService(),
     persistence: createPersistenceService(),
     analytics: createAnalyticsService(),
   }

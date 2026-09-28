@@ -119,13 +119,17 @@ describe('AppShell', () => {
         'href',
         `/trips/${TEST_TRIP_ID}/budget`,
       )
+      expect(within(sections).getByRole('link', { name: 'Notes' })).toHaveAttribute(
+        'href',
+        `/trips/${TEST_TRIP_ID}/notes`,
+      )
     })
 
     it('scopes every Explore entry point to the trip', () => {
       renderShell(`/trips/${TEST_TRIP_ID}/itinerary`, demoStateFor())
 
       const exploreLinks = screen.getAllByRole('link', { name: 'Explore' })
-      expect(exploreLinks).toHaveLength(3)
+      expect(exploreLinks).toHaveLength(2)
       for (const link of exploreLinks) {
         expect(link).toHaveAttribute('href', `/trips/${TEST_TRIP_ID}/explore`)
       }
@@ -151,6 +155,10 @@ describe('AppShell', () => {
         'aria-current',
         'page',
       )
+      expect(within(mobile).getByRole('link', { name: 'Notes' })).toHaveAttribute(
+        'href',
+        `/trips/${TEST_TRIP_ID}/notes`,
+      )
     })
 
     it('drops the trip sections when the id in the url is unknown', () => {
@@ -160,11 +168,17 @@ describe('AppShell', () => {
       for (const link of screen.getAllByRole('link', { name: 'Explore' })) {
         expect(link).toHaveAttribute('href', '/explore')
       }
+    })
+
+    it('offers only real destinations on the mobile tab bar outside a trip', () => {
+      renderShell('/trips', demoStateFor())
+
       const mobile = screen.getAllByRole('navigation', { name: 'Primary' })[1]
-      expect(within(mobile).getByRole('link', { name: 'Itinerary' })).toHaveAttribute(
-        'href',
-        '/trips',
-      )
+      const tabs = within(mobile).getAllByRole('link')
+      expect(tabs.map((tab) => tab.getAttribute('href'))).toEqual(['/trips', '/explore', '/trips/new'])
+      expect(within(mobile).queryByRole('link', { name: 'Itinerary' })).not.toBeInTheDocument()
+      expect(within(mobile).queryByRole('link', { name: 'Budget' })).not.toBeInTheDocument()
+      expect(within(mobile).queryByRole('link', { name: 'Notes' })).not.toBeInTheDocument()
     })
   })
 

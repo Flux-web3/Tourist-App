@@ -5,6 +5,7 @@ import type {
   AnalyticsService,
   ExpenseService,
   ItineraryService,
+  NoteService,
   PersistenceService,
   PlaceService,
   TripService,
@@ -77,6 +78,7 @@ describe('the composition root shape', () => {
       'analytics',
       'expenses',
       'itinerary',
+      'notes',
       'persistence',
       'places',
       'trips',
@@ -117,6 +119,16 @@ describe('the composition root shape', () => {
     expect(typeof expenses.remove).toBe('function')
   })
 
+  it('satisfies the note service contract', () => {
+    const services = createServices()
+    const notes: NoteService = services.notes
+
+    expect(typeof notes.add).toBe('function')
+    expect(typeof notes.update).toBe('function')
+    expect(typeof notes.remove).toBe('function')
+    expect(typeof notes.setPinned).toBe('function')
+  })
+
   it('satisfies the persistence service contract', () => {
     const services = createServices()
     const persistence: PersistenceService = services.persistence
@@ -150,6 +162,7 @@ describe('the composition root shape', () => {
       'analytics',
       'expenses',
       'itinerary',
+      'notes',
       'persistence',
       'places',
       'trips',

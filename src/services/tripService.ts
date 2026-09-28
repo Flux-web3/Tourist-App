@@ -63,6 +63,7 @@ export const tripService: TripService = {
         trips: [...state.trips, trip],
         daysByTrip: { ...state.daysByTrip, [trip.id]: days },
         expensesByTrip: { ...state.expensesByTrip, [trip.id]: [] },
+        notesByTrip: { ...(state.notesByTrip ?? {}), [trip.id]: [] },
         generation: {
           ...state.generation,
           [trip.id]: { status: 'idle', error: null, shouldFail: false, startedAt: null, completedAt: null },
@@ -84,6 +85,12 @@ export const tripService: TripService = {
       updatedAt: timestamp,
     }
 
+    // Clearing the name is allowed on edit, so re-derive one rather than
+    // leaving the trip nameless in a list that shows nothing to click.
+    if (!next.name) {
+      next.name = suggestTripName(next.destination, next.startDate)
+    }
+
     const trips = state.trips.map((trip) => (trip.id === tripId ? next : trip))
     let daysByTrip = state.daysByTrip
 
@@ -99,9 +106,11 @@ export const tripService: TripService = {
   remove(state, tripId) {
     const daysByTrip = { ...state.daysByTrip }
     const expensesByTrip = { ...state.expensesByTrip }
+    const notesByTrip = { ...(state.notesByTrip ?? {}) }
     const generation = { ...state.generation }
     delete daysByTrip[tripId]
     delete expensesByTrip[tripId]
+    delete notesByTrip[tripId]
     delete generation[tripId]
 
     return {
@@ -109,6 +118,7 @@ export const tripService: TripService = {
       trips: state.trips.filter((trip) => trip.id !== tripId),
       daysByTrip,
       expensesByTrip,
+      notesByTrip,
       generation,
     }
   },

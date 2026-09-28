@@ -142,6 +142,19 @@ describe('round trip', () => {
           completedAt: FIXED_ISO,
         },
       },
+      notesByTrip: {
+        [tripId]: [
+          {
+            id: 'note_round_trip',
+            tripId,
+            title: 'Flight reference',
+            body: 'FR 1420\nDeparts 07:40',
+            pinned: true,
+            createdAt: FIXED_ISO,
+            updatedAt: FIXED_ISO,
+          },
+        ],
+      },
       themePreference: 'dark',
       hasDemoData: true,
     }
@@ -156,6 +169,8 @@ describe('round trip', () => {
     expect(loaded?.daysByTrip[tripId]?.[0]?.items[0]?.estimatedCost).toBe(12.5)
     expect(loaded?.expensesByTrip[tripId]?.[0]?.amount).toBe(19.99)
     expect(loaded?.generation[tripId]?.status).toBe('success')
+    expect(loaded?.notesByTrip?.[tripId]?.[0]?.pinned).toBe(true)
+    expect(loaded?.notesByTrip?.[tripId]?.[0]?.body).toBe('FR 1420\nDeparts 07:40')
     expect(loaded?.hasDemoData).toBe(true)
   })
 

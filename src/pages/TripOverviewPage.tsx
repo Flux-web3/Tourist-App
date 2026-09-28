@@ -20,7 +20,7 @@ import {
 import { countItems, findDayForDate } from '@/domain/itinerary'
 import { CURRENCY_SYMBOLS, formatMoney } from '@/domain/money'
 import { INTEREST_LABEL, ITINERARY_CATEGORY_ICON, PACE_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
-import { useGeneration, useTourist, useTrip, useTripBudget, useTripDays, useTripExpenses } from '@/state/useTourist'
+import { useGeneration, useTourist, useTrip, useTripBudget, useTripDays, useTripExpenses, useTripNotes } from '@/state/useTourist'
 
 function countLabel(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`
@@ -50,6 +50,7 @@ export default function TripOverviewPage() {
   const trip = useTrip(tripId)
   const days = useTripDays(tripId)
   const expenses = useTripExpenses(tripId)
+  const notes = useTripNotes(tripId)
   const budget = useTripBudget(tripId)
   const generation = useGeneration(tripId)
   const navigate = useNavigate()
@@ -163,6 +164,13 @@ export default function TripOverviewPage() {
         </Button>
         <ButtonLink to={`/trips/${trip.id}/budget`} variant="secondary" icon={<Icon name="add_card" size={18} />}>
           Add expense
+        </ButtonLink>
+        <ButtonLink
+          to={`/trips/${trip.id}/notes`}
+          variant="secondary"
+          icon={<Icon name="note_add" size={18} />}
+        >
+          {notes.length > 0 ? `Notes (${notes.length})` : 'Add a note'}
         </ButtonLink>
         <Button
           variant="danger"
@@ -372,6 +380,12 @@ export default function TripOverviewPage() {
             {expenses.length > 0
               ? `Every logged expense, ${countLabel(expenses.length, 'entry', 'entries')}`
               : 'No logged expenses to lose'}
+          </li>
+          <li className="flex items-start gap-2">
+            <Icon name="sticky_note_2" size={18} className="mt-0.5 shrink-0 text-ink-subtle" />
+            {notes.length > 0
+              ? `${countLabel(notes.length, 'note', 'notes')} saved against this trip`
+              : 'No notes saved yet'}
           </li>
         </ul>
       </Dialog>

@@ -8,6 +8,7 @@ import type {
   ThemePreference,
   Trip,
   TripDraft,
+  TripNote,
   User,
 } from '@/domain/types'
 
@@ -28,6 +29,13 @@ export interface PersistedState {
   trips: Trip[]
   daysByTrip: Record<string, ItineraryDay[]>
   expensesByTrip: Record<string, Expense[]>
+  /**
+   * Notes arrived after v1 shipped, so this key may be absent on snapshots
+   * written by an earlier build. Treat it as optional when validating and
+   * normalise it on load rather than rejecting the whole snapshot, which would
+   * silently discard the traveller's trips.
+   */
+  notesByTrip?: Record<string, TripNote[]>
   generation: Record<string, GenerationState>
   themePreference: ThemePreference
   /** True when the seeded Lagos to Paris demo trip is present. */
@@ -93,6 +101,24 @@ export interface ExpenseService {
   remove(state: PersistedState, tripId: string, expenseId: string): PersistedState
 }
 
+export type NewNoteInput = Omit<TripNote, 'id' | 'createdAt' | 'updatedAt' | 'pinned'> & {
+  pinned?: boolean
+}
+
+export type NotePatch = Partial<Omit<TripNote, 'id' | 'tripId' | 'createdAt'>>
+
+export interface NoteMutationResult {
+  state: PersistedState
+  note: TripNote | null
+}
+
+export interface NoteService {
+  add(state: PersistedState, input: NewNoteInput): NoteMutationResult
+  update(state: PersistedState, tripId: string, noteId: string, patch: NotePatch): NoteMutationResult
+  setPinned(state: PersistedState, tripId: string, noteId: string, pinned: boolean): PersistedState
+  remove(state: PersistedState, tripId: string, noteId: string): PersistedState
+}
+
 export type AnalyticsEventName =
   | 'signup_completed'
   | 'trip_created'
@@ -105,6 +131,10 @@ export type AnalyticsEventName =
   | 'experience_searched'
   | 'experience_added'
   | 'expense_added'
+  | 'note_created'
+  | 'note_updated'
+  | 'note_deleted'
+  | 'note_pin_toggled'
   | 'trip_saved'
 
 export type AnalyticsPayload = Record<string, string | number | boolean | null>

@@ -12,6 +12,7 @@ import type {
   ThemePreference,
   Trip,
   TripDraft,
+  TripNote,
   User,
 } from '@/domain/types'
 import type { TouristState } from './touristReducer'
@@ -26,6 +27,14 @@ export type NewExpenseInput = {
 }
 
 export type ExpensePatch = Partial<Omit<Expense, 'id' | 'tripId' | 'createdAt'>>
+
+export type NewNoteInput = {
+  tripId: string
+  title: string
+  body: string
+}
+
+export type NotePatch = Partial<Pick<TripNote, 'title' | 'body'>>
 
 export type ItineraryItemPatch = Partial<
   Omit<ItineraryItem, 'id' | 'tripId' | 'createdAt' | 'updatedAt' | 'source' | 'editedByUser'>
@@ -85,6 +94,11 @@ export interface TouristActions {
   addExpense(input: NewExpenseInput): Expense | null
   updateExpense(expenseId: string, patch: ExpensePatch): void
   removeExpense(tripId: string, expenseId: string): void
+
+  addNote(input: NewNoteInput): TripNote | null
+  updateNote(tripId: string, noteId: string, patch: NotePatch): TripNote | null
+  toggleNotePin(tripId: string, noteId: string): void
+  removeNote(tripId: string, noteId: string): void
 
   searchExperiences(query: CatalogQuery): Promise<Experience[]>
   getExperience(id: string): Promise<Experience | null>

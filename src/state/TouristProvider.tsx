@@ -32,6 +32,8 @@ import {
   type ExpensePatch,
   type ItineraryItemPatch,
   type NewExpenseInput,
+  type NewNoteInput,
+  type NotePatch,
   type TouristActions,
   type TouristContextValue,
 } from './touristContext'
@@ -245,6 +247,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         trips: next.trips,
         daysByTrip: next.daysByTrip,
         expensesByTrip: next.expensesByTrip,
+        notesByTrip: next.notesByTrip,
         generation: next.generation,
       })
     }
@@ -457,8 +460,49 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       })
     }
 
-    const searchExperiences = (query: CatalogQuery) => services.places.search(query)
+    const addNote = (input: NewNoteInput) => {
+      const current = stateRef.current
+      const trip = current.trips.find((candidate) => candidate.id === input.tripId)
+      if (!trip) return null
+      const result = services.notes.add(current, { ...input, pinned: false })
+      if (!result.note) return null
+      patch({ notesByTrip: result.state.notesByTrip })
+      services.analytics.track('note_created', { tripId: trip.id, pinned: false })
+      trackSaved(trip.id)
+      return result.note
+    }
 
+    const updateNote = (tripId: string, noteId: string, update: NotePatch) => {
+      const result = services.notes.update(stateRef.current, tripId, noteId, update)
+      if (!result.note) return null
+      patch({ notesByTrip: result.state.notesByTrip })
+      services.analytics.track('note_updated', {
+        tripId,
+        noteId,
+        fields: Object.keys(update).join(','),
+      })
+      trackSaved(tripId)
+      return result.note
+    }
+
+    const toggleNotePin = (tripId: string, noteId: string) => {
+      const current = stateRef.current
+      const existing = (current.notesByTrip?.[tripId] ?? []).find((note) => note.id === noteId)
+      if (!existing) return
+      const next = services.notes.setPinned(current, tripId, noteId, !existing.pinned)
+      patch({ notesByTrip: next.notesByTrip })
+      services.analytics.track('note_pin_toggled', { tripId, noteId, pinned: !existing.pinned })
+      trackSaved(tripId)
+    }
+
+    const removeNote = (tripId: string, noteId: string) => {
+      const next = services.notes.remove(stateRef.current, tripId, noteId)
+      patch({ notesByTrip: next.notesByTrip })
+      services.analytics.track('note_deleted', { tripId, noteId })
+      trackSaved(tripId)
+    }
+
+    const searchExperiences = (query: CatalogQuery) => services.places.search(query)
     const getExperience = (id: string) => services.places.getById(id)
 
     const trackSearch = (query: CatalogQuery) => {
@@ -492,6 +536,10 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       addExpense,
       updateExpense,
       removeExpense,
+      addNote,
+      updateNote,
+      toggleNotePin,
+      removeNote,
       searchExperiences,
       getExperience,
       trackSearch,

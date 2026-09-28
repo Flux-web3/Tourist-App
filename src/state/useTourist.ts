@@ -1,8 +1,15 @@
 import { useContext, useMemo } from 'react'
-import { selectBudget, selectDays, selectExpenses, selectTrip, selectTrips } from './selectors'
+import {
+  selectBudget,
+  selectDays,
+  selectExpenses,
+  selectNotes,
+  selectTrip,
+  selectTrips,
+} from './selectors'
 import { TouristContext, type TouristContextValue } from './touristContext'
 import type { BudgetSummary } from '@/domain/money'
-import type { Expense, ItineraryDay, Trip } from '@/domain/types'
+import type { Expense, ItineraryDay, Trip, TripNote } from '@/domain/types'
 import type { TouristState } from './touristReducer'
 
 export function useTourist(): TouristContextValue {
@@ -44,6 +51,11 @@ export function useTripDays(tripId: string | undefined): ItineraryDay[] {
 export function useTripExpenses(tripId: string | undefined): Expense[] {
   const state = useAppState()
   return useMemo(() => selectExpenses(state, tripId), [state, tripId])
+}
+
+export function useTripNotes(tripId: string | undefined): TripNote[] {
+  const state = useAppState()
+  return useMemo(() => selectNotes(state, tripId), [state, tripId])
 }
 
 export function useTripBudget(tripId: string | undefined): BudgetSummary | null {

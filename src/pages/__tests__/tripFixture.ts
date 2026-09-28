@@ -7,6 +7,7 @@ import type {
   ItineraryDay,
   ItineraryItem,
   Trip,
+  TripNote,
   User,
 } from '@/domain/types'
 
@@ -137,6 +138,20 @@ export function makeFixtureExpenses(tripId = FIXTURE_TRIP_ID): Expense[] {
   }))
 }
 
+export const FIXTURE_NOTE_TITLES = ['Flight reference', 'Apartment key safe', 'Dinner booking'] as const
+
+export function makeFixtureNotes(tripId = FIXTURE_TRIP_ID): TripNote[] {
+  return FIXTURE_NOTE_TITLES.map((title, index) => ({
+    id: `note-${index + 1}`,
+    tripId,
+    title,
+    body: `Detail ${index + 1}\nSecond line ${index + 1}`,
+    pinned: index === 0,
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+  }))
+}
+
 export function makeGeneration(overrides: Partial<GenerationState> = {}): GenerationState {
   return {
     status: 'idle',
@@ -154,6 +169,7 @@ export interface FixtureOptions {
   trip?: Partial<Trip>
   days?: ItineraryDay[]
   expenses?: Expense[]
+  notes?: TripNote[]
   generation?: GenerationState
   user?: User
   extraTrips?: Trip[]
@@ -169,6 +185,7 @@ export function fixtureState(options: FixtureOptions = {}): PersistedState {
     trip = {},
     days = makeFixtureDays(FIXTURE_TRIP_ID, firstDate),
     expenses = makeFixtureExpenses(),
+    notes = makeFixtureNotes(),
     generation = makeGeneration(),
     user = createGuestUser({ id: FIXTURE_USER_ID, name: 'Adaeze N.' }),
     extraTrips = [],
@@ -181,6 +198,7 @@ export function fixtureState(options: FixtureOptions = {}): PersistedState {
     daysByTrip: { [FIXTURE_TRIP_ID]: days },
     expensesByTrip: { [FIXTURE_TRIP_ID]: expenses },
     generation: { [FIXTURE_TRIP_ID]: generation },
+    notesByTrip: { [FIXTURE_TRIP_ID]: notes },
     themePreference: 'system',
     hasDemoData: false,
   }
