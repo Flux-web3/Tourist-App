@@ -57,7 +57,16 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
           destination, same cover, which is what makes a trip recognisable in a
           list at a glance.
         */}
-        <TripCover destination={trip.destination} ratio="21 / 9" className="-mx-1 -mt-1" />
+        {/*
+          Capped, not just proportional: at a single-column desktop width a
+          21/9 cover is ~300px tall and swamps the trip it is supposed to
+          introduce. The SVG slices, so the crop stays centred at any height.
+        */}
+        <TripCover
+          destination={trip.destination}
+          ratio="21 / 9"
+          className="-mx-1 -mt-1 max-h-28 sm:max-h-32"
+        />
 
         <div className="flex flex-col gap-2">
           <div className="min-w-0">
