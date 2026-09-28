@@ -4,7 +4,7 @@ import { TripService, analytics } from '@/services';
 import { getDemoData } from '@/data/demo';
 import { storage } from '@/data/storage';
 
-type Screen = 'welcome' | 'trips' | 'create-trip' | 'overview' | 'itinerary' | 'explore' | 'budget';
+type Screen = 'landing' | 'welcome' | 'trips' | 'create-trip' | 'overview' | 'itinerary' | 'explore' | 'budget' | 'notes';
 
 interface AppState {
   user: User | null;
@@ -33,7 +33,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [activeTrip, setActiveTrip] = useState<Trip | null>(null);
-  const [screen, setScreen] = useState<Screen>('welcome');
+  const [screen, setScreen] = useState<Screen>('landing');
   const [placeDetailId, setPlaceDetailId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     setUser(null);
     setActiveTrip(null);
-    setScreen('welcome');
+    setScreen('landing');
     storage.setDemo(false);
   }, []);
 

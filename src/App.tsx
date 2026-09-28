@@ -1,4 +1,5 @@
 import { AppProvider, useApp } from '@/context/AppContext';
+import { Landing } from '@/screens/Landing';
 import { WelcomeScreen } from '@/screens/Welcome';
 import { TripsHome } from '@/screens/TripsHome';
 import { CreateTrip } from '@/screens/CreateTrip';
@@ -9,6 +10,10 @@ import { Budget } from '@/screens/Budget';
 
 function AppContent() {
   const { screen, user } = useApp();
+
+  if (screen === 'landing') {
+    return <Landing />;
+  }
 
   if (!user && screen !== 'welcome') {
     return <WelcomeScreen />;
