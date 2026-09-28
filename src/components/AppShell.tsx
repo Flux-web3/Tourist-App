@@ -126,7 +126,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : null}
       </header>
 
-      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      {/* Focusable so the skip link and a dialog whose opener was deleted can land here. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 focus:outline-none"
+      >
         {children}
       </main>
 

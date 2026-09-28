@@ -76,7 +76,15 @@ export function Dialog({ open, onClose, title, description, children, footer, si
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
       document.body.style.overflow = previousOverflow
-      restoreRef.current?.focus?.()
+      /*
+       * Deleting a record from its own menu removes the control that opened the
+       * dialog, and focusing a detached node silently drops focus to <body>,
+       * sending screen readers back to the top of the document. The page's main
+       * region is the nearest place that still exists.
+       */
+      const opener = restoreRef.current
+      if (opener?.isConnected) opener.focus()
+      else document.getElementById('main-content')?.focus()
     }
   }, [open])
 

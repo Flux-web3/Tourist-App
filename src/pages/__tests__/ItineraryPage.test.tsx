@@ -474,6 +474,31 @@ describe('ItineraryPage', () => {
       expect(screen.queryByText(FIXTURE_ITEM_TITLES[0])).not.toBeInTheDocument()
       expect(screen.getByText('3 stops · €54 estimated')).toBeInTheDocument()
     })
+
+    it('keeps keyboard focus on the day after a stop is removed or moved', async () => {
+      const user = userEvent.setup()
+      renderItinerary()
+
+      expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
+      // The stop's own controls vanish with it, so focus must land somewhere real.
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Remove')
+      await user.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove activity' }),
+      )
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { level: 3, name: formatLongDate(DAY_ONE) })).toHaveFocus()
+      })
+
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[1], 'Move to another day')
+      await user.selectOptions(
+        screen.getByLabelText(`Move ${FIXTURE_ITEM_TITLES[1]} to another day`),
+        'day-2',
+      )
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { level: 3, name: formatLongDate(DAY_TWO) })).toHaveFocus()
+      })
+      expect(document.body).not.toHaveFocus()
+    })
   })
 
   describe('replacing a stop with an alternative', () => {

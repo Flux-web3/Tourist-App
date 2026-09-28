@@ -110,6 +110,41 @@ describe('Dialog', () => {
     expect(document.activeElement).toBe(trigger)
   })
 
+  it('falls back to the main region when the opener was deleted, not to <body>', async () => {
+    function DeleteHarness() {
+      const [open, setOpen] = useState(false)
+      const [deleted, setDeleted] = useState(false)
+      return (
+        <main id="main-content" tabIndex={-1}>
+          {deleted ? null : (
+            <button type="button" onClick={() => setOpen(true)}>
+              Delete expense
+            </button>
+          )}
+          <Dialog open={open} onClose={() => setOpen(false)} title="Delete this expense?">
+            <button
+              type="button"
+              onClick={() => {
+                setDeleted(true)
+                setOpen(false)
+              }}
+            >
+              Confirm delete
+            </button>
+          </Dialog>
+        </main>
+      )
+    }
+    const user = userEvent.setup()
+    render(<DeleteHarness />)
+
+    await user.click(screen.getByRole('button', { name: 'Delete expense' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+    expect(screen.queryByRole('button', { name: 'Delete expense' })).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(screen.getByRole('main'))
+  })
+
   it('keeps Tab focus inside the dialog', async () => {
     const user = userEvent.setup()
     render(<Harness onClose={vi.fn()} />)

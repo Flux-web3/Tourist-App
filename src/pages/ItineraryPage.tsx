@@ -314,6 +314,19 @@ export default function ItineraryPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [removing, setRemoving] = useState<ItineraryItem | null>(null)
   const [moveItemId, setMoveItemId] = useState<string | null>(null)
+  /**
+   * Removing or moving a stop unmounts the control that had focus, which
+   * dropped keyboard and screen-reader users back to the top of the document.
+   * The day the stop left, or landed on, takes focus instead once the plan has
+   * re-rendered.
+   */
+  const focusDayRef = useRef<string | null>(null)
+  useEffect(() => {
+    const dayId = focusDayRef.current
+    if (!dayId) return
+    focusDayRef.current = null
+    document.getElementById(`day-heading-${dayId}`)?.focus()
+  }, [days])
   const [addOpen, setAddOpen] = useState(false)
   const [addDayId, setAddDayId] = useState('')
   const [addStartTime, setAddStartTime] = useState('10:00')
@@ -396,6 +409,7 @@ export default function ItineraryPage() {
       setRemoving(null)
       return
     }
+    focusDayRef.current = days.find((day) => day.items.some((item) => item.id === removing.id))?.id ?? null
     actions.removeItem(trip.id, removing.id)
     setRemoving(null)
   }
@@ -521,7 +535,13 @@ export default function ItineraryPage() {
                       <p className="text-label-sm uppercase tracking-widest text-terracotta">
                         {`Day ${position + 1}`}
                       </p>
-                      <h3 className="break-words text-headline-sm">{formatLongDate(day.date)}</h3>
+                      <h3
+                        id={`day-heading-${day.id}`}
+                        tabIndex={-1}
+                        className="break-words text-headline-sm"
+                      >
+                        {formatLongDate(day.date)}
+                      </h3>
                       {day.title ? (
                         <p className="mt-0.5 text-body-md text-ink-muted">{day.title}</p>
                       ) : null}
@@ -568,6 +588,7 @@ export default function ItineraryPage() {
                               void actions.replaceItem(trip.id, item.id)
                             }}
                             onMove={(targetDayId) => {
+                              focusDayRef.current = targetDayId
                               actions.moveItem(trip.id, item.id, targetDayId)
                               setMoveItemId(null)
                             }}
