@@ -42,9 +42,24 @@ import { createInitialTouristState, toPersistedState, touristReducer } from './t
 const IDLE_GENERATION: GenerationState = {
   status: 'idle',
   error: null,
-  shouldFail: false,
   startedAt: null,
   completedAt: null,
+}
+
+/**
+ * True when the trip still has the shape the plan was drafted against. These are
+ * exactly the fields `tripService.update` re-flows the itinerary for, so a change
+ * to any of them means a result produced before the change describes a trip that
+ * no longer exists.
+ */
+function sameItineraryShape(before: Trip, after: Trip | undefined): after is Trip {
+  return (
+    after !== undefined &&
+    after.startDate === before.startDate &&
+    after.endDate === before.endDate &&
+    after.pace === before.pace &&
+    after.destination === before.destination
+  )
 }
 
 function timestamp(): string {
@@ -59,6 +74,12 @@ export function TouristProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state)
   stateRef.current = state
   const variantRef = useRef<Record<string, number>>({})
+  /**
+   * The prototype's "make the next generation fail" switch. Deliberately a ref
+   * rather than part of the persisted state: it is a demo affordance, so it must
+   * not survive a reload and strand a trip in permanent failure.
+   */
+  const simulateFailureRef = useRef<Record<string, boolean>>({})
 
   const commit = useCallback((next: PersistedState) => {
     stateRef.current = { ...next, hydrated: stateRef.current.hydrated }
@@ -125,12 +146,30 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         ? ((variantRef.current[tripId] = (variantRef.current[tripId] ?? 0) + 1))
         : 0
 
-      setGeneration(tripId, { ...IDLE_GENERATION, status: 'loading', shouldFail, startedAt })
+      setGeneration(tripId, { ...IDLE_GENERATION, status: 'loading', startedAt })
       services.analytics.track('itinerary_generation_started', { tripId, regenerate, variant })
 
       try {
         const generated = await services.itinerary.generate(trip, { shouldFail, variant })
         const after = stateRef.current
+        const current = after.trips.find((candidate) => candidate.id === tripId)
+        /**
+         * The trip was deleted while this was in flight. Writing the days now
+         * would put a bucket back for a trip that no longer exists, and nothing
+         * would ever clean it up.
+         */
+        if (!current) return
+        /**
+         * The dates, pace or destination moved while this was in flight, so these
+         * days describe a trip the traveller no longer has.
+         * `tripService.update` already reflowed the itinerary onto the new shape,
+         * so the honest thing is to throw this result away and clear the spinner
+         * rather than overwrite good days with stale ones.
+         */
+        if (!sameItineraryShape(trip, current)) {
+          setGeneration(tripId, IDLE_GENERATION)
+          return
+        }
         const existing = after.daysByTrip[tripId] ?? []
         const days = regenerate ? mergeGeneratedDays(existing, generated) : generated
         const completedAt = timestamp()
@@ -142,7 +181,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           ),
           generation: {
             ...after.generation,
-            [tripId]: { status: 'success', error: null, shouldFail, startedAt, completedAt },
+            [tripId]: { status: 'success', error: null, startedAt, completedAt },
           },
         })
         services.analytics.track('itinerary_generation_succeeded', {
@@ -156,13 +195,15 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         const after = stateRef.current
         const message =
           error instanceof Error ? error.message : 'Something went wrong while drafting your itinerary.'
+        // Same orphan guard as the success path: no generation record for a trip
+        // that was deleted while this was in flight.
+        if (!after.trips.some((candidate) => candidate.id === tripId)) return
         patch({
           generation: {
             ...after.generation,
             [tripId]: {
               status: 'error',
               error: message,
-              shouldFail,
               startedAt,
               completedAt: timestamp(),
             },
@@ -222,6 +263,14 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         ...createEmptyState(current.user),
         themePreference: current.themePreference,
       }
+      /**
+       * "Clear all data" has to mean all of it. The analytics log is in memory
+       * only, but it still holds destinations and the traveller's raw search
+       * text, so leaving it behind would make the promise false.
+       */
+      services.analytics.clear()
+      variantRef.current = {}
+      simulateFailureRef.current = {}
       services.persistence.save(fresh)
       commit(fresh)
     }
@@ -235,6 +284,10 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         trips: result.state.trips,
         daysByTrip: result.state.daysByTrip,
         expensesByTrip: result.state.expensesByTrip,
+        // The notes bucket `tripService.create` just built has to come across
+        // too, or the first note written to the trip lands in a bucket that the
+        // create never registered.
+        notesByTrip: result.state.notesByTrip,
         generation: result.state.generation,
       })
       services.analytics.track('trip_created', {
@@ -258,33 +311,36 @@ export function TouristProvider({ children }: { children: ReactNode }) {
 
     const deleteTrip = (tripId: string) => {
       const next = services.trips.remove(stateRef.current, tripId)
+      delete variantRef.current[tripId]
+      delete simulateFailureRef.current[tripId]
       patch({
         trips: next.trips,
         daysByTrip: next.daysByTrip,
         expensesByTrip: next.expensesByTrip,
         notesByTrip: next.notesByTrip,
         generation: next.generation,
+        hasDemoData: next.hasDemoData,
       })
     }
 
     const generateItinerary = async (tripId: string, options?: { regenerate?: boolean }) => {
       const existing = stateRef.current.daysByTrip[tripId] ?? []
-      const shouldFail = stateRef.current.generation[tripId]?.shouldFail ?? false
       await runGeneration(tripId, {
         regenerate: options?.regenerate ?? existing.length > 0,
-        shouldFail,
+        shouldFail: simulateFailureRef.current[tripId] ?? false,
       })
     }
 
     const retryGeneration = async (tripId: string) => {
       const current = stateRef.current
       const previous = current.generation[tripId] ?? IDLE_GENERATION
-      setGeneration(tripId, { ...previous, status: 'idle', error: null, shouldFail: false })
+      simulateFailureRef.current[tripId] = false
+      setGeneration(tripId, { ...previous, status: 'idle', error: null })
       await runGeneration(tripId, { regenerate: true, shouldFail: false })
     }
 
     const setSimulateFailure = (tripId: string, shouldFail: boolean) => {
-      setGeneration(tripId, { ...IDLE_GENERATION, shouldFail })
+      simulateFailureRef.current[tripId] = shouldFail
     }
 
     const getItem = (tripId: string, itemId: string) =>
@@ -319,9 +375,17 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           day: located.day,
           item: located.item,
           variant,
-          shouldFail: current.generation[tripId]?.shouldFail ?? false,
+          shouldFail: simulateFailureRef.current[tripId] ?? false,
         })
         const after = stateRef.current
+        const stillThere = after.trips.find((candidate) => candidate.id === tripId)
+        // The trip was deleted while the suggestion was in flight: writing the
+        // days back would resurrect a bucket nothing will ever clean up.
+        if (!stillThere) return
+        // The trip was re-flowed, so this suggestion was built against a day that
+        // may no longer exist. Discard it rather than write it somewhere it does
+        // not belong; the plan the traveller has is untouched either way.
+        if (!sameItineraryShape(trip, stillThere)) return
         const days = replaceItemInDays(
           after.daysByTrip[tripId] ?? [],
           itemId,

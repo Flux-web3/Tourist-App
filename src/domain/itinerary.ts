@@ -1,5 +1,5 @@
 import { sumAmounts } from './money'
-import { timeToMinutes } from './format'
+import { differenceInDays, timeToMinutes } from './format'
 import type { ItineraryDay, ItineraryItem } from './types'
 
 /**
@@ -48,7 +48,16 @@ function mapDays(
   )
 }
 
-/** Inserts without displacing anything: the new item takes the requested slot. */
+/**
+ * Inserts the new item at the requested slot, then puts the day back in
+ * chronological order.
+ *
+ * `position` still decides where the item lands among stops that share its
+ * start time, because `sortItems` is a stable sort with a deterministic
+ * tie-break. What it can no longer do is leave a 09:00 stop sitting below an
+ * 18:00 one: the day is rendered chronologically, so an out-of-order array
+ * would read as a bug to the traveller.
+ */
 export function insertItemAt(
   days: readonly ItineraryDay[],
   dayId: string,
@@ -60,22 +69,38 @@ export function insertItemAt(
     const items = [...day.items]
     const index = position === undefined ? items.length : Math.max(0, Math.min(position, items.length))
     items.splice(index, 0, item)
-    return { ...day, items }
+    return { ...day, items: sortItems(items) }
   })
 }
 
+/**
+ * Applies the patch, and re-sorts the day when the edit moved the stop in time.
+ *
+ * The itinerary screen lets the traveller pick any start time, so an edit that
+ * moves a stop from 18:00 to 09:00 has to move it in the day as well - it used
+ * to stay in its old slot and the day rendered out of order. An edit that only
+ * changes a title, a note or a cost deliberately does not re-sort: nothing moved
+ * in time, and shuffling the day for a rename would be its own small surprise.
+ */
 export function updateItemInDays(
   days: readonly ItineraryDay[],
   itemId: string,
   patch: Partial<Omit<ItineraryItem, 'id' | 'tripId'>>,
   timestamp: string,
 ): ItineraryDay[] {
-  return mapDays(days, itemId, (item) => ({
+  const located = findItemInDays(days, itemId)
+  const next = mapDays(days, itemId, (item) => ({
     ...item,
     ...patch,
     editedByUser: true,
     updatedAt: timestamp,
   }))
+  if (!located || patch.startTime === undefined || patch.startTime === located.item.startTime) {
+    return next
+  }
+  return next.map((day) =>
+    day.items.some((item) => item.id === itemId) ? { ...day, items: sortItems(day.items) } : day,
+  )
 }
 
 /** Targeted swap: one slot changes, every other item keeps its identity. */
@@ -102,6 +127,11 @@ export function removeItemFromDays(days: readonly ItineraryDay[], itemId: string
   )
 }
 
+/**
+ * Moves an item to another day (or another slot on the same day). The receiving
+ * day is re-sorted by `insertItemAt`, so a stop dragged to a day never lands
+ * out of chronological order.
+ */
 export function moveItemInDays(
   days: readonly ItineraryDay[],
   itemId: string,
@@ -116,21 +146,66 @@ export function moveItemInDays(
   return insertItemAt(withoutItem, targetDayId, located.item, targetIndex)
 }
 
+/** The surviving day closest in time to a day that the new range dropped. */
+function nearestDayIndex(days: readonly ItineraryDay[], dateISO: string): number {
+  let nearest = 0
+  let smallest = Number.POSITIVE_INFINITY
+  days.forEach((day, index) => {
+    const distance = Math.abs(differenceInDays(day.date, dateISO))
+    // Strictly smaller, so an exact tie resolves to the earlier day and the
+    // result stays deterministic.
+    if (distance < smallest) {
+      smallest = distance
+      nearest = index
+    }
+  })
+  return nearest
+}
+
 /**
  * Regeneration keeps everything the traveller owns (added, catalog-sourced or
  * hand-edited) and swaps in a fresh set of AI drafts for the rest.
+ *
+ * Shortening a trip is the delicate case. The new day set is shorter than the
+ * old one, so some existing days have no counterpart at all. Mapping over the
+ * generated set alone would take those days out whole, and with them every stop
+ * the traveller had added, saved from the catalogue or hand-edited - silent data
+ * loss, and the opposite of what the edit dialog promises. So preserved items on
+ * a dropped day are carried onto the nearest surviving day instead. Purely-AI
+ * stops on a dropped day are discarded, because those are regenerable.
  */
 export function mergeGeneratedDays(
   existing: readonly ItineraryDay[],
   generated: readonly ItineraryDay[],
 ): ItineraryDay[] {
-  return generated.map((day) => {
+  // No day survives, so there is nowhere to carry anything to. Keeping the
+  // itinerary is the only non-destructive answer; emptying it would throw away
+  // work to satisfy a range that cannot hold a single day.
+  if (generated.length === 0) return [...existing]
+
+  const claimed = new Set<ItineraryDay>()
+  const merged = generated.map((day) => {
     const previous =
       existing.find((candidate) => candidate.id === day.id) ??
       existing.find((candidate) => candidate.date === day.date) ??
       existing.find((candidate) => candidate.index === day.index)
+    if (previous) claimed.add(previous)
     const preserved = previous ? previous.items.filter(isPreservedOnRegenerate) : []
-    return { ...day, items: sortItems([...preserved, ...day.items]) }
+    return { ...day, items: [...preserved, ...day.items] }
+  })
+
+  const rescued = new Map<number, ItineraryItem[]>()
+  for (const dropped of existing) {
+    if (claimed.has(dropped)) continue
+    const carried = dropped.items.filter(isPreservedOnRegenerate)
+    if (carried.length === 0) continue
+    const target = nearestDayIndex(merged, dropped.date)
+    rescued.set(target, [...(rescued.get(target) ?? []), ...carried])
+  }
+
+  return merged.map((day, index) => {
+    const carried = rescued.get(index)
+    return { ...day, items: sortItems(carried ? [...day.items, ...carried] : day.items) }
   })
 }
 

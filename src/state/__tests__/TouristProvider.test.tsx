@@ -11,6 +11,7 @@ import type {
 } from '@/domain/types'
 import { createEmptyDraft } from '@/domain/validation'
 import { STORAGE_VERSION, type PersistedState } from '@/services/contracts'
+import { services } from '@/services'
 import { selectBudget, selectTrip } from '@/state/selectors'
 import type { TouristContextValue } from '@/state/touristContext'
 import { TouristProvider } from '@/state/TouristProvider'
@@ -93,7 +94,7 @@ function makeExpense(tripId: string, id: string, overrides: Partial<Expense> = {
 }
 
 function idleGeneration(): GenerationState {
-  return { status: 'idle', error: null, shouldFail: false, startedAt: null, completedAt: null }
+  return { status: 'idle', error: null, startedAt: null, completedAt: null }
 }
 
 const SEEDED_DAYS: ItineraryDay[] = [
@@ -312,6 +313,54 @@ describe('TouristProvider trips', () => {
     expect(state.generation[createdId].status).toBe('idle')
   })
 
+  /**
+   * `tripService.create` builds a notes bucket for the new trip, and the provider
+   * used to drop it while copying the other four across.
+   */
+  it('registers the notes bucket the trip service built', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let createdId = ''
+    act(() => {
+      createdId = ctx().actions.createTrip(parisDraft()).id
+    })
+
+    expect(ctx().state.notesByTrip?.[createdId]).toEqual([])
+    expect(readStored().notesByTrip?.[createdId]).toEqual([])
+  })
+
+  it('takes a note on a freshly created trip without a missing bucket', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let createdId = ''
+    act(() => {
+      createdId = ctx().actions.createTrip(parisDraft()).id
+    })
+    act(() => {
+      ctx().actions.addNote({ tripId: createdId, title: 'Flight', body: 'PC 1044' })
+    })
+
+    expect(ctx().state.notesByTrip?.[createdId]).toHaveLength(1)
+  })
+
+  it('does not apply an update the domain validator refuses', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+    const before = ctx().state
+
+    act(() => {
+      ctx().actions.updateTrip(TRIP_ID, { endDate: '2026-03-01' })
+    })
+
+    expect(ctx().state.trips[0].endDate).toBe(before.trips[0].endDate)
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(before.daysByTrip[TRIP_ID])
+  })
+
   it('names an unnamed trip from its destination and start month', () => {
     vi.useFakeTimers({ now: FIXED_NOW })
     seedState(emptyState())
@@ -516,7 +565,9 @@ describe('TouristProvider generation', () => {
     act(() => {
       ctx().actions.setSimulateFailure(tripId, true)
     })
-    expect(generationFor(tripId).shouldFail).toBe(true)
+    // The switch is deliberately not part of the state any more, so its effect is
+    // what gets asserted: the next run fails.
+    expect(generationFor(tripId).shouldFail).toBeUndefined()
 
     act(() => {
       pending = ctx().actions.generateItinerary(tripId)
@@ -559,7 +610,6 @@ describe('TouristProvider generation', () => {
     })
     const retrying = generationFor(TRIP_ID)
     expect(retrying.status).toBe('loading')
-    expect(retrying.shouldFail).toBe(false)
     expect(retrying.error).toBeNull()
 
     await act(async () => {
@@ -724,12 +774,28 @@ describe('TouristProvider itinerary items', () => {
     })
     const after = ctx().state.daysByTrip[TRIP_ID]
     expect(after[0].items.map((item) => item.id)).toEqual(['itm_a'])
-    expect(after[1].items.map((item) => item.id)).toEqual(['itm_b', 'itm_c'])
-    expect(after[1].items[0]).toBe(before[0].items[1])
+    expect(after[1].items.map((item) => item.id)).toEqual(['itm_c', 'itm_b'])
+    expect(after[1].items[1]).toBe(before[0].items[1])
     expect(after[0].items[0]).toBe(before[0].items[0])
   })
 
-  it('inserts a custom item at the chosen day and position', () => {
+  /**
+   * The requested index no longer wins over the clock: `itm_b` starts at 10:00
+   * and `itm_c` at 09:00, so dropping it at slot 0 still leaves it second. A day
+   * is rendered chronologically, so honouring the index literally would have put
+   * a 10:00 stop above a 09:00 one.
+   */
+  it('keeps the receiving day chronological when the requested slot would not', () => {
+    seedState(seededState())
+    renderProvider()
+    act(() => {
+      ctx().actions.moveItem(TRIP_ID, 'itm_b', `${TRIP_ID}_d2`, 0)
+    })
+    const times = ctx().state.daysByTrip[TRIP_ID][1].items.map((item) => item.startTime)
+    expect(times).toEqual(['09:00', '10:00'])
+  })
+
+  it('inserts a custom item on the chosen day, in its chronological slot', () => {
     seedState(seededState())
     renderProvider()
     const before = ctx().state.daysByTrip[TRIP_ID]
@@ -755,7 +821,9 @@ describe('TouristProvider itinerary items', () => {
     })
 
     const after = ctx().state.daysByTrip[TRIP_ID]
-    const created = after[0].items[1]
+    // Requested slot 1, but its derived start time is 11:30 and the day already
+    // holds 08:00 and 10:00, so chronological order puts it last.
+    const created = after[0].items[2]
     expect(createdId).not.toBe('')
     expect(created.id).toBe(createdId)
     expect(after[0].items).toHaveLength(3)
@@ -771,8 +839,40 @@ describe('TouristProvider itinerary items', () => {
     expect(created.startTime).toBe('11:30')
     expect(created.endTime).toBeNull()
     expect(after[0].items[0]).toBe(day.items[0])
-    expect(after[0].items[2]).toBe(day.items[1])
+    expect(after[0].items[1]).toBe(day.items[1])
+    expect(after[0].items.map((item) => item.startTime)).toEqual(['08:00', '10:00', '11:30'])
     expect(after[1]).toBe(before[1])
+  })
+
+  it('honours the requested slot among stops that share a start time', () => {
+    seedState(seededState())
+    renderProvider()
+    const day = ctx().state.daysByTrip[TRIP_ID][0]
+
+    act(() => {
+      ctx().actions.addCustomItem(
+        TRIP_ID,
+        {
+          title: 'Same slot',
+          category: 'food',
+          startTime: '08:00',
+          endTime: null,
+          location: '',
+          description: '',
+          estimatedCost: 0,
+          notes: '',
+        },
+        { dayId: day.id, position: 0 },
+      )
+    })
+
+    // 'Same slot' is a user item at 08:00, so the tie-break puts it above the
+    // untouched 08:00 AI draft it was dropped in front of.
+    expect(allTitles([ctx().state.daysByTrip[TRIP_ID][0]])).toEqual([
+      'Same slot',
+      'Item itm_a',
+      'Item itm_b',
+    ])
   })
 
   it('appends a custom item when no position is given', () => {
@@ -843,7 +943,9 @@ describe('TouristProvider itinerary items', () => {
     })
 
     const after = ctx().state.daysByTrip[TRIP_ID]
-    const inserted = after[0].items[0]
+    // Requested slot 0, but a 16:00 stop belongs after the day's 08:00 and 10:00
+    // ones, so it lands last rather than at the top of the day.
+    const inserted = after[0].items[2]
     expect(box.created).not.toBeNull()
     expect(inserted.id).toBe(box.created?.id)
     expect(after[0].items).toHaveLength(3)
@@ -856,8 +958,9 @@ describe('TouristProvider itinerary items', () => {
     expect(inserted.startTime).toBe('16:00')
     expect(inserted.endTime).toBe('18:30')
     expect(inserted.editedByUser).toBe(false)
-    expect(after[0].items[1]).toBe(day.items[0])
-    expect(after[0].items[2]).toBe(day.items[1])
+    expect(after[0].items.map((item) => item.startTime)).toEqual(['08:00', '10:00', '16:00'])
+    expect(after[0].items[0]).toBe(day.items[0])
+    expect(after[0].items[1]).toBe(day.items[1])
     expect(after[1]).toBe(before[1])
     expect(ctx().state.trips[0].status).toBe('itinerary_ready')
     expect(selectBudget(ctx().state, selectTrip(ctx().state, TRIP_ID))?.itineraryEstimate).toBe(104)
@@ -1164,6 +1267,339 @@ describe('TouristProvider persistence', () => {
     expect(stored.expensesByTrip).toEqual({})
     expect(stored.generation).toEqual({})
     expect(stored.hasDemoData).toBe(false)
+  })
+
+  /**
+   * The analytics log is in memory only, but it holds destinations and the
+   * traveller's raw search text. "Clear all data" left it untouched, which made
+   * the promise false.
+   */
+  it('clears the in-memory analytics log as well', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food' })
+    })
+    expect(services.analytics.events().length).toBeGreaterThan(0)
+
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(services.analytics.events()).toEqual([])
+  })
+
+  it('leaves no trace of the searched text behind', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food' })
+    })
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(JSON.stringify(services.analytics.events())).not.toContain('Le Marais')
+  })
+
+  it('clears the demo flag when the demo trip is deleted', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+    const demoId = ctx().state.trips[0].id
+    expect(ctx().state.hasDemoData).toBe(true)
+
+    act(() => {
+      ctx().actions.deleteTrip(demoId)
+    })
+
+    expect(ctx().state.hasDemoData).toBe(false)
+    expect(readStored().hasDemoData).toBe(false)
+  })
+
+  it('lets the demo be loaded again after it was deleted', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+    const demoId = ctx().state.trips[0].id
+    act(() => {
+      ctx().actions.deleteTrip(demoId)
+    })
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+
+    expect(ctx().state.trips).toHaveLength(1)
+    expect(ctx().state.hasDemoData).toBe(true)
+  })
+})
+
+/**
+ * Generation is asynchronous, so the trip can be deleted or its dates changed
+ * while a run is in flight. Both paths used to write `daysByTrip[tripId]` and
+ * `generation[tripId]` back regardless, leaving either a permanent orphan or days
+ * built for a date range the trip no longer had.
+ */
+describe('TouristProvider generation races', () => {
+  it('writes nothing back when the trip is deleted mid-generation', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let tripId = ''
+    act(() => {
+      tripId = ctx().actions.createTrip(parisDraft()).id
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(tripId, { regenerate: true })
+    })
+    act(() => {
+      ctx().actions.deleteTrip(tripId)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    const state = ctx().state
+    expect(state.trips).toEqual([])
+    expect(state.daysByTrip[tripId]).toBeUndefined()
+    expect(state.generation[tripId]).toBeUndefined()
+    expect(readStored().daysByTrip[tripId]).toBeUndefined()
+    expect(readStored().generation[tripId]).toBeUndefined()
+  })
+
+  it('writes no error record either when the trip is deleted mid-generation', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let tripId = ''
+    act(() => {
+      tripId = ctx().actions.createTrip(parisDraft()).id
+    })
+    act(() => {
+      ctx().actions.setSimulateFailure(tripId, true)
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(tripId, { regenerate: true })
+    })
+    act(() => {
+      ctx().actions.deleteTrip(tripId)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(ctx().state.generation[tripId]).toBeUndefined()
+    expect(ctx().state.daysByTrip[tripId]).toBeUndefined()
+  })
+
+  it('discards days built for a date range the trip no longer has', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let tripId = ''
+    act(() => {
+      tripId = ctx().actions.createTrip(parisDraft({ endDate: '2026-05-06' })).id
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(tripId, { regenerate: true })
+    })
+    // The dates move while the six-day plan is still being drafted.
+    act(() => {
+      ctx().actions.updateTrip(tripId, { endDate: '2026-05-02' })
+    })
+    const reflowed = ctx().state.daysByTrip[tripId]
+    expect(reflowed).toHaveLength(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    // The stale six-day result must not overwrite the reflowed two-day plan.
+    expect(ctx().state.daysByTrip[tripId]).toHaveLength(2)
+    expect(ctx().state.daysByTrip[tripId]).toBe(reflowed)
+  })
+
+  it('clears the loading state rather than leaving a spinner behind', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    let tripId = ''
+    act(() => {
+      tripId = ctx().actions.createTrip(parisDraft({ endDate: '2026-05-06' })).id
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(tripId, { regenerate: true })
+    })
+    expect(generationFor(tripId).status).toBe('loading')
+    act(() => {
+      ctx().actions.updateTrip(tripId, { endDate: '2026-05-02' })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(generationFor(tripId).status).toBe('idle')
+    expect(generationFor(tripId).error).toBeNull()
+  })
+
+  it('writes nothing back when the trip is deleted mid-swap', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.replaceItem(TRIP_ID, 'itm_a')
+    })
+    act(() => {
+      ctx().actions.deleteTrip(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+      await pending
+    })
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBeUndefined()
+    expect(readStored().daysByTrip[TRIP_ID]).toBeUndefined()
+  })
+
+  it('discards a swap suggestion built against a range the trip no longer has', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.replaceItem(TRIP_ID, 'itm_a')
+    })
+    act(() => {
+      ctx().actions.updateTrip(TRIP_ID, { endDate: '2026-04-05' })
+    })
+    const reflowed = ctx().state.daysByTrip[TRIP_ID]
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+      await pending
+    })
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(reflowed)
+  })
+})
+
+/**
+ * The simulated-failure switch is a demo affordance. It used to live in the
+ * persisted generation record, so a `true` survived a reload and wedged that trip
+ * into permanent failure with no UI left to turn it off.
+ */
+describe('TouristProvider simulated failure is not persisted', () => {
+  it('still makes the next run fail', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.setSimulateFailure(TRIP_ID, true)
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(generationFor(TRIP_ID).status).toBe('error')
+  })
+
+  it('can be turned back off again', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.setSimulateFailure(TRIP_ID, true)
+    })
+    act(() => {
+      ctx().actions.setSimulateFailure(TRIP_ID, false)
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(generationFor(TRIP_ID).status).toBe('success')
+  })
+
+  it('never reaches the stored payload', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.setSimulateFailure(TRIP_ID, true)
+    })
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(window.localStorage.getItem(STATE_KEY) ?? '').not.toContain('shouldFail')
+  })
+
+  /**
+   * The wedge itself: a snapshot written by an older build carries
+   * `shouldFail: true`, and the trip must still generate normally.
+   */
+  it('ignores a true left behind in an older snapshot', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    const stale = seededState()
+    seedState({
+      ...stale,
+      generation: { [TRIP_ID]: { ...idleGeneration(), shouldFail: true } },
+    })
+    renderProvider()
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.generateItinerary(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+
+    expect(generationFor(TRIP_ID).status).toBe('success')
   })
 })
 

@@ -1,8 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
-import { addDays, formatDateRange, formatLongDate } from '@/domain/format'
+import { describe, expect, it, vi } from 'vitest'
+import { addDays, formatLongDate } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import ItineraryPage from '@/pages/ItineraryPage'
 import {
@@ -12,12 +12,14 @@ import {
   fixtureState,
   makeFixtureDays,
   makeFixtureTrip,
-  makeGeneration,
   readStoredState,
 } from '@/pages/__tests__/tripFixture'
+import { GENERATION_ERROR_MESSAGE, services } from '@/services'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type { PersistedState } from '@/services/contracts'
 import type { ItineraryDay } from '@/domain/types'
+
+type User = ReturnType<typeof userEvent.setup>
 
 const DAY_ONE = FIXTURE_DAY_ONE_DATE
 const DAY_TWO = addDays(FIXTURE_DAY_ONE_DATE, 1)
@@ -51,6 +53,16 @@ function stopCard(title: string): HTMLElement {
   return article
 }
 
+/**
+ * Edit, Replace, Move and Remove are one tap away inside each stop's own menu
+ * rather than four buttons on every card, so a test reaches them the way a
+ * traveller does.
+ */
+async function chooseStopAction(user: User, title: string, action: string): Promise<void> {
+  await user.click(within(stopCard(title)).getByRole('button', { name: `Actions for ${title}` }))
+  await user.click(within(stopCard(title)).getByRole('menuitem', { name: action }))
+}
+
 function storedDays(): ItineraryDay[] {
   return readStoredState().daysByTrip[FIXTURE_TRIP_ID] ?? []
 }
@@ -69,21 +81,38 @@ async function openDialog(name: string): Promise<HTMLElement> {
 
 describe('ItineraryPage', () => {
   describe('the plan it shows', () => {
-    it('summarises stops, days and the draft estimate', async () => {
+    it('summarises days, stops and the draft estimate on one line', async () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
       expect(screen.getByText(/2 days in Paris, France/)).toBeInTheDocument()
       expect(screen.getByText(/5 planned stops/)).toBeInTheDocument()
+      // One AI-marked figure, stating the currency once for the whole screen.
+      expect(screen.getByText(PROTOTYPE_LABEL.aiDraftEstimate)).toBeInTheDocument()
+      expect(screen.getByText('€129 EUR')).toBeInTheDocument()
 
-      const summary = within(screen.getByRole('region', { name: 'Plan summary' }))
-      expect(summary.getByText('Planned stops')).toBeInTheDocument()
-      expect(summary.getByText('5')).toBeInTheDocument()
-      expect(summary.getByText('Across 2 days')).toBeInTheDocument()
-      expect(summary.getByText('Days')).toBeInTheDocument()
-      expect(summary.getByText(formatDateRange(TRIP.startDate, TRIP.endDate))).toBeInTheDocument()
-      expect(summary.getByText(PROTOTYPE_LABEL.aiDraftEstimate)).toBeInTheDocument()
-      expect(summary.getByText('€129 EUR')).toBeInTheDocument()
+      // The three stat tiles that used to sit between the header and Day 1 are gone.
+      expect(screen.queryByRole('region', { name: 'Plan summary' })).not.toBeInTheDocument()
+      expect(screen.queryByText('Planned stops')).not.toBeInTheDocument()
+      expect(screen.queryByText('A projection from this draft, not a booking')).not.toBeInTheDocument()
+    })
+
+    it('puts the first day above every explanation', async () => {
+      renderItinerary()
+
+      expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
+      const headings = screen
+        .getAllByRole('heading')
+        .map((heading) => heading.textContent ?? '')
+        .filter((text) => text !== '')
+
+      // h1, the screen-reader-only region name, then straight into Day 1.
+      expect(headings[0]).toBe(TRIP.name)
+      expect(headings[1]).toBe('Day by day')
+      expect(headings[2]).toContain(formatLongDate(DAY_ONE))
+      expect(headings[3]).toBe(FIXTURE_ITEM_TITLES[0])
+      // Nothing between the header and the timeline needs opening to read the plan.
+      expect(within(daySection(0)).getAllByRole('article')).toHaveLength(4)
     })
 
     it('groups stops under numbered day headings with a per-day total', async () => {
@@ -93,8 +122,8 @@ describe('ItineraryPage', () => {
       expect(screen.getByRole('heading', { name: 'Day by day' })).toBeInTheDocument()
       expect(screen.getByText('Day 1')).toBeInTheDocument()
       expect(screen.getByText('Day 2')).toBeInTheDocument()
-      expect(screen.getByText('4 stops · €84.00 EUR estimated')).toBeInTheDocument()
-      expect(screen.getByText('1 stop · €45.00 EUR estimated')).toBeInTheDocument()
+      expect(screen.getByText('4 stops · €84 estimated')).toBeInTheDocument()
+      expect(screen.getByText('1 stop · €45 estimated')).toBeInTheDocument()
 
       const firstDay = within(daySection(0))
       expect(firstDay.getByText('Day 1')).toBeInTheDocument()
@@ -112,7 +141,7 @@ describe('ItineraryPage', () => {
       expect(draftStop.getByText(PROTOTYPE_LABEL.aiDraft)).toBeInTheDocument()
       expect(draftStop.queryByText('Edited')).not.toBeInTheDocument()
       expect(draftStop.getByText('Champ de Mars, Paris')).toBeInTheDocument()
-      expect(draftStop.getByText('€30.00 EUR')).toBeInTheDocument()
+      expect(draftStop.getByText('≈ €30')).toBeInTheDocument()
       expect(draftStop.getByText('9:00 AM')).toBeInTheDocument()
 
       const curatedStop = within(stopCard(FIXTURE_ITEM_TITLES[1]))
@@ -121,34 +150,49 @@ describe('ItineraryPage', () => {
       expect(curatedStop.queryByText(PROTOTYPE_LABEL.aiDraft)).not.toBeInTheDocument()
     })
 
-    it('explains that regeneration keeps the traveller’s own work', async () => {
+    it('gives each stop one menu instead of four buttons', async () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      expect(screen.getByText('Regenerating never takes your own work away')).toBeInTheDocument()
+      // Five stops, five triggers, each named after its own stop.
+      for (const title of FIXTURE_ITEM_TITLES) {
+        expect(screen.getByRole('button', { name: `Actions for ${title}` })).toBeInTheDocument()
+      }
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Replace' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    })
+
+    it('keeps the regeneration promise and the draft provenance one tap away', async () => {
+      renderItinerary()
+
+      expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
+      // The claim is visible; the reasoning is inside a disclosure, not an essay.
+      expect(screen.getByText(`${PROTOTYPE_LABEL.aiDraft}.`)).toBeInTheDocument()
+      expect(screen.getByText(/Made on this device, not booked/)).toBeInTheDocument()
+      expect(screen.getByText(/deterministic generator/)).toBeInTheDocument()
+      expect(
+        screen.getByText('Regenerating never takes your own work away.'),
+      ).toBeInTheDocument()
       expect(
         screen.getByText(/it always keeps the activities you added yourself/i),
       ).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Regenerate itinerary' })).toBeInTheDocument()
+
+      expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Add activity' })).toBeInTheDocument()
       // A drafted plan is redrafted or edited, never generated again from scratch.
       expect(screen.queryByRole('button', { name: 'Generate itinerary' })).not.toBeInTheDocument()
     })
 
-    it('marks the generator as a local prototype rather than a live service', async () => {
+    it('ships no prototype debug control and no standing status card', async () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      expect(
-        screen.getByText('These drafts come from a local prototype generator'),
-      ).toBeInTheDocument()
-      expect(
-        screen.getByText(
-          'This plan is saved on this device. Nothing is being generated right now.',
-        ),
-      ).toBeInTheDocument()
-      expect(screen.getByLabelText(/Simulate a failure on the next generation/)).toBeDefined()
-      expect(screen.getByRole('radio', { name: 'No failure' })).toBeChecked()
+      expect(screen.queryByLabelText(/Simulate a failure/)).not.toBeInTheDocument()
+      expect(screen.queryAllByRole('radio')).toHaveLength(0)
+      expect(screen.queryByText(/Nothing is being generated right now/)).not.toBeInTheDocument()
+      expect(screen.queryByText('Your draft is ready')).not.toBeInTheDocument()
     })
   })
 
@@ -212,7 +256,7 @@ describe('ItineraryPage', () => {
       expect(storedItem(added?.id ?? '')?.id).toBe(added?.id)
       expect(within(daySection(1)).getByText('Canal-side picnic')).toBeInTheDocument()
       expect(within(daySection(1)).getByText('Added by you')).toBeInTheDocument()
-      expect(screen.getByText('2 stops · €71.00 EUR estimated')).toBeInTheDocument()
+      expect(screen.getByText('2 stops · €71 estimated')).toBeInTheDocument()
     })
 
     it('refuses to save an activity with no name and explains why', async () => {
@@ -255,7 +299,7 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(within(stopCard(FIXTURE_ITEM_TITLES[0])).getByRole('button', { name: 'Edit' }))
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Edit')
 
       const dialog = screen.getByRole('dialog')
       expect(within(dialog).getByRole('heading', { level: 2, name: 'Edit activity' })).toBeInTheDocument()
@@ -294,7 +338,7 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(within(stopCard(FIXTURE_ITEM_TITLES[0])).getByRole('button', { name: 'Edit' }))
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Edit')
 
       const dialog = screen.getByRole('dialog')
       await user.type(within(dialog).getByLabelText(/^End time/), '08:00')
@@ -312,13 +356,7 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      const card = within(stopCard(FIXTURE_ITEM_TITLES[0]))
-      const move = card.getByRole('button', { name: 'Move' })
-      expect(move).toHaveAttribute('aria-expanded', 'false')
-      await user.click(move)
-      expect(
-        within(stopCard(FIXTURE_ITEM_TITLES[0])).getByRole('button', { name: 'Move' }),
-      ).toHaveAttribute('aria-expanded', 'true')
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Move to another day')
 
       await user.selectOptions(
         screen.getByLabelText(`Move ${FIXTURE_ITEM_TITLES[0]} to another day`),
@@ -330,7 +368,7 @@ describe('ItineraryPage', () => {
       expect(days[1].items.map((item) => item.title)).toContain(FIXTURE_ITEM_TITLES[0])
       expect(days[0].items).toHaveLength(3)
       expect(days[1].items).toHaveLength(2)
-      expect(screen.getByText('3 stops · €54.00 EUR estimated')).toBeInTheDocument()
+      expect(screen.getByText('3 stops · €54 estimated')).toBeInTheDocument()
     })
 
     it('keeps the stop when the traveller backs out of the removal', async () => {
@@ -338,16 +376,14 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(
-        within(stopCard(FIXTURE_ITEM_TITLES[0])).getByRole('button', { name: 'Remove' }),
-      )
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Remove')
 
       const dialog = screen.getByRole('dialog')
       expect(
         within(dialog).getByRole('heading', { level: 2, name: `Remove ${FIXTURE_ITEM_TITLES[0]}?` }),
       ).toBeInTheDocument()
       expect(
-        within(dialog).getByText('09:00 · Champ de Mars, Paris · €30.00 EUR estimated.'),
+        within(dialog).getByText('09:00 · Champ de Mars, Paris · €30 estimated.'),
       ).toBeInTheDocument()
       await user.click(within(dialog).getByRole('button', { name: 'Keep it' }))
 
@@ -362,9 +398,7 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(
-        within(stopCard(FIXTURE_ITEM_TITLES[0])).getByRole('button', { name: 'Remove' }),
-      )
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[0], 'Remove')
       await user.click(
         within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove activity' }),
       )
@@ -374,7 +408,7 @@ describe('ItineraryPage', () => {
       })
       expect(storedDays()[0].items).toHaveLength(3)
       expect(screen.queryByText(FIXTURE_ITEM_TITLES[0])).not.toBeInTheDocument()
-      expect(screen.getByText('3 stops · €54.00 EUR estimated')).toBeInTheDocument()
+      expect(screen.getByText('3 stops · €54 estimated')).toBeInTheDocument()
     })
   })
 
@@ -384,29 +418,18 @@ describe('ItineraryPage', () => {
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(
-        within(stopCard(FIXTURE_ITEM_TITLES[1])).getByRole('button', { name: 'Replace' }),
-      )
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[1], 'Replace')
 
       await waitFor(() => {
-        expect(
-          within(stopCard(FIXTURE_ITEM_TITLES[1])).getByRole('button', { name: 'Swapping' }),
-        ).toBeInTheDocument()
+        expect(within(stopCard(FIXTURE_ITEM_TITLES[1])).getByRole('status')).toHaveTextContent(
+          'Swapping',
+        )
       })
-      const others = screen
-        .getAllByRole('button', { name: 'Replace' })
-        .filter((button) => button.closest('article') !== stopCard(FIXTURE_ITEM_TITLES[1]))
-      expect(others.length).toBe(4)
-      for (const button of others) {
-        expect(button).toBeDisabled()
-      }
+      expect(stopCard(FIXTURE_ITEM_TITLES[1])).toHaveAttribute('aria-busy', 'true')
 
-      await waitFor(
-        () => {
-          expect(screen.queryByRole('button', { name: 'Swapping' })).not.toBeInTheDocument()
-          expect(screen.queryByText(FIXTURE_ITEM_TITLES[1])).not.toBeInTheDocument()
-        },
-      )
+      await waitFor(() => {
+        expect(screen.queryByText(FIXTURE_ITEM_TITLES[1])).not.toBeInTheDocument()
+      })
 
       const firstDay = storedDays()[0]
       expect(firstDay.items).toHaveLength(4)
@@ -418,26 +441,30 @@ describe('ItineraryPage', () => {
         endTime: null,
       })
       expect(replacement?.title).not.toBe(FIXTURE_ITEM_TITLES[1])
-      expect(firstDay.items.map((item) => item.title)).toContain(
-        FIXTURE_ITEM_TITLES[0],
-      )
+      expect(firstDay.items.map((item) => item.title)).toContain(FIXTURE_ITEM_TITLES[0])
       expect(storedDays()[1].items.map((item) => item.title)).toEqual([FIXTURE_ITEM_TITLES[4]])
-  })
+    })
   })
 
-  describe('generating a draft', () => {
-    it('offers generation only when the plan has no stops', async () => {
+  describe('generating a first draft', () => {
+    it('makes generation the single obvious action and skips the wall of caveats', async () => {
       renderItinerary(fixtureState({ days: EMPTY_DAYS }))
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Generate itinerary' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Regenerate itinerary' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Add activity' })).toBeEnabled()
+      expect(screen.getByText('Your 2 days in Paris, France are wide open')).toBeInTheDocument()
       expect(
-        screen.getAllByText('Nothing planned yet. This day is wide open.'),
-      ).toHaveLength(2)
-      expect(screen.getAllByRole('button', { name: 'Add an activity' })).toHaveLength(2)
-      expect(screen.getByText('No draft has been generated for this trip yet.')).toBeInTheDocument()
+        screen.getByText(
+          'Draft a plan to start from, then change anything you like. Whatever you add yourself is always kept.',
+        ),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Generate itinerary' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Add activity' })).toBeEnabled()
+
+      // No empty-day filler and nothing to regenerate yet.
+      expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByText('Nothing planned yet. This day is wide open.'),
+      ).not.toBeInTheDocument()
       expect(screen.queryAllByRole('article')).toHaveLength(0)
     })
 
@@ -448,80 +475,87 @@ describe('ItineraryPage', () => {
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: 'Generate itinerary' }))
 
-      expect(
-        await screen.findByRole('button', { name: 'Drafting' }),
-      ).toBeInTheDocument()
-      expect(screen.getByText('Drafting your itinerary…')).toBeInTheDocument()
+      expect(await screen.findByText('Drafting your itinerary…')).toBeInTheDocument()
       expect(
         screen.getByText(
-          'The days and stops already on screen stay exactly where they are while the new draft is prepared.',
+          'Drafting your itinerary. Nothing already on your plan will be moved or removed.',
         ),
       ).toBeInTheDocument()
 
-      const success = await screen.findByText('Your draft is ready', undefined)
-      expect(success).toBeInTheDocument()
+      expect(await screen.findByText('Your draft is ready')).toBeInTheDocument()
       expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
       const days = storedDays()
       expect(days).toHaveLength(2)
       expect(days.map((day) => day.index)).toEqual([1, 2])
       expect(days.flatMap((day) => day.items).length).toBeGreaterThan(0)
-      expect(screen.getAllByRole('article').length).toBe(
-        days.flatMap((day) => day.items).length,
-      )
-      expect(
-        within(screen.getByRole('region', { name: 'Plan summary' })).getByText(
-          `Across ${days.length} days`,
-        ),
-      ).toBeInTheDocument()
-  })
+      expect(screen.getAllByRole('article').length).toBe(days.flatMap((day) => day.items).length)
+      expect(screen.getByText(/2 days in Paris, France/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
+    })
+
     it('keeps the traveller’s own stops and the current plan on screen while redrafting', async () => {
       const user = userEvent.setup()
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: 'Regenerate itinerary' }))
+      await user.click(screen.getByRole('button', { name: 'Regenerate' }))
 
-      expect(
-        await screen.findByRole('button', { name: 'Regenerating' }),
-      ).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: 'Regenerating' })).toBeInTheDocument()
       expect(screen.getByText(FIXTURE_ITEM_TITLES[0])).toBeInTheDocument()
       expect(storedDays()[0].items).toHaveLength(4)
 
-      await waitFor(
-        () => {
-          expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
-        },
-      )
+      await waitFor(() => {
+        expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
+      })
       const days = storedDays()
       const kept = days.flatMap((day) => day.items).filter((item) => item.source === 'user')
       expect(kept).toHaveLength(0)
       expect(days.flatMap((day) => day.items).length).toBeGreaterThanOrEqual(5)
-  })
+    })
+
+    it('leaves the day list in place once a single stop exists', async () => {
+      const [firstDay, secondDay] = makeFixtureDays()
+      renderItinerary(
+        fixtureState({
+          days: [{ ...firstDay, items: firstDay.items.slice(0, 1) }, { ...secondDay, items: [] }],
+        }),
+      )
+
+      expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2)
+      expect(screen.getByText('Nothing planned yet. This day is wide open.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Add an activity' })).toBeInTheDocument()
+      expect(screen.getByText('1 stop · €30 estimated')).toBeInTheDocument()
+    })
   })
 
   describe('when generation fails', () => {
     it('reports the failure, leaves the plan untouched and recovers on retry', async () => {
       const user = userEvent.setup()
-      renderItinerary(
-        fixtureState({ days: EMPTY_DAYS, generation: makeGeneration({ shouldFail: true }) }),
+      // The prototype's simulate-failure switch is no longer shipped in the UI,
+      // so the failure path is driven through the service it used to toggle.
+      vi.spyOn(services.itinerary, 'generate').mockRejectedValueOnce(
+        new Error(GENERATION_ERROR_MESSAGE),
       )
+      renderItinerary(fixtureState({ days: EMPTY_DAYS }))
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
-      expect(screen.getByRole('radio', { name: 'Fail next run' })).toBeChecked()
       await user.click(screen.getByRole('button', { name: 'Generate itinerary' }))
 
-      const error = await screen.findByText('The itinerary draft could not be generated')
-      expect(error).toBeInTheDocument()
+      expect(
+        await screen.findByText('The itinerary draft could not be generated'),
+      ).toBeInTheDocument()
       expect(
         screen.getByText(
           'The itinerary draft could not be generated. The plan you already had is untouched.',
         ),
       ).toBeInTheDocument()
       expect(
-        screen.getByText(/We could not draft an itinerary just now\. Nothing was changed/),
+        screen.getByText(/We could not draft an itinerary just now/),
       ).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
-      expect(screen.getAllByText('Nothing planned yet. This day is wide open.')).toHaveLength(2)
+      // The invitation is still the one obvious way forward.
+      expect(screen.getByText('Your 2 days in Paris, France are wide open')).toBeInTheDocument()
       await waitFor(() => {
         expect(storedDays().every((day) => day.items.length === 0)).toBe(true)
         expect(readStoredState().generation[FIXTURE_TRIP_ID]?.status).toBe('error')
@@ -536,11 +570,9 @@ describe('ItineraryPage', () => {
         expect(storedDays().flatMap((day) => day.items).length).toBeGreaterThan(0)
         expect(readStoredState().generation[FIXTURE_TRIP_ID]).toMatchObject({
           status: 'success',
-          shouldFail: false,
           error: null,
         })
       })
-      expect(screen.getByRole('radio', { name: 'No failure' })).toBeChecked()
     })
   })
 })

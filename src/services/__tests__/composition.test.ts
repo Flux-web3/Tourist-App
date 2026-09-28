@@ -85,66 +85,121 @@ describe('the composition root shape', () => {
     ])
   })
 
-  it('satisfies the trip service contract', () => {
-    const services = createServices()
-    const trips: TripService = services.trips
+  /**
+   * These used to be seven `expect(typeof service.method).toBe('function')`
+   * blocks, which asserted nothing: the `const x: SomeService = services.x`
+   * annotation on the line above already proves the shape at compile time, and a
+   * slot wired to a broken implementation would have passed every one of them.
+   * Each slot now takes one real call through the contract-typed handle and the
+   * observable effect is checked instead.
+   */
+  it('reaches a working trip service through the contract', () => {
+    const trips: TripService = createServices().trips
+    const base = createEmptyState(createGuestUser())
 
-    expect(typeof trips.create).toBe('function')
-    expect(typeof trips.update).toBe('function')
-    expect(typeof trips.remove).toBe('function')
+    const created = trips.create(base, draft(), 'usr_fixture')
+    expect(created.trip).not.toBeNull()
+    const tripId = created.trip?.id ?? ''
+
+    const updated = trips.update(created.state, tripId, { travelers: 5 })
+    expect(updated.trip?.travelers).toBe(5)
+
+    expect(trips.remove(updated.state, tripId).trips).toEqual([])
   })
 
-  it('satisfies the itinerary service contract', () => {
-    const services = createServices()
-    const itinerary: ItineraryService = services.itinerary
+  it('reaches a working itinerary service through the contract', async () => {
+    const itinerary: ItineraryService = createServices().itinerary
+    const trip = firstTrip(createServices())
 
-    expect(typeof itinerary.generate).toBe('function')
-    expect(typeof itinerary.suggestAlternative).toBe('function')
+    const pending = itinerary.generate(trip)
+    await vi.advanceTimersByTimeAsync(GENERATION_WAIT_MS)
+    const days = await pending
+    expect(days.map((day) => day.date)).toEqual(eachDay(START, END))
+
+    const day = days[0]
+    const item = day?.items[0]
+    if (!day || !item) throw new Error('the generated plan has no first item')
+    const alternativePending = itinerary.suggestAlternative({ trip, day, item })
+    await vi.advanceTimersByTimeAsync(GENERATION_WAIT_MS)
+    const alternative = await alternativePending
+    expect(alternative.title).not.toBe(item.title)
   })
 
-  it('satisfies the place service contract', () => {
-    const services = createServices()
-    const places: PlaceService = services.places
+  it('reaches a working place service through the contract', async () => {
+    const places: PlaceService = createServices().places
 
-    expect(typeof places.search).toBe('function')
-    expect(typeof places.getById).toBe('function')
+    const found = await places.search({ text: '', category: 'all' })
+    expect(found.length).toBeGreaterThan(0)
+
+    const first = found[0]
+    if (!first) throw new Error('the catalogue is empty')
+    expect((await places.getById(first.id))?.id).toBe(first.id)
+    expect(await places.getById('exp_does_not_exist')).toBeNull()
   })
 
-  it('satisfies the expense service contract', () => {
+  it('reaches a working expense service through the contract', () => {
     const services = createServices()
     const expenses: ExpenseService = services.expenses
+    const trip = firstTrip(services)
+    const base = createEmptyState(createGuestUser())
 
-    expect(typeof expenses.add).toBe('function')
-    expect(typeof expenses.update).toBe('function')
-    expect(typeof expenses.remove).toBe('function')
+    const added = expenses.add(base, {
+      tripId: trip.id,
+      description: 'Metro pass',
+      amount: 25.5,
+      currency: 'EUR',
+      category: 'transport',
+      date: START,
+      notes: '',
+    })
+    expect(added.state.expensesByTrip[trip.id]).toHaveLength(1)
+
+    const patched = expenses.update(added.state, added.expense.id, { amount: 30 })
+    expect(patched.expensesByTrip[trip.id]?.[0]?.amount).toBe(30)
+
+    expect(expenses.remove(patched, trip.id, added.expense.id).expensesByTrip[trip.id]).toEqual([])
   })
 
-  it('satisfies the note service contract', () => {
+  it('reaches a working note service through the contract', () => {
     const services = createServices()
     const notes: NoteService = services.notes
+    const trip = firstTrip(services)
+    const base = createEmptyState(createGuestUser())
 
-    expect(typeof notes.add).toBe('function')
-    expect(typeof notes.update).toBe('function')
-    expect(typeof notes.remove).toBe('function')
-    expect(typeof notes.setPinned).toBe('function')
+    const added = notes.add(base, { tripId: trip.id, title: 'Flight', body: 'PC 1044' })
+    const noteId = added.note?.id ?? ''
+    expect(noteId).not.toBe('')
+
+    expect(notes.update(added.state, trip.id, noteId, { body: 'PC 1045' }).note?.body).toBe('PC 1045')
+    expect(
+      notes.setPinned(added.state, trip.id, noteId, true).notesByTrip?.[trip.id]?.[0]?.pinned,
+    ).toBe(true)
+    expect(notes.remove(added.state, trip.id, noteId).notesByTrip?.[trip.id]).toEqual([])
   })
 
-  it('satisfies the persistence service contract', () => {
-    const services = createServices()
-    const persistence: PersistenceService = services.persistence
+  it('reaches a working persistence service through the contract', () => {
+    const persistence: PersistenceService = createServices().persistence
+    const state = createEmptyState(createGuestUser())
 
-    expect(typeof persistence.load).toBe('function')
-    expect(typeof persistence.save).toBe('function')
-    expect(typeof persistence.clear).toBe('function')
+    persistence.clear()
+    expect(persistence.load()).toBeNull()
+
+    persistence.save(state)
+    expect(persistence.load()?.user.id).toBe(state.user.id)
+
+    persistence.clear()
+    expect(persistence.load()).toBeNull()
   })
 
-  it('satisfies the analytics service contract', () => {
-    const services = createServices()
-    const analytics: AnalyticsService = services.analytics
+  it('reaches a working analytics service through the contract', () => {
+    const analytics: AnalyticsService = createServices().analytics
 
-    expect(typeof analytics.track).toBe('function')
-    expect(typeof analytics.events).toBe('function')
-    expect(typeof analytics.clear).toBe('function')
+    expect(analytics.events()).toEqual([])
+    analytics.track('trip_saved', { tripId: 'trip_fixture' })
+    expect(analytics.events().map((entry) => entry.event)).toEqual(['trip_saved'])
+
+    analytics.clear()
+    expect(analytics.events()).toEqual([])
   })
 
   it('hands back a fresh persistence and analytics service on every call', () => {

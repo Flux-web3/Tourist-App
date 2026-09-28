@@ -86,13 +86,6 @@ function ExpenseForm({
 
   return (
     <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
-      <p className="flex items-start gap-2 rounded-control border border-line bg-surface-low px-3 py-2 text-body-sm text-ink-muted">
-        <Icon name="currency_exchange" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
-        <span>
-          {`Every amount stays in ${currency} (${CURRENCY_SYMBOLS[currency]}). This prototype does not convert between currencies.`}
-        </span>
-      </p>
-
       {messageCount > 0 ? (
         <div
           ref={summaryRef}
@@ -121,6 +114,10 @@ function ExpenseForm({
         onChange={(event) => onPatch({ description: event.target.value })}
       />
 
+      {/*
+        The currency is stated once for the whole form rather than repeated as a
+        `EUR` suffix beside a `€` prefix in the amount field itself.
+      */}
       <div className="grid gap-4 sm:grid-cols-2">
         <NumberField
           label="Amount"
@@ -129,33 +126,36 @@ function ExpenseForm({
           step={0.01}
           value={draft.amount}
           prefix={CURRENCY_SYMBOLS[currency]}
-          suffix={currency}
           error={errors.amount}
           onValueChange={(value) => onPatch({ amount: value })}
         />
-        <SelectField
-          label="Category"
+        <TextField
+          label="Date paid"
           required
-          options={EXPENSE_CATEGORY_OPTIONS}
-          value={draft.category}
-          error={errors.category}
-          onChange={(event) => onPatch({ category: event.target.value as ExpenseCategory })}
+          type="date"
+          value={draft.date}
+          error={errors.date}
+          onChange={(event) => onPatch({ date: event.target.value })}
         />
       </div>
 
-      <TextField
-        label="Date paid"
+      <p className="flex items-center gap-1.5 text-body-sm text-ink-subtle">
+        <Icon name="currency_exchange" size={14} className="shrink-0" />
+        {`Amounts are in ${currency} (${CURRENCY_SYMBOLS[currency]}) and never converted. Anything paid before departure counts too.`}
+      </p>
+
+      <SelectField
+        label="Category"
         required
-        type="date"
-        value={draft.date}
-        error={errors.date}
-        hint="Anything paid before departure is valid too."
-        onChange={(event) => onPatch({ date: event.target.value })}
+        options={EXPENSE_CATEGORY_OPTIONS}
+        value={draft.category}
+        error={errors.category}
+        onChange={(event) => onPatch({ category: event.target.value as ExpenseCategory })}
       />
 
       <TextAreaField
         label="Notes"
-        rows={3}
+        rows={2}
         maxLength={300}
         value={draft.notes}
         placeholder="Optional: who was paid, or what it covered."
@@ -217,9 +217,9 @@ export function ExpenseFormDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      size="lg"
+      size="md"
       title="Add expense"
-      description={`Log something you have already paid for. It counts towards ${PROTOTYPE_LABEL.actualSpent} straight away.`}
+      description={`Something you have already paid for. It counts towards ${PROTOTYPE_LABEL.actualSpent} straight away.`}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -304,9 +304,9 @@ export function EditExpenseDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      size="lg"
+      size="md"
       title="Edit expense"
-      description={`Correct a logged expense. ${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} update straight away.`}
+      description={`${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} update straight away.`}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

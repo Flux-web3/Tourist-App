@@ -7,7 +7,10 @@ import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type { ItineraryDay, ItineraryItem } from '@/domain/types'
 
+type User = ReturnType<typeof userEvent.setup>
+
 const TRIP_ID = 'trip-under-test'
+const MENU_LABEL = 'Actions for Louvre highlights'
 
 function makeItem(overrides: Partial<ItineraryItem> = {}): ItineraryItem {
   return {
@@ -71,6 +74,12 @@ function renderCard({
   }
   const result = renderWithProviders(<ItineraryItemCard {...props} />, { route: '/trips' })
   return { ...result, props }
+}
+
+/** Every per-stop action now lives one tap away, behind the card's own menu. */
+async function openMenu(user: User, label: string = MENU_LABEL): Promise<HTMLElement> {
+  await user.click(screen.getByRole('button', { name: label }))
+  return screen.getByRole('menu', { name: label })
 }
 
 describe('ItineraryItemCard', () => {
@@ -142,15 +151,49 @@ describe('ItineraryItemCard', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the location, description, note and estimated price', () => {
+  it('shows the location, description and note', () => {
     renderCard({ item: makeItem({ notes: 'Book the timed entry first.' }) })
 
     const article = screen.getByRole('article', { name: 'Louvre highlights' })
     expect(within(article).getByText('Rue de Rivoli, Paris')).toBeInTheDocument()
     expect(within(article).getByText('The quiet wing before the crowds arrive.')).toBeInTheDocument()
     expect(within(article).getByText(/Book the timed entry first\./)).toBeInTheDocument()
-    expect(within(article).getByText(PROTOTYPE_LABEL.estimatedPrice)).toBeInTheDocument()
-    expect(within(article).getByText('€24.00 EUR')).toBeInTheDocument()
+  })
+
+  it('shows the price as a compact marked estimate rather than a captioned figure', () => {
+    renderCard()
+
+    const article = screen.getByRole('article', { name: 'Louvre highlights' })
+    expect(within(article).getByText('≈ €24')).toBeInTheDocument()
+    // The integrity label survives for assistive tech, not as a caption above the number.
+    expect(within(article).getByText(`${PROTOTYPE_LABEL.estimatedPrice}:`)).toHaveClass('sr-only')
+    expect(within(article).queryByText('€24.00 EUR')).not.toBeInTheDocument()
+  })
+
+  it('reads a zero-cost stop as free instead of as a price of nothing', () => {
+    renderCard({ item: makeItem({ estimatedCost: 0 }) })
+
+    const article = screen.getByRole('article', { name: 'Louvre highlights' })
+    expect(within(article).getByText('Free')).toBeInTheDocument()
+    expect(within(article).queryByText(/€0/)).not.toBeInTheDocument()
+  })
+
+  it('lets a long title and location wrap instead of overflowing a narrow phone', () => {
+    renderCard({
+      item: makeItem({
+        title: 'Musée National des Arts Asiatiques Guimet, afternoon visit',
+        location: 'Place d’Iéna, 6 Place d’Iéna, 75116 Paris, Île-de-France, France',
+      }),
+    })
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'Musée National des Arts Asiatiques Guimet, afternoon visit',
+      }),
+    ).toHaveClass('break-words')
+    expect(
+      screen.getByText('Place d’Iéna, 6 Place d’Iéna, 75116 Paris, Île-de-France, France'),
+    ).toHaveClass('break-words')
   })
 
   it('omits the optional location, description and note when they are empty', () => {
@@ -161,89 +204,180 @@ describe('ItineraryItemCard', () => {
     expect(within(article).queryByText(/^Note:/)).not.toBeInTheDocument()
   })
 
-  it('wires the edit and remove actions to their callbacks', async () => {
-    const user = userEvent.setup()
-    const onEdit = vi.fn()
-    const onRemove = vi.fn()
-    renderCard({ onEdit, onRemove })
+  describe('the actions menu', () => {
+    it('keeps the card to a single control until it is opened', () => {
+      renderCard()
 
-    await user.click(screen.getByRole('button', { name: 'Edit' }))
-    await user.click(screen.getByRole('button', { name: 'Remove' }))
-
-    expect(onEdit).toHaveBeenCalledOnce()
-    expect(onRemove).toHaveBeenCalledOnce()
-  })
-
-  it('requests a different suggestion when the stop is replaced', async () => {
-    const user = userEvent.setup()
-    const onReplace = vi.fn()
-    renderCard({ onReplace })
-
-    await user.click(screen.getByRole('button', { name: 'Replace' }))
-
-    expect(onReplace).toHaveBeenCalledOnce()
-  })
-
-  it('shows the swap in progress and blocks the other stops from swapping', async () => {
-    const user = userEvent.setup()
-    const onReplace = vi.fn()
-    const { props } = renderCard({
-      item: makeItem(),
-      pendingItemId: 'item-louvre',
-      onReplace,
+      const trigger = screen.getByRole('button', { name: MENU_LABEL })
+      expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getAllByRole('button')).toHaveLength(1)
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
 
-    const swapping = screen.getByRole('button', { name: 'Swapping' })
-    expect(swapping).toBeDisabled()
-    expect(swapping).toHaveAttribute('aria-busy', 'true')
-    expect(props.pendingItemId).toBe('item-louvre')
+    it('names the trigger after the stop so many cards stay distinguishable', () => {
+      renderCard({ item: makeItem({ title: 'Montmartre in the morning' }) })
 
-    await user.click(swapping)
-    expect(onReplace).not.toHaveBeenCalled()
+      expect(
+        screen.getByRole('button', { name: 'Actions for Montmartre in the morning' }),
+      ).toBeInTheDocument()
+    })
+
+    it('offers every action that used to be its own button', async () => {
+      const user = userEvent.setup()
+      renderCard()
+
+      const menu = await openMenu(user)
+
+      expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+      expect(within(menu).getByRole('menuitem', { name: 'Replace' })).toBeInTheDocument()
+      expect(within(menu).getByRole('menuitem', { name: 'Move to another day' })).toBeInTheDocument()
+      expect(within(menu).getByRole('menuitem', { name: 'Remove' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: MENU_LABEL })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      )
+    })
+
+    it('wires edit and remove to their callbacks', async () => {
+      const user = userEvent.setup()
+      const onEdit = vi.fn()
+      const onRemove = vi.fn()
+      renderCard({ onEdit, onRemove })
+
+      await user.click(within(await openMenu(user)).getByRole('menuitem', { name: 'Edit' }))
+      expect(onEdit).toHaveBeenCalledOnce()
+
+      await user.click(within(await openMenu(user)).getByRole('menuitem', { name: 'Remove' }))
+      expect(onRemove).toHaveBeenCalledOnce()
+    })
+
+    it('requests a different suggestion when the stop is replaced', async () => {
+      const user = userEvent.setup()
+      const onReplace = vi.fn()
+      renderCard({ onReplace })
+
+      await user.click(within(await openMenu(user)).getByRole('menuitem', { name: 'Replace' }))
+
+      expect(onReplace).toHaveBeenCalledOnce()
+    })
+
+    it('opens, moves and selects by keyboard alone', async () => {
+      const user = userEvent.setup()
+      const onReplace = vi.fn()
+      renderCard({ onReplace })
+
+      const trigger = screen.getByRole('button', { name: MENU_LABEL })
+      trigger.focus()
+      await user.keyboard('{Enter}')
+
+      expect(screen.getByRole('menu', { name: MENU_LABEL })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus()
+
+      await user.keyboard('{ArrowDown}')
+      expect(screen.getByRole('menuitem', { name: 'Replace' })).toHaveFocus()
+
+      await user.keyboard('{End}')
+      expect(screen.getByRole('menuitem', { name: 'Remove' })).toHaveFocus()
+
+      await user.keyboard('{Home}')
+      expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus()
+
+      await user.keyboard('{ArrowDown}{Enter}')
+      expect(onReplace).toHaveBeenCalledOnce()
+      expect(trigger).toHaveFocus()
+    })
+
+    it('closes on Escape and hands focus back to the trigger', async () => {
+      const user = userEvent.setup()
+      renderCard()
+
+      await openMenu(user)
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: MENU_LABEL })).toHaveFocus()
+    })
+
+    it('shows the swap in progress on the card and blocks a second swap', async () => {
+      const user = userEvent.setup()
+      const onReplace = vi.fn()
+      renderCard({ pendingItemId: 'item-louvre', onReplace })
+
+      const article = screen.getByRole('article', { name: 'Louvre highlights' })
+      expect(article).toHaveAttribute('aria-busy', 'true')
+      expect(within(article).getByRole('status')).toHaveTextContent('Swapping')
+
+      const swapping = within(await openMenu(user)).getByRole('menuitem', { name: 'Swapping' })
+      expect(swapping).toBeDisabled()
+
+      await user.click(swapping)
+      expect(onReplace).not.toHaveBeenCalled()
+    })
+
+    it('disables replace while another stop is mid-swap', async () => {
+      const user = userEvent.setup()
+      renderCard({ pendingItemId: 'item-somewhere-else' })
+
+      const article = screen.getByRole('article', { name: 'Louvre highlights' })
+      expect(article).not.toHaveAttribute('aria-busy')
+      expect(within(article).queryByRole('status')).not.toBeInTheDocument()
+
+      expect(within(await openMenu(user)).getByRole('menuitem', { name: 'Replace' })).toBeDisabled()
+    })
+
+    it('asks to move the stop when there is another day to move it to', async () => {
+      const user = userEvent.setup()
+      const onToggleMove = vi.fn()
+      renderCard({ onToggleMove })
+
+      expect(screen.queryByLabelText('Move Louvre highlights to another day')).not.toBeInTheDocument()
+      await user.click(
+        within(await openMenu(user)).getByRole('menuitem', { name: 'Move to another day' }),
+      )
+
+      expect(onToggleMove).toHaveBeenCalledOnce()
+    })
+
+    it('hides the move action on a single-day trip', async () => {
+      const user = userEvent.setup()
+      renderCard({ days: [DAY_ONE] })
+
+      const menu = await openMenu(user)
+      expect(within(menu).queryByRole('menuitem', { name: 'Move to another day' })).not.toBeInTheDocument()
+      expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+    })
   })
 
-  it('disables replace while another stop is mid-swap', () => {
-    renderCard({ pendingItemId: 'item-somewhere-else' })
+  describe('the move panel', () => {
+    it('lists the other days, takes focus, and moves the stop once a day is chosen', async () => {
+      const user = userEvent.setup()
+      const onMove = vi.fn()
+      renderCard({ days: [DAY_ONE, DAY_TWO], moving: true, onMove })
 
-    expect(screen.getByRole('button', { name: 'Replace' })).toBeDisabled()
-  })
+      const select = screen.getByLabelText('Move Louvre highlights to another day')
+      expect(select).toHaveValue('')
+      expect(select).toHaveFocus()
+      expect(screen.getByRole('option', { name: 'Choose a day' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('option', { name: `Day 2 · ${formatShortDate('2026-03-11')}` }),
+      ).toBeInTheDocument()
+      expect(screen.getAllByRole('option')).toHaveLength(2)
 
-  it('offers the move control when there is another day to move to', async () => {
-    const user = userEvent.setup()
-    const onToggleMove = vi.fn()
-    renderCard({ onToggleMove })
+      await user.selectOptions(select, 'day-2')
 
-    const move = screen.getByRole('button', { name: 'Move' })
-    expect(move).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByLabelText('Move Louvre highlights to another day')).not.toBeInTheDocument()
+      expect(onMove).toHaveBeenCalledExactlyOnceWith('day-2')
+    })
 
-    await user.click(move)
-    expect(onToggleMove).toHaveBeenCalledOnce()
-  })
+    it('can be dismissed without moving the stop', async () => {
+      const user = userEvent.setup()
+      const onMove = vi.fn()
+      const onToggleMove = vi.fn()
+      renderCard({ moving: true, onMove, onToggleMove })
 
-  it('hides the move control on a single-day trip', () => {
-    renderCard({ days: [DAY_ONE] })
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(screen.queryByRole('button', { name: 'Move' })).not.toBeInTheDocument()
-  })
-
-  it('lists the other days and moves the stop once a day is chosen', async () => {
-    const user = userEvent.setup()
-    const onMove = vi.fn()
-    renderCard({ days: [DAY_ONE, DAY_TWO], moving: true, onMove })
-
-    expect(screen.getByRole('button', { name: 'Move' })).toHaveAttribute('aria-expanded', 'true')
-
-    const select = screen.getByLabelText('Move Louvre highlights to another day')
-    expect(select).toHaveValue('')
-    expect(screen.getByRole('option', { name: 'Choose a day' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('option', { name: `Day 2 · ${formatShortDate('2026-03-11')}` }),
-    ).toBeInTheDocument()
-    expect(screen.getAllByRole('option')).toHaveLength(2)
-
-    await user.selectOptions(select, 'day-2')
-
-    expect(onMove).toHaveBeenCalledExactlyOnceWith('day-2')
+      expect(onToggleMove).toHaveBeenCalledOnce()
+      expect(onMove).not.toHaveBeenCalled()
+    })
   })
 })

@@ -5,11 +5,11 @@ import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Dialog } from '@/components/ui/Dialog'
 import { SelectField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
-import { formatDuration, formatShortDate, isValidTime } from '@/domain/format'
-import { formatMoney } from '@/domain/money'
+import { formatDuration, formatShortDate, formatTime, isValidTime } from '@/domain/format'
+import { formatAmount } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTripDays } from '@/state/useTourist'
-import type { Experience, ItineraryDay, Trip } from '@/domain/types'
+import type { Experience, ItineraryDay, ItineraryItem, Trip } from '@/domain/types'
 
 export interface AddToTripDialogProps {
   trip: Trip
@@ -20,6 +20,41 @@ export interface AddToTripDialogProps {
 
 const ADD_FAILED =
   'This place could not be added to the selected day. Nothing in your itinerary has changed.'
+
+/** Enough of the day to place a stop sensibly, without turning the sheet into a page. */
+const PREVIEW_LIMIT = 4
+
+function DayPreview({ day }: { day: ItineraryDay }) {
+  const shown: ItineraryItem[] = day.items.slice(0, PREVIEW_LIMIT)
+  const hidden = day.items.length - shown.length
+
+  return (
+    <div className="rounded-control border border-line bg-surface-low p-3">
+      <p className="text-label-md text-ink">{`Already in Day ${day.index}`}</p>
+      {day.items.length === 0 ? (
+        <p className="mt-1 text-body-sm text-ink-subtle">Nothing planned yet.</p>
+      ) : (
+        <>
+          <ul className="mt-2 flex list-none flex-col gap-1">
+            {shown.map((item) => (
+              <li key={item.id} className="flex min-w-0 items-baseline gap-2 text-body-sm">
+                <span className="tnum w-20 shrink-0 text-ink-subtle">
+                  {formatTime(item.startTime) ?? 'Any time'}
+                </span>
+                <span className="min-w-0 break-words text-ink-muted">{item.title}</span>
+              </li>
+            ))}
+          </ul>
+          {hidden > 0 ? (
+            <p className="mt-1 text-body-sm text-ink-subtle">
+              {`and ${hidden} more ${hidden === 1 ? 'stop' : 'stops'} that day`}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  )
+}
 
 export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTripDialogProps) {
   const { actions } = useTourist()
@@ -32,12 +67,14 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
 
   const dayOptions = days.map((day) => ({
     value: day.id,
-    label: `Day ${day.index} \u00b7 ${formatShortDate(day.date)}`,
+    label: `Day ${day.index} · ${formatShortDate(day.date)}`,
   }))
+
+  const selectedDay = days.find((day) => day.id === dayId) ?? null
 
   const priceLine = experience.isFree
     ? 'Free to visit'
-    : `${formatMoney(experience.priceFrom, experience.currency, { showCents: false })} and up`
+    : `${formatAmount(experience.priceFrom, experience.currency)} and up`
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -131,14 +168,16 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
             Generate a day-by-day draft first, then come back and drop this place into whichever day suits it.
           </Alert>
         ) : (
-          <SelectField
-            label="Day"
-            required
-            options={dayOptions}
-            value={dayId}
-            onChange={(event) => setDayId(event.target.value)}
-            hint="The activity is inserted into this day only."
-          />
+          <>
+            <SelectField
+              label="Day"
+              required
+              options={dayOptions}
+              value={dayId}
+              onChange={(event) => setDayId(event.target.value)}
+            />
+            {selectedDay ? <DayPreview day={selectedDay} /> : null}
+          </>
         )}
 
         <TextField
@@ -147,14 +186,14 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           value={startTime}
           onChange={(event) => setStartTime(event.target.value)}
           disabled={days.length === 0}
-          hint="Optional. Leave this empty and Tourist uses the first free slot in that day."
+          hint="Optional. Left empty, it goes in the first free slot."
         />
 
         {error ? <Alert tone="danger" title={error.title}>{error.message}</Alert> : null}
 
-        <Alert tone="info" title="Nothing else changes">
-          {`The activity is inserted into the day you choose. Every other stop, time and estimate in ${trip.name} stays exactly as it is, and you can move or remove it later.`}
-        </Alert>
+        <p className="text-body-sm text-ink-subtle">
+          Only this day changes, and you can move or remove the stop later.
+        </p>
       </form>
     </Dialog>
   )

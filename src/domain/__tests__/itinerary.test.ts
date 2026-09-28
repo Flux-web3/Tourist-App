@@ -300,6 +300,108 @@ describe('updateItemInDays', () => {
     const next = updateItemInDays(days, 'a', { title: 'Renamed' }, NOW)
     expect(next[0].items[0].id).toBe('a')
   })
+
+  /**
+   * The itinerary screen lets the traveller pick any start time, so an edited
+   * time has to move the stop in the day as well. It used to stay in its old
+   * slot and the day rendered out of chronological order.
+   */
+  it('re-sorts the day when an edit moves a stop earlier', () => {
+    const days = [
+      day({
+        items: [
+          item({ id: 'morning', startTime: '09:00' }),
+          item({ id: 'afternoon', startTime: '15:00' }),
+          item({ id: 'evening', startTime: '19:00' }),
+        ],
+      }),
+    ]
+    const next = updateItemInDays(days, 'evening', { startTime: '07:00' }, NOW)
+    expect(idsOf(next[0])).toEqual(['evening', 'morning', 'afternoon'])
+  })
+
+  it('re-sorts the day when an edit moves a stop later', () => {
+    const days = [
+      day({
+        items: [
+          item({ id: 'morning', startTime: '09:00' }),
+          item({ id: 'afternoon', startTime: '15:00' }),
+        ],
+      }),
+    ]
+    const next = updateItemInDays(days, 'morning', { startTime: '21:00' }, NOW)
+    expect(idsOf(next[0])).toEqual(['afternoon', 'morning'])
+  })
+
+  it('leaves the order alone when the edit does not touch the start time', () => {
+    const days = [
+      day({
+        items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '09:00' })],
+      }),
+    ]
+    const next = updateItemInDays(days, 'b', { title: 'Renamed', estimatedCost: 40 }, NOW)
+    expect(idsOf(next[0])).toEqual(['a', 'b'])
+  })
+
+  it('leaves the order alone when the patched start time is the one it already had', () => {
+    const days = [
+      day({
+        items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '09:00' })],
+      }),
+    ]
+    const next = updateItemInDays(days, 'b', { startTime: '09:00' }, NOW)
+    expect(idsOf(next[0])).toEqual(['a', 'b'])
+  })
+
+  it('leaves days that do not hold the item identical by reference', () => {
+    const days = [
+      day({ items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '15:00' })] }),
+      day({ id: 'trip_1_d2', index: 2, items: [item({ id: 'c' })] }),
+    ]
+    const next = updateItemInDays(days, 'b', { startTime: '07:00' }, NOW)
+    expect(next[1]).toBe(days[1])
+  })
+
+  it('does not mutate the input day when it re-sorts', () => {
+    const days = [
+      day({ items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '15:00' })] }),
+    ]
+    updateItemInDays(days, 'b', { startTime: '07:00' }, NOW)
+    expect(idsOf(days[0])).toEqual(['a', 'b'])
+  })
+})
+
+describe('insertItemAt keeps the day chronological', () => {
+  it('places a later stop after the ones already on the day', () => {
+    const days = [
+      day({ items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '11:00' })] }),
+    ]
+    const next = insertItemAt(days, 'trip_1_d1', item({ id: 'new', startTime: '18:00' }), 0)
+    expect(idsOf(next[0])).toEqual(['a', 'b', 'new'])
+  })
+
+  it('places an earlier stop before the ones already on the day', () => {
+    const days = [
+      day({ items: [item({ id: 'a', startTime: '09:00' }), item({ id: 'b', startTime: '11:00' })] }),
+    ]
+    const next = insertItemAt(days, 'trip_1_d1', item({ id: 'new', startTime: '07:00' }))
+    expect(idsOf(next[0])).toEqual(['new', 'a', 'b'])
+  })
+})
+
+describe('moveItemInDays keeps the receiving day chronological', () => {
+  it('sorts the moved stop into the target day by time, not by index', () => {
+    const days = [
+      day({ items: [item({ id: 'late', startTime: '20:00' })] }),
+      day({
+        id: 'trip_1_d2',
+        index: 2,
+        items: [item({ id: 'x', startTime: '09:00' }), item({ id: 'y', startTime: '12:00' })],
+      }),
+    ]
+    const next = moveItemInDays(days, 'late', 'trip_1_d2', 0)
+    expect(idsOf(next[1])).toEqual(['x', 'y', 'late'])
+  })
 })
 
 describe('removeItemFromDays', () => {
@@ -593,5 +695,168 @@ describe('mergeGeneratedDays', () => {
   it('does not mutate the existing days', () => {
     mergeGeneratedDays(existing, generated)
     expect(idsOf(existing[0])).toEqual(['user_breakfast', 'catalog_museum', 'ai_unescorted'])
+  })
+})
+
+/**
+ * Shortening the date range used to delete every dropped day whole - the
+ * traveller's own stops with it - because the merge only ever mapped over the
+ * *generated* days and an existing day with no counterpart simply vanished. The
+ * edit dialog promises the opposite: "anything you added or edited yourself is
+ * kept". These tests hold that promise to account.
+ */
+describe('mergeGeneratedDays when the date range shrinks', () => {
+  const week = [1, 2, 3, 4, 5, 6, 7].map((index) =>
+    day({
+      id: `trip_1_d${index}`,
+      date: `2025-03-0${index}`,
+      index,
+      items: [item({ id: `ai_d${index}`, source: 'ai', editedByUser: false, startTime: '12:00' })],
+    }),
+  )
+
+  function withItemsOnDay(index: number, items: ItineraryItem[]): ItineraryDay[] {
+    return week.map((existingDay) =>
+      existingDay.index === index
+        ? { ...existingDay, items: [...existingDay.items, ...items] }
+        : existingDay,
+    )
+  }
+
+  /** The first three days of the same trip: the range now ends on day 3. */
+  const shortened = week.slice(0, 3).map((existingDay) => ({
+    ...existingDay,
+    items: [item({ id: `fresh_d${existingDay.index}`, source: 'ai', startTime: '10:00' })],
+  }))
+
+  it('keeps a traveller-added stop from a day the new range no longer has', () => {
+    const existing = withItemsOnDay(7, [
+      item({ id: 'user_last_day', source: 'user', startTime: '09:00' }),
+    ])
+    const merged = mergeGeneratedDays(existing, shortened)
+
+    expect(merged).toHaveLength(3)
+    expect(merged.flatMap(idsOf)).toContain('user_last_day')
+  })
+
+  it('keeps a catalog stop from a dropped day', () => {
+    const existing = withItemsOnDay(6, [
+      item({ id: 'catalog_last_day', source: 'catalog', startTime: '09:00' }),
+    ])
+    expect(mergeGeneratedDays(existing, shortened).flatMap(idsOf)).toContain('catalog_last_day')
+  })
+
+  it('keeps a hand-edited AI stop from a dropped day', () => {
+    const existing = withItemsOnDay(5, [
+      item({ id: 'edited_last_day', source: 'ai', editedByUser: true, startTime: '09:00' }),
+    ])
+    expect(mergeGeneratedDays(existing, shortened).flatMap(idsOf)).toContain('edited_last_day')
+  })
+
+  it('carries a dropped stop onto the nearest surviving day', () => {
+    const existing = withItemsOnDay(7, [
+      item({ id: 'user_last_day', source: 'user', startTime: '09:00' }),
+    ])
+    const merged = mergeGeneratedDays(existing, shortened)
+
+    // Day 7 is nearest to the last surviving day, day 3.
+    expect(idsOf(merged[2])).toContain('user_last_day')
+    expect(idsOf(merged[0])).not.toContain('user_last_day')
+  })
+
+  it('carries a stop dropped off the front onto the first surviving day', () => {
+    const laterHalf = week.slice(4).map((existingDay) => ({
+      ...existingDay,
+      items: [item({ id: `fresh_d${existingDay.index}`, source: 'ai', startTime: '10:00' })],
+    }))
+    const existing = withItemsOnDay(1, [
+      item({ id: 'user_first_day', source: 'user', startTime: '09:00' }),
+    ])
+    const merged = mergeGeneratedDays(existing, laterHalf)
+
+    expect(idsOf(merged[0])).toContain('user_first_day')
+  })
+
+  it('still discards purely-AI stops from a dropped day', () => {
+    const merged = mergeGeneratedDays(week, shortened)
+
+    expect(merged.flatMap(idsOf)).not.toContain('ai_d7')
+    expect(merged.flatMap(idsOf)).not.toContain('ai_d4')
+  })
+
+  it('carries every preserved stop exactly once', () => {
+    const existing = withItemsOnDay(7, [
+      item({ id: 'user_last_day', source: 'user', startTime: '09:00' }),
+      item({ id: 'catalog_last_day', source: 'catalog', startTime: '13:00' }),
+    ])
+    const ids = mergeGeneratedDays(existing, shortened).flatMap(idsOf)
+
+    expect(ids.filter((id) => id === 'user_last_day')).toHaveLength(1)
+    expect(ids.filter((id) => id === 'catalog_last_day')).toHaveLength(1)
+  })
+
+  it('collects preserved stops from several dropped days', () => {
+    const existing = withItemsOnDay(5, [
+      item({ id: 'user_d5', source: 'user', startTime: '09:00' }),
+    ]).map((existingDay) =>
+      existingDay.index === 7
+        ? {
+            ...existingDay,
+            items: [...existingDay.items, item({ id: 'user_d7', source: 'user', startTime: '16:00' })],
+          }
+        : existingDay,
+    )
+    const ids = mergeGeneratedDays(existing, shortened).flatMap(idsOf)
+
+    expect(ids).toContain('user_d5')
+    expect(ids).toContain('user_d7')
+  })
+
+  it('re-sorts the receiving day after carrying stops onto it', () => {
+    const existing = withItemsOnDay(7, [
+      item({ id: 'user_early', source: 'user', startTime: '07:00' }),
+      item({ id: 'user_late', source: 'user', startTime: '21:00' }),
+    ])
+    const receiving = mergeGeneratedDays(existing, shortened)[2]
+    const times = receiving.items.map((entry) => entry.startTime)
+
+    expect(times).toEqual([...times].sort())
+    expect(idsOf(receiving)[0]).toBe('user_early')
+    expect(idsOf(receiving).at(-1)).toBe('user_late')
+  })
+
+  it('keeps the carried stop payload untouched', () => {
+    const carried = item({ id: 'user_last_day', source: 'user', startTime: '09:00', notes: 'Booked' })
+    const existing = withItemsOnDay(7, [carried])
+    const merged = mergeGeneratedDays(existing, shortened)
+
+    expect(merged.flatMap((entry) => entry.items).find((entry) => entry.id === 'user_last_day')).toEqual(
+      carried,
+    )
+  })
+
+  it('does not mutate the dropped day it rescued from', () => {
+    const existing = withItemsOnDay(7, [
+      item({ id: 'user_last_day', source: 'user', startTime: '09:00' }),
+    ])
+    mergeGeneratedDays(existing, shortened)
+
+    expect(idsOf(existing[6])).toEqual(['ai_d7', 'user_last_day'])
+  })
+
+  /**
+   * An end date before the start date leaves `eachDay` with nothing to return,
+   * so the generated set is empty and there is no surviving day to carry
+   * anything to. Emptying the itinerary would be the one outcome worse than
+   * doing nothing.
+   */
+  it('keeps the itinerary when the regenerated set is empty', () => {
+    const existing = withItemsOnDay(1, [
+      item({ id: 'user_first_day', source: 'user', startTime: '09:00' }),
+    ])
+    const merged = mergeGeneratedDays(existing, [])
+
+    expect(merged).toHaveLength(7)
+    expect(merged.flatMap(idsOf)).toContain('user_first_day')
   })
 })

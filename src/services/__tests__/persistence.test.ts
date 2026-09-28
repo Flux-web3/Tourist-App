@@ -36,12 +36,15 @@ afterEach(() => {
 })
 
 describe('storage contract', () => {
-  it('pins the storage version to 1', () => {
-    expect(STORAGE_VERSION).toBe(1)
-  })
-
-  it('uses exactly the versioned storage key', () => {
-    expect(STORAGE_KEY).toBe('tourist.state.v1')
+  /**
+   * The two tests that used to live here asserted `STORAGE_VERSION === 1` and
+   * `STORAGE_KEY === 'tourist.state.v1'` against the very constants they
+   * imported, so they could only ever compare a value to itself. What actually
+   * matters is that the two agree - the key carries the version, and a bump to
+   * one without the other would read an old snapshot as a current one.
+   */
+  it('keeps the storage key and the storage version in step', () => {
+    expect(STORAGE_KEY).toBe(`tourist.state.v${STORAGE_VERSION}`)
   })
 
   it('writes the payload under that key with the current version', () => {
@@ -137,7 +140,6 @@ describe('round trip', () => {
         [tripId]: {
           status: 'success',
           error: null,
-          shouldFail: false,
           startedAt: FIXED_ISO,
           completedAt: FIXED_ISO,
         },
@@ -392,6 +394,62 @@ describe('rejection of unusable payloads', () => {
   })
 })
 
+/**
+ * `shouldFail` was a prototype switch that should never have been persisted. A
+ * snapshot that still carries it has to load - refusing it would cost the
+ * traveller their trips - but the flag itself must not come back, or a `true`
+ * written months ago would wedge that trip into permanent failure on every
+ * reload, with no UI left to turn it off.
+ */
+describe('the retired shouldFail switch', () => {
+  it('still accepts a v1 snapshot that carries the flag', () => {
+    const state = createDemoState()
+    const trip = state.trips[0]
+    if (!trip) throw new Error('demo state has no trip')
+    const record = state.generation[trip.id]
+    if (!record) throw new Error('demo state has no generation record')
+
+    writeRaw(
+      JSON.stringify({
+        ...state,
+        generation: { ...state.generation, [trip.id]: { ...record, shouldFail: true } },
+      }),
+    )
+
+    const loaded = service.load()
+    expect(loaded).not.toBeNull()
+    expect(loaded?.trips).toHaveLength(1)
+  })
+
+  it('drops a persisted true rather than carrying it into the new session', () => {
+    const state = createDemoState()
+    const trip = state.trips[0]
+    if (!trip) throw new Error('demo state has no trip')
+    const record = state.generation[trip.id]
+    if (!record) throw new Error('demo state has no generation record')
+
+    writeRaw(
+      JSON.stringify({
+        ...state,
+        generation: { ...state.generation, [trip.id]: { ...record, shouldFail: true } },
+      }),
+    )
+
+    expect(service.load()?.generation[trip.id]?.shouldFail).toBeUndefined()
+  })
+
+  it('does not write the flag back out on save', () => {
+    const state = createDemoState()
+    const trip = state.trips[0]
+    if (!trip) throw new Error('demo state has no trip')
+
+    service.save(state)
+    const raw = window.localStorage.getItem(STORAGE_KEY) ?? ''
+
+    expect(raw).not.toContain('shouldFail')
+  })
+})
+
 describe('save guards', () => {
   it('writes nothing when handed a state that is not a valid payload', () => {
     const state = createEmptyState()
@@ -562,7 +620,15 @@ describe('createDemoState', () => {
 
     expect(generation?.status).toBe('idle')
     expect(generation?.error).toBeNull()
-    expect(generation?.shouldFail).toBe(false)
+    expect(generation?.startedAt).toBeNull()
+    expect(generation?.completedAt).toBeNull()
+  })
+
+  it('does not seed the retired shouldFail switch', () => {
+    const state = createDemoState()
+    const generation = state.generation[state.trips[0]?.id ?? '']
+
+    expect(generation?.shouldFail).toBeUndefined()
   })
 
   it('passes the shape validator and survives a save and load cycle', () => {

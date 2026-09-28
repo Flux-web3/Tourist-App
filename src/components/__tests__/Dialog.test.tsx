@@ -69,7 +69,11 @@ describe('Dialog', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Trip details' })
     expect(dialog).toContainElement(document.activeElement as HTMLElement)
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close dialog' }))
+    // The first control in the body, not Close. Close precedes the body in the
+    // DOM, so the naive "first focusable" landed every form dialog's opening
+    // focus on the one control the traveller did not open the dialog to use.
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Close dialog' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inside the dialog' }))
   })
 
   it('closes on the close button, on Escape and on a backdrop click', async () => {

@@ -489,14 +489,30 @@ function isParisTrip(trip: Trip): boolean {
   return trip.destination.toLowerCase().includes('paris')
 }
 
+/**
+ * Chooses one stop.
+ *
+ * `used` spans the whole trip and is only a preference: there are fewer
+ * templates than a month-long trip has slots, so it is exhausted and the
+ * fallback below starts reusing the pool. `daySeen` is the hard constraint —
+ * a template already placed on the current day is removed from the candidates
+ * entirely, so a single day can never show the same stop twice. Selection stays
+ * driven by the seeded `random()` index over a deterministically ordered array.
+ */
 function pickTemplate(
   pool: DraftTemplate[],
   random: () => number,
   used: Set<string>,
   interests: readonly TravelInterest[],
+  daySeen: ReadonlySet<string>,
 ): DraftTemplate {
   const bookable = pool.filter((template) => !isArrivalOrDeparture(template))
-  const preferred = bookable.filter(
+  const unseenToday = bookable.filter((template) => !daySeen.has(template.id))
+  // Only if a day somehow asks for more stops than the bank holds do we allow a
+  // repeat, rather than returning nothing.
+  const pickable = unseenToday.length > 0 ? unseenToday : bookable
+
+  const preferred = pickable.filter(
     (template) => template.interest !== null && interests.includes(template.interest),
   )
   const preferredFresh = preferred.filter((template) => !used.has(template.id))
@@ -504,8 +520,8 @@ function pickTemplate(
     return preferredFresh[Math.floor(random() * preferredFresh.length)]
   }
 
-  const fresh = bookable.filter((template) => !used.has(template.id))
-  const candidates = fresh.length > 0 ? fresh : bookable
+  const fresh = pickable.filter((template) => !used.has(template.id))
+  const candidates = fresh.length > 0 ? fresh : pickable
   return candidates[Math.floor(random() * candidates.length)]
 }
 
@@ -578,29 +594,29 @@ export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().t
     const isLast = dayIndex === total - 1
 
     const chosen: DraftTemplate[] = []
+    // Reset per day: repeats across days are unavoidable on a long trip, repeats
+    // inside one day are not acceptable.
+    const daySeen = new Set<string>()
+    const take = (template: DraftTemplate): void => {
+      used.add(template.id)
+      daySeen.add(template.id)
+      chosen.push(template)
+    }
 
     if (isFirst) {
-      chosen.push(pool.find((template) => template.id.endsWith('arrive')) ?? pool[0])
-      const anchor = pickTemplate(pool, random, used, trip.interests)
-      used.add(anchor.id)
-      chosen.push(anchor)
+      take(pool.find((template) => template.id.endsWith('arrive')) ?? pool[0])
+      take(pickTemplate(pool, random, used, trip.interests, daySeen))
       if (target >= 4) {
-        const extra = pickTemplate(pool, random, used, trip.interests)
-        used.add(extra.id)
-        chosen.push(extra)
+        take(pickTemplate(pool, random, used, trip.interests, daySeen))
       }
     } else if (isLast) {
       const departure = pool.find((template) => template.id.endsWith('depart')) ?? pool[pool.length - 1]
-      chosen.unshift(departure)
-      const anchor = pickTemplate(pool, random, used, trip.interests)
-      used.add(anchor.id)
-      chosen.push(anchor)
+      take(departure)
+      take(pickTemplate(pool, random, used, trip.interests, daySeen))
     } else {
       const count = target + (random() > 0.6 ? 1 : 0)
       for (let slot = 0; slot < count; slot += 1) {
-        const template = pickTemplate(pool, random, used, trip.interests)
-        used.add(template.id)
-        chosen.push(template)
+        take(pickTemplate(pool, random, used, trip.interests, daySeen))
       }
     }
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { formatDateRange } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
-import { createEmptyState } from '@/services/persistence'
+import { DEMO_TRIP_ID, createEmptyState } from '@/services/persistence'
 import TripsHomePage from '@/pages/TripsHomePage'
 import { demoStateFor, renderWithProviders, TEST_TRIP_ID } from '@/test/renderWithProviders'
 
@@ -11,32 +11,123 @@ function renderTripsHome() {
   return renderWithProviders(<TripsHomePage />, { route: '/trips', state: demoStateFor() })
 }
 
+function renderEmptyTripsHome() {
+  return renderWithProviders(<TripsHomePage />, { route: '/trips', state: createEmptyState() })
+}
+
+const MENU_LABEL = 'Sample data and reset options'
+
 describe('TripsHomePage', () => {
-  it('frames the page as on-device only and offers the trip creation entry point', () => {
-    renderWithProviders(<TripsHomePage />, { route: '/trips', state: createEmptyState() })
+  it('leads with the trips and keeps the entry point to a new one', () => {
+    renderTripsHome()
 
     expect(screen.getByRole('heading', { level: 1, name: 'Your trips' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(PROTOTYPE_LABEL.localOnly)
-    expect(screen.getByRole('status')).toHaveTextContent(
-      `${PROTOTYPE_LABEL.noAccount}. Itinerary drafts and prices are estimates, not bookings.`,
-    )
     expect(screen.getByRole('link', { name: 'Plan a new trip' })).toHaveAttribute('href', '/trips/new')
   })
 
-  it('invites the first trip when the device has none', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<TripsHomePage />, { route: '/trips', state: createEmptyState() })
+  it('puts the trip above the standing explanation of how it is stored', () => {
+    renderTripsHome()
 
-    expect(screen.getByText('No trips yet')).toBeInTheDocument()
+    const tripHeading = screen.getByRole('heading', { name: 'Paris in the Spring' })
+    const storageClaim = screen.getByText(PROTOTYPE_LABEL.localOnly)
+
     expect(
-      screen.getByText(/Plan your first trip and Tourist will draft a day-by-day itinerary/),
+      tripHeading.compareDocumentPosition(storageClaim) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('keeps the honesty as a one-line claim that opens for the detail', async () => {
+    const user = userEvent.setup()
+    renderTripsHome()
+
+    const claim = screen.getByText(PROTOTYPE_LABEL.localOnly)
+    const details = claim.closest('details') as HTMLDetailsElement
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
+
+    await user.click(claim)
+
+    expect(details.open).toBe(true)
+    expect(screen.getByText(new RegExp(PROTOTYPE_LABEL.noAccount))).toBeInTheDocument()
+    expect(
+      screen.getByText('Itinerary drafts and prices are estimates, not bookings.'),
     ).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Plan a trip' })).toHaveAttribute('href', '/trips/new')
+  })
 
-    await user.click(screen.getByRole('button', { name: 'Restore the demo trip' }))
+  it('no longer puts developer controls above the traveller content', () => {
+    renderTripsHome()
 
-    expect(await screen.findByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
-    expect(screen.getByText('The demo trip has been restored.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear all data' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restore demo trip' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Demo data' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: MENU_LABEL })).toBeInTheDocument()
+  })
+
+  describe('the first run, when the device is genuinely empty', () => {
+    it('makes planning the first trip the only primary action', () => {
+      renderEmptyTripsHome()
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Your trips' })).toBeInTheDocument()
+      expect(screen.getByText('Plan your first trip')).toBeInTheDocument()
+      expect(
+        screen.getByText(/Tell Tourist where you are going and it drafts a day-by-day itinerary/),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Plan a trip' })).toHaveAttribute('href', '/trips/new')
+
+      // The header CTA stands down so the empty state carries a single primary action.
+      expect(screen.queryByRole('link', { name: 'Plan a new trip' })).not.toBeInTheDocument()
+    })
+
+    it('offers the sample trip as a clearly secondary way to look around', async () => {
+      const user = userEvent.setup()
+      renderEmptyTripsHome()
+
+      await user.click(screen.getByRole('button', { name: 'Look around a sample trip' }))
+
+      expect(await screen.findByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
+      expect(screen.getByText('The sample trip has been added to your trips.')).toBeInTheDocument()
+      expect(screen.queryByText('Plan your first trip')).not.toBeInTheDocument()
+    })
+
+    it('cannot wipe the device when there is nothing stored', async () => {
+      const user = userEvent.setup()
+      renderEmptyTripsHome()
+
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
+
+      expect(screen.getByRole('menuitem', { name: 'Clear all data on this device' })).toBeDisabled()
+    })
+  })
+
+  describe('telling sample data apart from the traveller own trips', () => {
+    it('marks the loaded demo trip as sample data', async () => {
+      const user = userEvent.setup()
+      renderEmptyTripsHome()
+
+      await user.click(screen.getByRole('button', { name: 'Look around a sample trip' }))
+
+      const card = (await screen.findByRole('heading', { name: 'Paris in the Spring' })).closest(
+        'article',
+      ) as HTMLElement
+      expect(within(card).getByText('Sample trip')).toBeInTheDocument()
+    })
+
+    it('leaves a trip the traveller planned unmarked', () => {
+      renderTripsHome()
+
+      expect(screen.getByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
+      expect(screen.queryByText('Sample trip')).not.toBeInTheDocument()
+    })
+
+    it('will not add the sample trip twice', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<TripsHomePage />, { route: '/trips', state: demoStateFor(DEMO_TRIP_ID) })
+
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
+
+      expect(screen.getByRole('menuitem', { name: 'Sample trip already added' })).toBeDisabled()
+      expect(screen.queryByRole('menuitem', { name: 'Add the sample trip' })).not.toBeInTheDocument()
+    })
   })
 
   it('summarises the seeded trip with its route, size and readiness', () => {
@@ -60,15 +151,19 @@ describe('TripsHomePage', () => {
     expect(screen.getByText(/\d+ planned stops/)).toBeInTheDocument()
   })
 
-  it('separates the trip budget from actual spend and what is left', () => {
+  it('separates the trip budget from actual spend and what is left, stating the currency once', () => {
     renderTripsHome()
 
     expect(screen.getByText(PROTOTYPE_LABEL.tripBudget)).toBeInTheDocument()
-    expect(screen.getByText('€2,500 EUR')).toBeInTheDocument()
+    expect(screen.getByText('€2,500')).toBeInTheDocument()
     expect(screen.getByText(PROTOTYPE_LABEL.actualSpent)).toBeInTheDocument()
-    expect(screen.getByText('€1,385 EUR')).toBeInTheDocument()
+    expect(screen.getByText('€1,385')).toBeInTheDocument()
     expect(screen.getByText(PROTOTYPE_LABEL.remaining)).toBeInTheDocument()
-    expect(screen.getByText('€1,115 EUR')).toBeInTheDocument()
+    expect(screen.getByText('€1,115')).toBeInTheDocument()
+
+    // The code is stated once for the card rather than against every figure.
+    expect(screen.getByText('EUR')).toBeInTheDocument()
+    expect(screen.queryByText(/€2,500 EUR/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Over budget by/)).not.toBeInTheDocument()
   })
 
@@ -81,8 +176,8 @@ describe('TripsHomePage', () => {
 
     renderWithProviders(<TripsHomePage />, { route: '/trips', state: overBudget })
 
-    expect(screen.getByText('-€385 EUR')).toBeInTheDocument()
-    expect(screen.getByText('Over budget by €385 EUR')).toBeInTheDocument()
+    expect(screen.getByText('-€385')).toBeInTheDocument()
+    expect(screen.getByText('Over budget by €385')).toBeInTheDocument()
   })
 
   it('links each trip to its overview, itinerary and budget screens', () => {
@@ -102,48 +197,68 @@ describe('TripsHomePage', () => {
     )
   })
 
-  it('lists every trip that will be lost before clearing, and can be cancelled', async () => {
-    const user = userEvent.setup()
-    renderTripsHome()
+  describe('clearing everything on this device', () => {
+    async function openClearConfirmation(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
+      await user.click(screen.getByRole('menuitem', { name: 'Clear all data on this device' }))
+      return screen.getByRole('dialog', { name: 'Clear all data?' })
+    }
 
-    await user.click(screen.getByRole('button', { name: 'Clear all data' }))
+    it('is reachable only through a deliberate menu, never as a bare link', async () => {
+      const user = userEvent.setup()
+      renderTripsHome()
 
-    const dialog = screen.getByRole('dialog', { name: 'Clear all data?' })
-    expect(dialog).toHaveAccessibleDescription(
-      'This removes everything Tourist has stored in this browser. It cannot be undone.',
-    )
-    expect(within(dialog).getByText(/Paris in the Spring/)).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Clear all data on this device' })).not.toBeInTheDocument()
 
-    await user.click(within(dialog).getByRole('button', { name: 'Keep my data' }))
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
-  })
+      const item = screen.getByRole('menuitem', { name: 'Clear all data on this device' })
+      expect(item).toBeEnabled()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
 
-  it('empties the device once the destructive action is confirmed', async () => {
-    const user = userEvent.setup()
-    renderTripsHome()
+    it('lists every trip that will be lost, and can be cancelled', async () => {
+      const user = userEvent.setup()
+      renderTripsHome()
 
-    await user.click(screen.getByRole('button', { name: 'Clear all data' }))
-    const dialog = screen.getByRole('dialog', { name: 'Clear all data?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+      const dialog = await openClearConfirmation(user)
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByText('No trips yet')).toBeInTheDocument()
-    expect(
-      screen.getByText('All saved trips, itineraries and expenses have been cleared.'),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
-  })
+      expect(dialog).toHaveAccessibleDescription(
+        'This removes everything Tourist has stored in this browser. It cannot be undone.',
+      )
+      expect(within(dialog).getByText(/Paris in the Spring/)).toBeInTheDocument()
 
-  it('replaces cleared data with a freshly generated demo trip', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<TripsHomePage />, { route: '/trips', state: createEmptyState() })
+      await user.click(within(dialog).getByRole('button', { name: 'Keep my data' }))
 
-    await user.click(screen.getByRole('button', { name: 'Restore demo trip' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
+    })
 
-    expect(await screen.findByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
-    expect(screen.getByText('The demo trip has been restored.')).toBeInTheDocument()
-    expect(screen.queryByText('No trips yet')).not.toBeInTheDocument()
+    it('empties the device once the destructive action is confirmed', async () => {
+      const user = userEvent.setup()
+      renderTripsHome()
+
+      const dialog = await openClearConfirmation(user)
+      await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByText('Plan your first trip')).toBeInTheDocument()
+      expect(
+        screen.getByText('All saved trips, itineraries and expenses have been cleared.'),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
+    })
+
+    it('can put the sample trip back afterwards', async () => {
+      const user = userEvent.setup()
+      renderTripsHome()
+
+      const dialog = await openClearConfirmation(user)
+      await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+      await user.click(screen.getByRole('button', { name: 'Look around a sample trip' }))
+
+      expect(await screen.findByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
+      expect(screen.getByText('Sample trip')).toBeInTheDocument()
+    })
   })
 })

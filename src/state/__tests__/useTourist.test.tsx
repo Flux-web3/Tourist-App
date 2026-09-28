@@ -124,7 +124,6 @@ const EXPENSES: Expense[] = [
 const GENERATION: GenerationState = {
   status: 'success',
   error: null,
-  shouldFail: false,
   startedAt: '2026-01-02T00:00:00.000Z',
   completedAt: '2026-01-02T00:00:02.000Z',
 }
@@ -293,7 +292,6 @@ describe('useGeneration', () => {
     const { result } = renderHook(() => useGeneration(TRIP_OLD.id), { wrapper })
     expect(result.current.status).toBe('success')
     expect(result.current.error).toBeNull()
-    expect(result.current.shouldFail).toBe(false)
     expect(result.current.startedAt).toBe('2026-01-02T00:00:00.000Z')
     expect(result.current.completedAt).toBe('2026-01-02T00:00:02.000Z')
   })
@@ -309,7 +307,6 @@ describe('useGeneration', () => {
     expect(result.current.unknown).toEqual({
       status: 'idle',
       error: null,
-      shouldFail: false,
       startedAt: null,
       completedAt: null,
     })

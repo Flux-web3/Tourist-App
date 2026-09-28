@@ -56,15 +56,24 @@ function dateSummary(): HTMLElement {
 }
 
 describe('CreateTripPage', () => {
-  it('introduces the form and states that the trip never leaves the device', () => {
+  it('introduces the form and states that the trip never leaves the device', async () => {
+    const user = userEvent.setup()
     renderCreate()
 
     expect(screen.getByRole('heading', { level: 1, name: 'Plan a trip' })).toBeInTheDocument()
     expect(screen.getByText('New trip')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(PROTOTYPE_LABEL.localOnly)
-    expect(screen.getByRole('status')).toHaveTextContent(
-      `${PROTOTYPE_LABEL.noAccount}. The trip, its draft itinerary and every expense stay in this browser.`,
-    )
+
+    // The storage claim is one line now, not a banner between the title and the
+    // first question.
+    const claim = screen.getByText(PROTOTYPE_LABEL.localOnly)
+    await user.click(claim)
+
+    expect((claim.closest('details') as HTMLDetailsElement).open).toBe(true)
+    expect(
+      screen.getByText(
+        `${PROTOTYPE_LABEL.noAccount}. The trip, its draft itinerary and every expense stay in this browser, and nothing is sent to a server.`,
+      ),
+    ).toBeInTheDocument()
   })
 
   it('starts from sensible defaults so only the essentials are left to answer', () => {
@@ -76,6 +85,27 @@ describe('CreateTripPage', () => {
     expect(screen.getByRole('radio', { name: /Balanced/ })).toBeChecked()
     expect(screen.getByLabelText(/Trip name/)).toHaveValue('')
     expect(screen.getByText('No dates chosen yet')).toBeInTheDocument()
+  })
+
+  it('shows a first-timer which answers are required and which are not', () => {
+    renderCreate()
+
+    expect(screen.getByLabelText(/Travelling from/)).toBeRequired()
+    expect(screen.getByLabelText(/Destination/)).toBeRequired()
+    expect(screen.getByLabelText(/Start date/)).toBeRequired()
+    expect(screen.getByLabelText(/End date/)).toBeRequired()
+    expect(screen.getByLabelText(/Travellers/)).toBeRequired()
+    expect(screen.getByLabelText(/Trip budget/)).toBeRequired()
+    expect(screen.getByLabelText(/Currency/)).toBeRequired()
+
+    expect(screen.getByLabelText(/Trip name/)).not.toBeRequired()
+    expect(screen.getByLabelText(/Notes/)).not.toBeRequired()
+  })
+
+  it('names the budget field after the chosen currency, which the symbol alone cannot announce', () => {
+    renderCreate()
+
+    expect(screen.getByLabelText(/Trip budget \(EUR\)/)).toHaveValue(2500)
   })
 
   it('refuses to create anything while the required answers are missing', async () => {

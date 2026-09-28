@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { AddToTripDialog } from '@/components/AddToTripDialog'
-import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
-import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
+import { Card, PageHeader } from '@/components/ui/Card'
+import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { CheckboxChipGroup, NumberField, RadioChipGroup, TextField } from '@/components/ui/Field'
 import { Icon, MediaFrame } from '@/components/ui/Icon'
 import { CATEGORIES } from '@/data/experiences'
 import { formatShortDate } from '@/domain/format'
-import { formatMoney } from '@/domain/money'
+import { formatPrice } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTrip } from '@/state/useTourist'
 import type { CatalogQuery } from '@/services/contracts'
@@ -36,6 +36,14 @@ function placeHref(experienceId: string, tripId: string | undefined): string {
   return tripId ? `/places/${experienceId}?trip=${tripId}` : `/places/${experienceId}`
 }
 
+/**
+ * One curated place.
+ *
+ * The catalogue's `rating` and `reviewCount` are invented demo figures, so they
+ * are deliberately not rendered: a star and a review count are read as social
+ * proof, and there is no proof behind them. Provenance and the estimate marking
+ * stay, because those are claims the prototype can actually stand behind.
+ */
 function ExperienceCard({
   experience,
   tripId,
@@ -45,9 +53,7 @@ function ExperienceCard({
   tripId: string | undefined
   onAdd: (() => void) | undefined
 }) {
-  const price = experience.isFree
-    ? 'Free'
-    : formatMoney(experience.priceFrom, experience.currency, { showCents: false })
+  const price = formatPrice(experience.isFree ? 0 : experience.priceFrom, experience.currency)
 
   return (
     <li className="list-none">
@@ -60,73 +66,62 @@ function ExperienceCard({
         />
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="catalog">{PROTOTYPE_LABEL.curatedGuide}</Badge>
-          <Badge tone="neutral">{PROTOTYPE_LABEL.catalogDemo}</Badge>
-        </div>
-
-        <div>
-          <h3 className="text-headline-sm">{experience.name}</h3>
-          <p className="mt-1 flex items-center gap-1.5 text-body-md text-ink-muted">
-            <Icon name="place" size={16} className="shrink-0 text-ink-subtle" />
-            {`${experience.neighborhood} \u00b7 ${experience.city}`}
-          </p>
-        </div>
-
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-body-md">
-          <span className="inline-flex items-center gap-1 font-semibold text-ink">
-            <Icon name="star" size={16} className="text-terracotta" />
-            <span className="tnum">{experience.rating.toFixed(1)}</span>
-            <span className="sr-only">out of 5</span>
-          </span>
-          <span className="tnum text-ink-subtle">{`${experience.reviewCount.toLocaleString('en-GB')} demo reviews`}</span>
+          <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
+            {PROTOTYPE_LABEL.curatedGuide}
+          </Badge>
           <Badge tone="neutral" icon={<Icon name={ITINERARY_CATEGORY_ICON[experience.category]} size={14} />}>
             {ITINERARY_CATEGORY_LABEL[experience.category]}
           </Badge>
-        </p>
+        </div>
 
-        <p className="flex flex-wrap items-baseline gap-x-2 text-body-md">
+        <div className="min-w-0">
+          <h3 className="break-words text-headline-sm">{experience.name}</h3>
+          <p className="mt-1 flex items-start gap-1.5 text-body-md text-ink-muted">
+            <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+            <span className="min-w-0 break-words">
+              {`${experience.neighborhood} · ${experience.city}`}
+            </span>
+          </p>
+        </div>
+
+        <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-body-md">
           <span className="text-label-sm uppercase tracking-wider text-ink-subtle">
-            {`${PROTOTYPE_LABEL.estimatedPrice} from`}
+            {experience.isFree ? PROTOTYPE_LABEL.estimatedPrice : `${PROTOTYPE_LABEL.estimatedPrice} from`}
           </span>
           <span className="tnum font-semibold text-ink">{price}</span>
         </p>
 
-        <p className="text-body-sm text-ink-subtle">
-          {`${experience.hoursNote} \u00b7 ${PROTOTYPE_LABEL.informationMayChange}`}
-        </p>
+        <p className="break-words text-body-sm text-ink-subtle">{experience.hoursNote}</p>
 
         <div className="mt-auto flex flex-col gap-2">
-          <ButtonLink
-            to={placeHref(experience.id, tripId)}
-            variant="secondary"
-            fullWidth
-            icon={<Icon name="arrow_forward" size={18} />}
-          >
-            View details
-          </ButtonLink>
           {onAdd ? (
-            <Button
-              variant="primary"
-              fullWidth
-              icon={<Icon name="add" size={18} />}
-              onClick={onAdd}
-            >
-              Add to trip
-            </Button>
-          ) : (
             <>
-              <p className="text-body-sm text-ink-subtle">
-                Pick a trip first and this place can be dropped straight into an itinerary day.
-              </p>
+              <Button
+                variant="primary"
+                fullWidth
+                icon={<Icon name="add" size={18} />}
+                onClick={onAdd}
+              >
+                Add to trip
+              </Button>
               <ButtonLink
-                to="/trips"
+                to={placeHref(experience.id, tripId)}
                 variant="secondary"
                 fullWidth
-                icon={<Icon name="luggage" size={18} />}
+                icon={<Icon name="arrow_forward" size={18} />}
               >
-                Choose a trip
+                View details
               </ButtonLink>
             </>
+          ) : (
+            <ButtonLink
+              to={placeHref(experience.id, tripId)}
+              variant="primary"
+              fullWidth
+              icon={<Icon name="arrow_forward" size={18} />}
+            >
+              View details
+            </ButtonLink>
           )}
         </div>
       </Card>
@@ -157,6 +152,8 @@ export default function ExplorePage() {
   const [category, setCategory] = useState<ItineraryCategory | 'all'>('all')
   const [maxPriceValue, setMaxPriceValue] = useState(0)
   const [freeOnly, setFreeOnly] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filterPanelId = useId()
 
   const [results, setResults] = useState<Experience[]>([])
   const [loading, setLoading] = useState(true)
@@ -225,6 +222,10 @@ export default function ExplorePage() {
 
   const hasFilters = text.trim() !== '' || category !== 'all' || maxPrice !== null
 
+  /** Filters hidden behind the collapsed control, so closing it never hides state. */
+  const hiddenFilterCount =
+    (category === 'all' ? 0 : 1) + (freeOnly ? 1 : 0) + (!freeOnly && maxPriceValue > 0 ? 1 : 0)
+
   const announcement = loading
     ? 'Searching places'
     : results.length === 0
@@ -234,10 +235,7 @@ export default function ExplorePage() {
   if (tripId && hydrated && !trip) {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader
-          title="Explore"
-          description="The curated Paris guide, with a place for every day of a trip."
-        />
+        <PageHeader title="Explore" description="The curated Paris guide." />
         <EmptyState
           icon="search_off"
           title="We could not find that trip"
@@ -257,20 +255,23 @@ export default function ExplorePage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         eyebrow={trip ? trip.name : PROTOTYPE_LABEL.curatedGuide}
         title="Explore"
         description={
           trip
-            ? `Curated Paris places you can add to ${trip.name}, one day at a time.`
-            : 'Browse the curated Paris guide, then pick a trip to drop places straight into an itinerary day.'
+            ? `Curated Paris places you can add to any day of ${trip.name}.`
+            : 'Pick a trip to add places to a day.'
+        }
+        actions={
+          trip ? undefined : (
+            <ButtonLink to="/trips" variant="secondary" icon={<Icon name="luggage" size={18} />}>
+              Choose a trip
+            </ButtonLink>
+          )
         }
       />
-
-      <Alert tone="prototype" title="Curated demo catalogue, not a live listings feed">
-        {`Every place here is hand-written prototype data rather than a live listings feed, and every price is an estimate. ${PROTOTYPE_LABEL.informationMayChange}, and nothing in this prototype can be booked or paid for.`}
-      </Alert>
 
       {added && trip ? (
         <div
@@ -278,7 +279,7 @@ export default function ExplorePage() {
           className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-actual-border bg-actual-bg px-4 py-3 text-actual-ink"
         >
           <p className="min-w-0 text-body-md">
-            {`${added.name} was added to Day ${added.day.index} \u00b7 ${formatShortDate(
+            {`${added.name} was added to Day ${added.day.index} · ${formatShortDate(
               added.day.date,
             )} of ${trip.name}.`}
           </p>
@@ -293,90 +294,95 @@ export default function ExplorePage() {
         </div>
       ) : null}
 
-      <Card>
-        <CardTitle hint="Search runs as you type. Results update a moment after you stop.">
-          Filter places
-        </CardTitle>
-
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <form
             role="search"
             aria-label="Search places"
             onSubmit={handleSearchSubmit}
-            className="sm:col-span-2"
+            className="min-w-0 flex-1"
           >
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <TextField
-                label="Search places"
-                type="search"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder="museum, canal, market"
-                hint="Matches names, summaries, neighbourhoods and tags."
-                className="flex-1"
-              />
-              <Button type="submit" variant="secondary" icon={<Icon name="search" size={18} />}>
-                Search
-              </Button>
-            </div>
+            <TextField
+              label="Search places"
+              type="search"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Name, neighbourhood or tag"
+            />
           </form>
 
-          <NumberField
-            label="Max price"
-            min={0}
-            max={500}
-            step={1}
-            value={maxPriceValue}
-            onValueChange={handleMaxPriceChange}
-            prefix={'\u20ac'}
-            suffix="EUR"
-            hint="An estimate. Leave 0 for no upper limit."
-          />
-
-          <CheckboxChipGroup<'free'>
-            legend="Price filters"
-            name="explore-free-only"
-            options={FREE_ONLY_OPTIONS}
-            values={freeOnly ? FREE_ONLY_SELECTED : FREE_ONLY_CLEARED}
-            onChange={handleFreeOnlyChange}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              icon={<Icon name="tune" size={18} />}
+              aria-expanded={filtersOpen}
+              aria-controls={filterPanelId}
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              {hiddenFilterCount > 0 ? `Filters (${hiddenFilterCount})` : 'Filters'}
+            </Button>
+            {hasFilters ? (
+              <Button
+                variant="ghost"
+                icon={<Icon name="filter_alt_off" size={18} />}
+                onClick={clearFilters}
+              >
+                Clear filters
+              </Button>
+            ) : null}
+          </div>
         </div>
 
-        <div className="mt-4">
-          <RadioChipGroup<ItineraryCategory | 'all'>
-            legend="Category"
-            name="explore-category"
-            value={category}
-            options={CATEGORIES}
-            onChange={handleCategoryChange}
-          />
-        </div>
+        {filtersOpen ? (
+          <div id={filterPanelId} className="surface-card flex flex-col gap-4 p-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <NumberField
+                label="Max price"
+                min={0}
+                max={500}
+                step={1}
+                value={maxPriceValue}
+                onValueChange={handleMaxPriceChange}
+                prefix={'€'}
+                suffix="EUR"
+                hint="Leave 0 for no upper limit."
+              />
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
-          <p className="text-body-sm text-ink-subtle">
-            {hasFilters
-              ? 'Filters are applied to the guide below.'
-              : 'Showing the whole curated guide. No filters applied.'}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Icon name="filter_alt_off" size={16} />}
-            onClick={clearFilters}
-            disabled={!hasFilters}
-          >
-            Clear filters
-          </Button>
-        </div>
-      </Card>
+              <CheckboxChipGroup<'free'>
+                legend="Price filters"
+                name="explore-free-only"
+                options={FREE_ONLY_OPTIONS}
+                values={freeOnly ? FREE_ONLY_SELECTED : FREE_ONLY_CLEARED}
+                onChange={handleFreeOnlyChange}
+              />
+            </div>
 
-      <section aria-label="Places">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <RadioChipGroup<ItineraryCategory | 'all'>
+              legend="Category"
+              name="explore-category"
+              value={category}
+              options={CATEGORIES}
+              onChange={handleCategoryChange}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <section aria-label="Places" className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="text-headline-sm">Places</h2>
           <p aria-live="polite" aria-atomic="true" className="tnum text-body-md text-ink-muted">
             {announcement}
           </p>
         </div>
+
+        <Disclosure
+          tone="catalog"
+          icon="auto_stories"
+          summary="Curated demo catalogue, not live data"
+        >
+          {`Every place here is hand-written prototype data rather than a live listings feed. Prices are estimates, opening hours are typical ranges, and nothing in this prototype can be booked or paid for. ${PROTOTYPE_LABEL.informationMayChange}.`}
+        </Disclosure>
 
         {loading ? (
           <ul
@@ -391,7 +397,7 @@ export default function ExplorePage() {
           <EmptyState
             icon="search_off"
             title="No places match those filters"
-            description="Try a different search term, another category, or widen the price filter to see more of the guide."
+            description="The rest of the guide is still here. Try a shorter search, another category, or a higher price cap."
             action={
               hasFilters ? (
                 <Button
@@ -399,7 +405,7 @@ export default function ExplorePage() {
                   icon={<Icon name="filter_alt_off" size={18} />}
                   onClick={clearFilters}
                 >
-                  Clear filters
+                  Show the whole guide
                 </Button>
               ) : undefined
             }

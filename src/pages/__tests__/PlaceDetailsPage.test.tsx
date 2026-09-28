@@ -41,34 +41,59 @@ describe('PlaceDetailsPage', () => {
     expect(
       screen.getByText('The world’s largest museum is overwhelming without a plan. Enter through the Richelieu wing, take the Denon wing highlights first, and save the Mona Lisa for the end of the route.'),
     ).toBeInTheDocument()
-    expect(screen.getByText('4.7')).toBeInTheDocument()
-    expect(screen.getByText('9,840 demo reviews')).toBeInTheDocument()
     expect(screen.getByText('1st arrondissement · Paris, France')).toBeInTheDocument()
     expect(screen.getAllByText('3 hr')).toHaveLength(2)
     expect(screen.getByText('Demo hours: 09:00 - 18:00, closed Tuesdays')).toBeInTheDocument()
     expect(screen.getByText('Morning, at opening')).toBeInTheDocument()
-    expect(screen.getByText('€22 EUR and up, hand-written for this prototype')).toBeInTheDocument()
     expect(screen.getByText('museum')).toBeInTheDocument()
     expect(screen.getByText('art')).toBeInTheDocument()
     expect(screen.getByText('monuments')).toBeInTheDocument()
+  })
+
+  it('marks the price as an estimate, and states the currency once', async () => {
+    renderPlace('exp_louvre_museum')
+
+    await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
+    // One figure on the page, marked as an estimate, with the currency beside it.
+    expect(screen.getByText('€22')).toBeInTheDocument()
+    expect(screen.getByText(`${PROTOTYPE_LABEL.estimatedPrice} from`)).toBeInTheDocument()
+    expect(screen.getByText(`EUR · ${PROTOTYPE_LABEL.informationMayChange}`)).toBeInTheDocument()
+    expect(screen.queryByText(/€22\.00/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/EUR and up/)).not.toBeInTheDocument()
+  })
+
+  it('never renders the invented rating or review count', async () => {
+    renderPlace('exp_louvre_museum')
+
+    await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
+    expect(screen.queryAllByText('star')).toHaveLength(0)
+    expect(screen.queryByText(/out of 5/)).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/reviews?/i)
+    expect(document.body.textContent).not.toMatch(/\b4\.\d\b/)
+  })
+
+  it('keeps the demo-record provenance as a one-line claim, one tap from the reasoning', async () => {
+    const user = userEvent.setup()
+    renderPlace('exp_louvre_museum')
+
+    await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
+    const summary = screen.getByText('Curated demo record, not a live listing')
+    const details = summary.closest('details') as HTMLElement
+    expect(details).not.toHaveAttribute('open')
+    expect(details).toHaveTextContent('hand-written prototype data, not a live listing')
+    expect(details).toHaveTextContent('there is no map behind this page')
+
+    await user.click(summary)
+    expect(details).toHaveAttribute('open')
   })
 
   it('says plainly that nothing on the page can be booked or paid for', async () => {
     renderPlace('exp_louvre_museum')
 
     await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
-    expect(screen.getByText('Curated demo record, not a live listing')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Ratings, opening hours and prices here are hand-written demo figures. There is no map, no live availability and no booking or payment anywhere in this prototype.',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Booking not available in this prototype' })).toBeDisabled()
-    expect(
-      screen.getByText(
-        'Live availability and opening hours are not integrated, so nothing on this page can be reserved or paid for.',
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getByText('No booking or payment in this prototype.')).toBeInTheDocument()
+    // The old dead "Booking not available" control is gone; the claim is not.
+    expect(screen.queryByRole('button', { name: /Booking/ })).not.toBeInTheDocument()
   })
 
   it('credits the photograph and says it opens in a new tab', async () => {
@@ -94,8 +119,10 @@ describe('PlaceDetailsPage', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Luxembourg Gardens' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Free and up, hand-written for this prototype')).toBeInTheDocument()
+    expect(screen.getByText('Free')).toBeInTheDocument()
+    expect(screen.getByText(PROTOTYPE_LABEL.estimatedPrice)).toBeInTheDocument()
     expect(screen.queryByText(/€0/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Free from|from Free/i)).not.toBeInTheDocument()
     expect(screen.getByText('Late afternoon')).toBeInTheDocument()
     expect(screen.getByText('Demo hours: 07:30 - sunset daily')).toBeInTheDocument()
   })
@@ -122,9 +149,7 @@ describe('PlaceDetailsPage', () => {
 
     await screen.findByRole('heading', { level: 1, name: 'Sainte-Chapelle' })
     expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
-    expect(
-      screen.getByText('Choose one of your trips to drop this place straight into an itinerary day.'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Pick a trip to drop this place into a day.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Choose a trip' })).toHaveAttribute('href', '/trips')
   })
 
@@ -133,11 +158,7 @@ describe('PlaceDetailsPage', () => {
 
     await screen.findByRole('heading', { level: 1, name: 'Sainte-Chapelle' })
     expect(screen.getByRole('button', { name: 'Add to trip' })).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Picks a day in Paris in the Spring and inserts this place without touching anything else.',
-      ),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Choose a trip' })).not.toBeInTheDocument()
   })
 
   it('admits when the place id is not in the guide', async () => {
@@ -176,8 +197,9 @@ describe('PlaceDetailsPage', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
     expect(within(dialog).getByText('Choose a day for Louvre Museum.')).toBeInTheDocument()
-    expect(within(dialog).getByText('Estimated price: €22 EUR and up')).toBeInTheDocument()
+    expect(within(dialog).getByText('Estimated price: €22 and up')).toBeInTheDocument()
     expect(daySelect(dialog)).toHaveValue('day-1')
+    expect(within(dialog).getByText('Louvre highlights')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
     await waitFor(() =>

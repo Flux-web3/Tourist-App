@@ -190,8 +190,18 @@ export type GenerationStatus = 'idle' | 'loading' | 'success' | 'error'
 export interface GenerationState {
   status: GenerationStatus
   error: string | null
-  /** Prototype-only switch that forces the next generation to fail. */
-  shouldFail: boolean
   startedAt: string | null
   completedAt: string | null
+  /**
+   * @deprecated Prototype-only switch that forced the next generation to fail.
+   *
+   * No longer read or written. It used to live here, which meant it was
+   * persisted: a `true` written by the demo switch survived a reload and wedged
+   * that trip into permanent failure with no UI left to turn it back off. The
+   * switch now lives in a non-persisted ref inside `TouristProvider`, so it
+   * lasts exactly as long as the session that set it. Declared optional only so
+   * that snapshots and fixtures written against v1 still load and still type;
+   * nothing should start reading it again.
+   */
+  shouldFail?: boolean
 }

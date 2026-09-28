@@ -69,7 +69,6 @@ export function useGeneration(tripId: string | undefined) {
   return state.generation[tripId ?? ''] ?? {
     status: 'idle' as const,
     error: null,
-    shouldFail: false,
     startedAt: null,
     completedAt: null,
   }

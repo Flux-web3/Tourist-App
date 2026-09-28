@@ -17,6 +17,8 @@ export const PROTOTYPE_LABEL = {
   guest: 'Guest mode',
   localOnly: 'Prototype: saved on this device only',
   noAccount: 'No account needed',
+  /** Marks the opt-in demo trip so sample data never passes for the traveller's own. */
+  sampleTrip: 'Sample trip',
 } as const
 
 export const ITINERARY_CATEGORY_LABEL: Record<ItineraryCategory, string> = {

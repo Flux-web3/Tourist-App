@@ -29,11 +29,10 @@ describe('WelcomePage', () => {
   it('asks only for a name, and makes clear that is all a profile does', () => {
     renderWelcome()
 
-    expect(
-      screen.getByRole('heading', { level: 1, name: 'Let us name the trip, or skip it' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Name your trips, or skip' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Your name' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Email' })).toBeInTheDocument()
+    expect(screen.getByText(/A name is the only thing a profile does here/)).toBeInTheDocument()
   })
 
   it('offers a real way in even when the name is skipped', () => {
@@ -43,15 +42,26 @@ describe('WelcomePage', () => {
     expect(screen.getByRole('button', { name: 'Try the demo trip' })).toBeEnabled()
   })
 
-  it('labels the prototype honestly and leaves social sign-in disabled', () => {
+  it('states the honesty once, as a claim that opens for the detail', async () => {
+    const user = userEvent.setup()
     renderWelcome()
 
-    expect(screen.getByText(PROTOTYPE_LABEL.noAccount)).toBeInTheDocument()
-    expect(screen.getByText(PROTOTYPE_LABEL.localOnly)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Continue with Apple' })).toBeDisabled()
+    const claim = screen.getByText(PROTOTYPE_LABEL.localOnly)
+    await user.click(claim)
+
+    expect((claim.closest('details') as HTMLDetailsElement).open).toBe(true)
+    expect(screen.getByText(new RegExp(PROTOTYPE_LABEL.noAccount))).toBeInTheDocument()
+    expect(screen.getByText(/There is no sign-up and no server/)).toBeInTheDocument()
+    expect(screen.getByText(/The demo trip is clearly marked as sample data/)).toBeInTheDocument()
+  })
+
+  it('says social sign-in is absent instead of showing buttons that do nothing', () => {
+    renderWelcome()
+
+    expect(screen.queryByRole('button', { name: 'Continue with Google' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with Apple' })).not.toBeInTheDocument()
     expect(
-      screen.getByText('Not available in this prototype — nothing is sent anywhere.'),
+      screen.getByText(/Google and Apple sign-in are not part of this prototype/),
     ).toBeInTheDocument()
   })
 
@@ -163,10 +173,14 @@ describe('WelcomePage', () => {
     expect(screen.queryByText(/Saved on this device as/)).not.toBeInTheDocument()
   })
 
-  it('explains what happens after the entry step', () => {
+  it('keeps the explanation of what comes next, but one tap away', async () => {
+    const user = userEvent.setup()
     const { container } = renderWelcome()
 
-    expect(screen.getByRole('heading', { name: 'What happens next' })).toBeInTheDocument()
+    const claim = screen.getByText('What happens next')
+    await user.click(claim)
+
+    expect((claim.closest('details') as HTMLDetailsElement).open).toBe(true)
     expect(container).toHaveTextContent(/day-by-day itinerary and prices every stop/)
     expect(container).toHaveTextContent(/draft never looks like a quote/)
   })

@@ -3,7 +3,7 @@ import { addDays, eachDay } from '@/domain/format'
 import type { ItineraryItem, Trip, TripDraft } from '@/domain/types'
 import { createEmptyDraft, suggestTripName, TRIP_LIMITS, validateTripDraft } from '@/domain/validation'
 import { STORAGE_VERSION, type PersistedState } from '@/services/contracts'
-import { createEmptyState, createGuestUser } from '@/services/persistence'
+import { createDemoState, createEmptyState, createGuestUser, DEMO_TRIP_ID } from '@/services/persistence'
 import { tripService } from '@/services/tripService'
 
 const FIXED_NOW = new Date('2026-03-15T09:30:00.000Z')
@@ -182,10 +182,15 @@ describe('tripService.create', () => {
     expect(state.generation[tripId]).toEqual({
       status: 'idle',
       error: null,
-      shouldFail: false,
       startedAt: null,
       completedAt: null,
     })
+  })
+
+  it('registers an empty notes bucket for the new trip', () => {
+    const { state, trip } = tripService.create(baseState(), validDraft(), 'usr_fixture')
+
+    expect(state.notesByTrip?.[trip?.id ?? '']).toEqual([])
   })
 
   it('stamps created and updated at the same moment', () => {
@@ -536,6 +541,268 @@ describe('tripService.update', () => {
   })
 })
 
+/**
+ * `update` used to forward any patch straight through without validating it. An
+ * `endDate` before the `startDate` left `eachDay` with nothing to return, so the
+ * trip silently lost every day it had.
+ */
+describe('tripService.update rejects a patch the domain validator refuses', () => {
+  function created() {
+    return tripService.create(baseState(), validDraft(), 'usr_fixture')
+  }
+
+  it('refuses an end date before the start date and keeps the days', () => {
+    const before = created()
+    const tripId = before.trip?.id ?? ''
+
+    const result = tripService.update(before.state, tripId, { endDate: '2026-03-20' })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+    expect(daysOf(before.state, tripId)).toHaveLength(5)
+  })
+
+  it('refuses a trip longer than the documented day cap', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', {
+      endDate: addDays(START, TRIP_LIMITS.maxDays),
+    })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses a budget of zero', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', { budget: 0 })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses emptying the interests', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', { interests: [] })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses a destination shorter than the documented minimum', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', { destination: 'P' })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses an unsupported currency', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', {
+      currency: 'CHF' as TripDraft['currency'],
+    })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses a start date that is not a real calendar date', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', { startDate: '2026-02-30' })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('refuses a name longer than the documented limit', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', {
+      name: 'P'.repeat(TRIP_LIMITS.maxNameLength + 1),
+    })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(before.state)
+  })
+
+  it('still accepts a name cleared to blank, which it re-derives', () => {
+    const before = created()
+
+    const result = tripService.update(before.state, before.trip?.id ?? '', { name: '   ' })
+
+    expect(result.trip?.name).toBe(suggestTripName('Paris, France', START))
+  })
+})
+
+/**
+ * A trip that has begun must stay editable. Its own start date is in the past for
+ * the rest of the trip, and refusing it froze the budget, the notes, the
+ * interests, the pace and the name for good.
+ */
+describe('tripService.update and a trip that has already started', () => {
+  const STARTED = '2026-03-01'
+
+  function inProgress(): { state: PersistedState; tripId: string } {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    // Backdate the stored trip directly: creation rightly refuses a past start.
+    return {
+      tripId,
+      state: {
+        ...created.state,
+        trips: created.state.trips.map((trip) =>
+          trip.id === tripId ? { ...trip, startDate: STARTED, endDate: '2026-03-20' } : trip,
+        ),
+      },
+    }
+  }
+
+  it('accepts a budget edit while the start date stays where it is', () => {
+    const { state, tripId } = inProgress()
+
+    const result = tripService.update(state, tripId, { budget: 4000 })
+
+    expect(result.trip?.budget).toBe(4000)
+    expect(result.trip?.startDate).toBe(STARTED)
+  })
+
+  it('accepts notes, a name, interests and a pace edit too', () => {
+    const { state, tripId } = inProgress()
+
+    const result = tripService.update(state, tripId, {
+      name: 'Paris, extended',
+      notes: 'Booked one more night',
+      interests: ['food'],
+      pace: 'relaxed',
+    })
+
+    expect(result.trip?.name).toBe('Paris, extended')
+    expect(result.trip?.notes).toBe('Booked one more night')
+    expect(result.trip?.pace).toBe('relaxed')
+  })
+
+  it('accepts a start date resubmitted unchanged alongside another edit', () => {
+    const { state, tripId } = inProgress()
+
+    const result = tripService.update(state, tripId, { startDate: STARTED, budget: 3000 })
+
+    expect(result.trip?.budget).toBe(3000)
+  })
+
+  it('still refuses moving the start date to a different past day', () => {
+    const { state, tripId } = inProgress()
+
+    const result = tripService.update(state, tripId, { startDate: '2026-02-01' })
+
+    expect(result.trip).toBeNull()
+    expect(result.state).toBe(state)
+  })
+})
+
+/**
+ * Shortening the range used to delete the dropped days whole, taking the
+ * traveller's own stops with them. The edit dialog promises the opposite.
+ */
+describe('tripService.update when the trip is shortened', () => {
+  function seededWeek(): { state: PersistedState; tripId: string } {
+    const created = tripService.create(
+      baseState(),
+      validDraft({ startDate: START, endDate: addDays(START, 6) }),
+      'usr_fixture',
+    )
+    const tripId = created.trip?.id ?? ''
+    const days = daysOf(created.state, tripId)
+    expect(days).toHaveLength(7)
+    const last = days[6]
+    if (!last) throw new Error('fixture trip has no seventh day')
+    return {
+      tripId,
+      state: {
+        ...created.state,
+        daysByTrip: {
+          ...created.state.daysByTrip,
+          [tripId]: [...days.slice(0, 6), { ...last, items: [...last.items, ...preservedFixtures()] }],
+        },
+      },
+    }
+  }
+
+  it('keeps the traveller-owned stops from the days it drops', () => {
+    const { state, tripId } = seededWeek()
+
+    const result = tripService.update(state, tripId, { endDate: addDays(START, 2) })
+    const ids = allItems(result.state, tripId).map((item) => item.id)
+
+    expect(daysOf(result.state, tripId)).toHaveLength(3)
+    expect(ids.filter((id) => id === 'itm_user_added')).toHaveLength(1)
+    expect(ids.filter((id) => id === 'itm_catalog_added')).toHaveLength(1)
+    expect(ids.filter((id) => id === 'itm_ai_edited')).toHaveLength(1)
+  })
+
+  it('still drops the unedited AI stops from those days', () => {
+    const { state, tripId } = seededWeek()
+
+    const result = tripService.update(state, tripId, { endDate: addDays(START, 2) })
+
+    expect(allItems(result.state, tripId).map((item) => item.id)).not.toContain('itm_ai_plain')
+  })
+
+  it('carries them onto the last surviving day', () => {
+    const { state, tripId } = seededWeek()
+
+    const result = tripService.update(state, tripId, { endDate: addDays(START, 2) })
+    const lastDay = daysOf(result.state, tripId)[2]
+
+    expect(lastDay?.items.map((item) => item.id)).toContain('itm_user_added')
+  })
+
+  it('keeps the carried stop payload untouched', () => {
+    const { state, tripId } = seededWeek()
+    const original = allItems(state, tripId).find((item) => item.id === 'itm_catalog_added')
+
+    const result = tripService.update(state, tripId, { endDate: addDays(START, 2) })
+
+    expect(allItems(result.state, tripId).find((item) => item.id === 'itm_catalog_added')).toEqual(
+      original,
+    )
+  })
+
+  it('leaves the receiving day in chronological order', () => {
+    const { state, tripId } = seededWeek()
+
+    const result = tripService.update(state, tripId, { endDate: addDays(START, 2) })
+    const times = daysOf(result.state, tripId)[2]?.items.map((item) => item.startTime) ?? []
+
+    expect(times).toEqual([...times].sort())
+  })
+
+  it('keeps them when the start date moves forward instead', () => {
+    const { state, tripId } = seededWeek()
+    const withFirstDayStops: PersistedState = {
+      ...state,
+      daysByTrip: {
+        ...state.daysByTrip,
+        [tripId]: daysOf(state, tripId).map((day, index) =>
+          index === 0
+            ? { ...day, items: [...day.items, syntheticItem({ id: 'itm_day_one', source: 'user' })] }
+            : day,
+        ),
+      },
+    }
+
+    const result = tripService.update(withFirstDayStops, tripId, { startDate: addDays(START, 3) })
+
+    expect(daysOf(result.state, tripId)).toHaveLength(4)
+    expect(allItems(result.state, tripId).map((item) => item.id)).toContain('itm_day_one')
+  })
+})
+
 describe('tripService.remove', () => {
   it('removes the trip and its days', () => {
     const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
@@ -585,5 +852,64 @@ describe('tripService.remove', () => {
 
     expect(result.trips).toHaveLength(1)
     expect(result.version).toBe(STORAGE_VERSION)
+  })
+
+  it('removes the notes bucket too', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const withNote: PersistedState = {
+      ...created.state,
+      notesByTrip: {
+        ...created.state.notesByTrip,
+        [tripId]: [
+          {
+            id: 'not_fixture',
+            tripId,
+            title: 'Flight reference',
+            body: 'PC 1044',
+            pinned: false,
+            createdAt: FIXED_ISO,
+            updatedAt: FIXED_ISO,
+          },
+        ],
+      },
+    }
+
+    const result = tripService.remove(withNote, tripId)
+
+    expect(result.notesByTrip?.[tripId]).toBeUndefined()
+  })
+
+  it('leaves another trip notes bucket alone', () => {
+    const first = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const second = tripService.create(first.state, validDraft({ name: 'Second trip' }), 'usr_fixture')
+    const keepId = second.trip?.id ?? ''
+
+    const result = tripService.remove(second.state, createdTrip(first.state).id)
+
+    expect(result.notesByTrip?.[keepId]).toEqual([])
+  })
+
+  /**
+   * `hasDemoData` is documented as "true when the seeded demo trip is present",
+   * so deleting that trip has to clear it. It used to stay set, leaving the
+   * snapshot claiming demo data that no longer existed.
+   */
+  it('clears hasDemoData when the demo trip itself is deleted', () => {
+    const demo = createDemoState(createGuestUser())
+    expect(demo.hasDemoData).toBe(true)
+
+    expect(tripService.remove(demo, DEMO_TRIP_ID).hasDemoData).toBe(false)
+  })
+
+  it('leaves hasDemoData alone when a different trip is deleted', () => {
+    const demo = createDemoState(createGuestUser())
+    const withOwnTrip = tripService.create(demo, validDraft({ name: 'My own trip' }), 'usr_fixture')
+    const ownId = withOwnTrip.trip?.id ?? ''
+
+    const result = tripService.remove(withOwnTrip.state, ownId)
+
+    expect(result.hasDemoData).toBe(true)
+    expect(result.trips.map((trip) => trip.id)).toEqual([DEMO_TRIP_ID])
   })
 })

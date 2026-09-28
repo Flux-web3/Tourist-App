@@ -1,22 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import {
   CURRENCIES,
+  CURRENCY_MINOR_UNITS,
   CURRENCY_SYMBOLS,
+  formatAmount,
   formatMoney,
   formatMoneyCompact,
+  formatPrice,
   fromCents,
+  hasFractionalPart,
+  minorUnits,
   sumAmounts,
   summariseBudget,
   toCents,
 } from '@/domain/money'
 import type { CurrencyCode } from '@/domain/types'
 
+/**
+ * JPY has no minor unit, so every JPY expectation below is the whole-yen form.
+ * `¥1,234.50` is not a JPY figure at all, and 1234.5 yen rounds to 1235.
+ */
 const WITH_CENTS: Record<CurrencyCode, string> = {
   EUR: '€1,234.50 EUR',
   USD: '$1,234.50 USD',
   GBP: '£1,234.50 GBP',
   NGN: '₦1,234.50 NGN',
-  JPY: '¥1,234.50 JPY',
+  JPY: '¥1,235 JPY',
 }
 
 const WITHOUT_CENTS: Record<CurrencyCode, string> = {
@@ -32,7 +41,7 @@ const SYMBOL_ONLY: Record<CurrencyCode, string> = {
   USD: '$1,234.50',
   GBP: '£1,234.50',
   NGN: '₦1,234.50',
-  JPY: '¥1,234.50',
+  JPY: '¥1,235',
 }
 
 const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
@@ -40,7 +49,7 @@ const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
   USD: '$0.00 USD',
   GBP: '£0.00 GBP',
   NGN: '₦0.00 NGN',
-  JPY: '¥0.00 JPY',
+  JPY: '¥0 JPY',
 }
 
 const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
@@ -48,7 +57,7 @@ const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
   USD: '-$1,234.50 USD',
   GBP: '-£1,234.50 GBP',
   NGN: '-₦1,234.50 NGN',
-  JPY: '-¥1,234.50 JPY',
+  JPY: '-¥1,235 JPY',
 }
 
 const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
@@ -79,6 +88,30 @@ describe('CURRENCIES', () => {
       NGN: '₦',
       JPY: '¥',
     })
+  })
+})
+
+describe('CURRENCY_MINOR_UNITS', () => {
+  it('gives JPY no minor unit and every other currency two', () => {
+    expect(CURRENCY_MINOR_UNITS).toEqual({ EUR: 2, USD: 2, GBP: 2, NGN: 2, JPY: 0 })
+  })
+
+  it('has an entry for every supported currency', () => {
+    for (const currency of CURRENCIES) {
+      expect(CURRENCY_MINOR_UNITS[currency]).toBeTypeOf('number')
+    }
+  })
+})
+
+describe('minorUnits', () => {
+  it('reads the table for a named currency', () => {
+    expect(minorUnits('EUR')).toBe(2)
+    expect(minorUnits('JPY')).toBe(0)
+  })
+
+  it('falls back to hundredths when no currency is named', () => {
+    expect(minorUnits()).toBe(2)
+    expect(minorUnits(undefined)).toBe(2)
   })
 })
 
@@ -170,6 +203,27 @@ describe('toCents', () => {
     expect(toCents(-0.005)).toBe(-1)
     expect(toCents(-0.125)).toBe(-13)
   })
+
+  it('keeps hundredths for a currency that has them', () => {
+    for (const currency of ['EUR', 'USD', 'GBP', 'NGN'] as CurrencyCode[]) {
+      expect(toCents(24.5, currency)).toBe(2450)
+      expect(toCents(24.5, currency)).toBe(toCents(24.5))
+    }
+  })
+
+  it('treats JPY as whole units rather than hundredths', () => {
+    expect(toCents(1000, 'JPY')).toBe(1000)
+    expect(toCents(1234, 'JPY')).toBe(1234)
+    expect(toCents(-1000, 'JPY')).toBe(-1000)
+    expect(toCents(0, 'JPY')).toBe(0)
+  })
+
+  it('rounds a JPY amount to the nearest whole yen', () => {
+    expect(toCents(1000.4, 'JPY')).toBe(1000)
+    expect(toCents(1000.5, 'JPY')).toBe(1001)
+    expect(toCents(-1000.5, 'JPY')).toBe(-1001)
+    expect(toCents(0.4, 'JPY')).toBe(0)
+  })
 })
 
 describe('fromCents', () => {
@@ -225,6 +279,18 @@ describe('fromCents', () => {
       expect(fromCents(toCents(value))).toBe(value)
     }
   })
+
+  it('round-trips whole yen through the JPY scale', () => {
+    for (const value of [0, 1, 7, 100, 1000, 1234, 1_000_000, 1e9, -1, -1000, -123_456]) {
+      expect(fromCents(toCents(value, 'JPY'), 'JPY')).toBe(value)
+    }
+  })
+
+  it('does not rescale a JPY figure by a hundred in either direction', () => {
+    expect(fromCents(1000, 'JPY')).toBe(1000)
+    expect(fromCents(toCents(1000, 'JPY'))).toBe(10)
+    expect(fromCents(toCents(1000), 'JPY')).toBe(100_000)
+  })
 })
 
 describe('sumAmounts', () => {
@@ -264,6 +330,21 @@ describe('sumAmounts', () => {
   it('treats non-finite entries as zero', () => {
     expect(sumAmounts([10, Number.NaN, 5])).toBe(15)
   })
+
+  it('sums JPY as whole yen without gaining or losing precision', () => {
+    expect(sumAmounts([1000, 2500, 340], 'JPY')).toBe(3840)
+    expect(sumAmounts([1000, 2500, 340], 'JPY')).toBe(sumAmounts([1000, 2500, 340]))
+    expect(sumAmounts([], 'JPY')).toBe(0)
+  })
+
+  it('rounds each JPY amount to whole yen before summing', () => {
+    expect(sumAmounts([1000.5, 1000.5], 'JPY')).toBe(2002)
+    expect(sumAmounts([0.4, 0.4, 0.4], 'JPY')).toBe(0)
+  })
+
+  it('keeps a large JPY total exact', () => {
+    expect(sumAmounts([1_000_000, 2_500_000, 1], 'JPY')).toBe(3_500_001)
+  })
 })
 
 describe('formatMoney', () => {
@@ -272,7 +353,7 @@ describe('formatMoney', () => {
   })
 
   for (const currency of CURRENCIES) {
-    it(`formats 1234.5 with cents and code for ${currency}`, () => {
+    it(`formats 1234.5 with its own minor units and the code for ${currency}`, () => {
       expect(formatMoney(1234.5, currency, { showCents: true, showCode: true })).toBe(
         WITH_CENTS[currency],
       )
@@ -325,6 +406,83 @@ describe('formatMoney', () => {
 
   it('formats a large amount with thousands separators', () => {
     expect(formatMoney(1_234_567.89, 'EUR')).toBe('€1,234,567.89 EUR')
+  })
+
+  it('never shows decimals for JPY, which has no minor unit', () => {
+    expect(formatMoney(1000, 'JPY')).toBe('¥1,000 JPY')
+    expect(formatMoney(1000, 'JPY', { showCents: true })).toBe('¥1,000 JPY')
+    expect(formatMoney(1000, 'JPY', { showCode: false })).toBe('¥1,000')
+    expect(formatMoney(1_234_567, 'JPY')).toBe('¥1,234,567 JPY')
+    expect(formatMoney(0, 'JPY')).toBe('¥0 JPY')
+  })
+
+  it('does not invent two decimal places on a JPY figure', () => {
+    expect(formatMoney(1000, 'JPY')).not.toContain('.')
+    expect(formatMoney(1000, 'JPY')).not.toBe('¥1,000.00 JPY')
+  })
+
+  it('keeps showing decimals for every currency that has a minor unit', () => {
+    for (const currency of CURRENCIES) {
+      const hasMinorUnit = CURRENCY_MINOR_UNITS[currency] > 0
+      expect(formatMoney(1000, currency).includes('.')).toBe(hasMinorUnit)
+    }
+  })
+})
+
+describe('hasFractionalPart', () => {
+  it('is true for an amount carrying cents', () => {
+    expect(hasFractionalPart(24.5, 'EUR')).toBe(true)
+    expect(hasFractionalPart(0.01, 'USD')).toBe(true)
+    expect(hasFractionalPart(-19.99, 'GBP')).toBe(true)
+  })
+
+  it('is false for a whole amount', () => {
+    expect(hasFractionalPart(24, 'EUR')).toBe(false)
+    expect(hasFractionalPart(0, 'NGN')).toBe(false)
+  })
+
+  it('is false for every JPY amount, fractional-looking or not', () => {
+    for (const amount of [0, 1, 1000, 1000.5, 1234.56, -1000.5, 0.4]) {
+      expect(hasFractionalPart(amount, 'JPY')).toBe(false)
+    }
+  })
+})
+
+describe('formatAmount', () => {
+  it('shows cents only when they carry information', () => {
+    expect(formatAmount(2500, 'EUR')).toBe('€2,500')
+    expect(formatAmount(2500.5, 'EUR')).toBe('€2,500.50')
+  })
+
+  it('never shows a minor unit for JPY', () => {
+    expect(formatAmount(1000, 'JPY')).toBe('¥1,000')
+    expect(formatAmount(1000.5, 'JPY')).toBe('¥1,001')
+  })
+
+  it('treats a non-finite amount as zero', () => {
+    expect(formatAmount(Number.NaN, 'EUR')).toBe('€0')
+    expect(formatAmount(Number.NaN, 'JPY')).toBe('¥0')
+  })
+})
+
+describe('formatPrice', () => {
+  it('renders zero as Free', () => {
+    expect(formatPrice(0, 'EUR')).toBe('Free')
+    expect(formatPrice(0, 'JPY')).toBe('Free')
+  })
+
+  it('honours a custom free label', () => {
+    expect(formatPrice(0, 'EUR', { freeLabel: 'No charge' })).toBe('No charge')
+  })
+
+  it('renders a real price through formatAmount', () => {
+    expect(formatPrice(19.99, 'EUR')).toBe('€19.99')
+    expect(formatPrice(1000, 'JPY')).toBe('¥1,000')
+  })
+
+  it('treats a sub-yen price as free rather than rounding it up to a yen', () => {
+    expect(formatPrice(0.4, 'JPY')).toBe('Free')
+    expect(formatPrice(0.004, 'EUR')).toBe('Free')
   })
 })
 
@@ -449,6 +607,9 @@ describe('summariseBudget', () => {
       estimateVariance: 0,
       isOverBudget: false,
       currency: 'JPY',
+      mixedCurrency: false,
+      otherCurrencies: [],
+      uncountedExpenseCount: 0,
     })
   })
 
@@ -504,5 +665,179 @@ describe('summariseBudget', () => {
       currency: 'JPY',
     })
     expect(summary.currency).toBe('JPY')
+  })
+
+  it('totals a JPY trip in whole yen', () => {
+    const summary = summariseBudget({
+      tripBudget: 150_000,
+      itineraryEstimates: [1200, 3400],
+      expenseAmounts: [1000, 2500],
+      currency: 'JPY',
+    })
+    expect(summary.tripBudget).toBe(150_000)
+    expect(summary.itineraryEstimate).toBe(4600)
+    expect(summary.actualSpent).toBe(3500)
+    expect(summary.remaining).toBe(146_500)
+    expect(summary.estimateVariance).toBe(1100)
+  })
+})
+
+describe('summariseBudget and a mixed-currency trip', () => {
+  it('reports no mixing when the currencies are not supplied at all', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(summary.mixedCurrency).toBe(false)
+    expect(summary.otherCurrencies).toEqual([])
+    expect(summary.uncountedExpenseCount).toBe(0)
+    expect(summary.actualSpent).toBe(150.5)
+  })
+
+  it('reports no mixing when every supplied currency matches the trip', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 50.5],
+      expenseCurrencies: ['EUR', 'EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.mixedCurrency).toBe(false)
+    expect(summary.otherCurrencies).toEqual([])
+    expect(summary.uncountedExpenseCount).toBe(0)
+    expect(summary.actualSpent).toBe(150.5)
+  })
+
+  it('behaves identically whether matching currencies are supplied or omitted', () => {
+    const withCodes = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [100, 50.5],
+      expenseCurrencies: ['EUR', 'EUR'],
+      currency: 'EUR',
+    })
+    const withoutCodes = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(withCodes).toEqual(withoutCodes)
+  })
+
+  it('flags the mismatch and keeps the foreign amount out of actualSpent', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 1000],
+      expenseCurrencies: ['EUR', 'JPY'],
+      currency: 'EUR',
+    })
+    expect(summary.mixedCurrency).toBe(true)
+    expect(summary.otherCurrencies).toEqual(['JPY'])
+    expect(summary.uncountedExpenseCount).toBe(1)
+    expect(summary.actualSpent).toBe(100)
+    expect(summary.remaining).toBe(900)
+  })
+
+  it('does not let a foreign amount push the trip over budget', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 500_000],
+      expenseCurrencies: ['EUR', 'NGN'],
+      currency: 'EUR',
+    })
+    expect(summary.actualSpent).toBe(100)
+    expect(summary.remaining).toBe(900)
+    expect(summary.isOverBudget).toBe(false)
+    expect(summary.mixedCurrency).toBe(true)
+  })
+
+  it('keeps estimateVariance on the trip currency alone', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [200],
+      expenseAmounts: [50, 1000],
+      expenseCurrencies: ['EUR', 'JPY'],
+      currency: 'EUR',
+    })
+    expect(summary.estimateVariance).toBe(150)
+  })
+
+  it('counts every mismatched expense and dedupes the codes it reports', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [10, 20, 30, 40],
+      expenseCurrencies: ['USD', 'JPY', 'JPY', 'EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.uncountedExpenseCount).toBe(3)
+    expect(summary.otherCurrencies).toEqual(['JPY', 'USD'])
+    expect(summary.actualSpent).toBe(40)
+  })
+
+  it('sorts the reported codes deterministically whatever order they arrive in', () => {
+    const codes: CurrencyCode[] = ['USD', 'NGN', 'JPY', 'GBP']
+    const forwards = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: codes.map(() => 5),
+      expenseCurrencies: codes,
+      currency: 'EUR',
+    })
+    const backwards = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: codes.map(() => 5),
+      expenseCurrencies: [...codes].reverse(),
+      currency: 'EUR',
+    })
+    expect(forwards.otherCurrencies).toEqual(['GBP', 'JPY', 'NGN', 'USD'])
+    expect(backwards.otherCurrencies).toEqual(forwards.otherCurrencies)
+  })
+
+  it('reports every expense as uncounted when none is in the trip currency', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [80],
+      expenseAmounts: [1000, 2500],
+      expenseCurrencies: ['JPY', 'JPY'],
+      currency: 'EUR',
+    })
+    expect(summary.actualSpent).toBe(0)
+    expect(summary.remaining).toBe(1000)
+    expect(summary.estimateVariance).toBe(80)
+    expect(summary.uncountedExpenseCount).toBe(2)
+    expect(summary.mixedCurrency).toBe(true)
+  })
+
+  it('treats an amount with no matching code entry as the trip currency', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [],
+      expenseAmounts: [100, 50, 25],
+      expenseCurrencies: ['EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.actualSpent).toBe(175)
+    expect(summary.mixedCurrency).toBe(false)
+    expect(summary.uncountedExpenseCount).toBe(0)
+  })
+
+  it('counts the trip currency when the trip is the JPY one', () => {
+    const summary = summariseBudget({
+      tripBudget: 150_000,
+      itineraryEstimates: [],
+      expenseAmounts: [1000, 20],
+      expenseCurrencies: ['JPY', 'EUR'],
+      currency: 'JPY',
+    })
+    expect(summary.actualSpent).toBe(1000)
+    expect(summary.remaining).toBe(149_000)
+    expect(summary.otherCurrencies).toEqual(['EUR'])
   })
 })

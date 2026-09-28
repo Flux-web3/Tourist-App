@@ -4,6 +4,7 @@ import type { CurrencyCode, Expense, ExpenseCategory, Trip } from '@/domain/type
 import { STORAGE_VERSION, type PersistedState } from '@/services/contracts'
 import { expenseService } from '@/services/expenseService'
 import { createEmptyState, createGuestUser } from '@/services/persistence'
+import { selectBudget } from '@/state/selectors'
 
 const FIXED_NOW = new Date('2026-03-15T09:30:00.000Z')
 const FIXED_ISO = '2026-03-15T09:30:00.000Z'
@@ -248,6 +249,13 @@ describe('expenseService.add and cent-safe money', () => {
   })
 })
 
+/**
+ * The service records the currency it was handed, and that is right: the
+ * traveller paid in it. What must not happen is the budget then adding that
+ * amount to a total labelled with the trip's currency. So each case below
+ * checks both halves — the record keeps its own currency, and the trip summary
+ * leaves the amount out and reports the mismatch.
+ */
 describe('expenseService.add and the trip currency', () => {
   it('stores the trip currency on the expense', () => {
     const { expense } = expenseService.add(stateWith(), expenseInput({ currency: TRIP.currency }))
@@ -256,20 +264,68 @@ describe('expenseService.add and the trip currency', () => {
     expect(expense.currency).toBe(TRIP.currency)
   })
 
-  it('stores any currency it is handed without reconciling it to the trip', () => {
-    const { expense } = expenseService.add(stateWith(), expenseInput({ currency: 'NGN' }))
+  it('counts an expense in the trip currency towards the trip total', () => {
+    const { state } = expenseService.add(
+      stateWith(),
+      expenseInput({ amount: 45, currency: TRIP.currency }),
+    )
+    const budget = selectBudget(state, TRIP)
+
+    expect(budget?.actualSpent).toBe(45)
+    expect(budget?.mixedCurrency).toBe(false)
+    expect(budget?.uncountedExpenseCount).toBe(0)
+  })
+
+  it('stores a foreign currency verbatim and keeps that amount out of the trip total', () => {
+    const { expense, state } = expenseService.add(
+      stateWith(),
+      expenseInput({ amount: 45_000, currency: 'NGN' }),
+    )
 
     expect(expense.currency).toBe('NGN')
     expect(expense.currency).not.toBe(TRIP.currency)
+
+    const budget = selectBudget(state, TRIP)
+    expect(budget?.currency).toBe('EUR')
+    expect(budget?.actualSpent).toBe(0)
+    expect(budget?.remaining).toBe(TRIP.budget)
+    expect(budget?.isOverBudget).toBe(false)
+    expect(budget?.mixedCurrency).toBe(true)
+    expect(budget?.otherCurrencies).toEqual(['NGN'])
+    expect(budget?.uncountedExpenseCount).toBe(1)
   })
 
-  it('does not derive the currency from the trip it is filed under', () => {
+  it('does not derive the currency from the trip it is filed under, and flags it there', () => {
     const { state } = expenseService.add(
       stateWith(),
-      expenseInput({ tripId: OTHER_TRIP.id, currency: 'GBP' as CurrencyCode }),
+      expenseInput({ tripId: OTHER_TRIP.id, amount: 30, currency: 'GBP' as CurrencyCode }),
     )
 
     expect(expensesOf(state, OTHER_TRIP.id)[0]?.currency).toBe('GBP')
+
+    const budget = selectBudget(state, OTHER_TRIP)
+    expect(OTHER_TRIP.currency).toBe('EUR')
+    expect(budget?.actualSpent).toBe(0)
+    expect(budget?.mixedCurrency).toBe(true)
+    expect(budget?.otherCurrencies).toEqual(['GBP'])
+  })
+
+  it('totals only the trip-currency expenses when a basket holds several currencies', () => {
+    let state = stateWith()
+    for (const [amount, currency] of [
+      [20, 'EUR'],
+      [30.5, 'EUR'],
+      [45_000, 'NGN'],
+      [1000, 'JPY'],
+    ] as [number, CurrencyCode][]) {
+      state = expenseService.add(state, expenseInput({ amount, currency })).state
+    }
+
+    const budget = selectBudget(state, TRIP)
+    expect(budget?.actualSpent).toBe(50.5)
+    expect(budget?.remaining).toBe(2449.5)
+    expect(budget?.otherCurrencies).toEqual(['JPY', 'NGN'])
+    expect(budget?.uncountedExpenseCount).toBe(2)
   })
 })
 

@@ -244,6 +244,85 @@ describe('noteService', () => {
 
       expect(result.notesByTrip?.[TRIP.id]?.[0]?.pinned).toBe(false)
     })
+
+    /**
+     * `updatedAt` is the stamp the UI shows against the note, so it has to mean
+     * "the traveller changed what this says". Pinning used to move it, which had
+     * the note claim an edit that never happened.
+     */
+    it('does not move the edit timestamp when a note is pinned', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const pinned = service.setPinned(stateWith([existing]), TRIP.id, existing.id, true)
+
+      expect(pinned.notesByTrip?.[TRIP.id]?.[0]?.updatedAt).toBe(FIXED_ISO)
+      expect(pinned.notesByTrip?.[TRIP.id]?.[0]?.createdAt).toBe(FIXED_ISO)
+    })
+
+    it('does not move the edit timestamp when a note is unpinned', () => {
+      const existing = note({ pinned: true })
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const unpinned = service.setPinned(stateWith([existing]), TRIP.id, existing.id, false)
+
+      expect(unpinned.notesByTrip?.[TRIP.id]?.[0]?.updatedAt).toBe(FIXED_ISO)
+    })
+
+    it('leaves the note otherwise identical when only the pin changes', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const pinned = service.setPinned(stateWith([existing]), TRIP.id, existing.id, true)
+
+      expect(pinned.notesByTrip?.[TRIP.id]?.[0]).toEqual({ ...existing, pinned: true })
+    })
+  })
+
+  describe('update and the edit timestamp', () => {
+    it('does not move the edit timestamp for a pin-only patch', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const result = service.update(stateWith([existing]), TRIP.id, existing.id, { pinned: true })
+
+      expect(result.note?.pinned).toBe(true)
+      expect(result.note?.updatedAt).toBe(FIXED_ISO)
+    })
+
+    it('does not move the edit timestamp when the text is resubmitted unchanged', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const result = service.update(stateWith([existing]), TRIP.id, existing.id, {
+        title: existing.title,
+        body: existing.body,
+      })
+
+      expect(result.note?.updatedAt).toBe(FIXED_ISO)
+    })
+
+    it('still moves it when the body really changes', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const result = service.update(stateWith([existing]), TRIP.id, existing.id, {
+        body: 'FR 1420, departs 08:10',
+      })
+
+      expect(result.note?.updatedAt).toBe('2026-03-20T08:00:00.000Z')
+    })
+
+    it('still moves it when the title really changes', () => {
+      const existing = note()
+      vi.setSystemTime(new Date('2026-03-20T08:00:00.000Z'))
+
+      const result = service.update(stateWith([existing]), TRIP.id, existing.id, {
+        title: 'Return flight',
+      })
+
+      expect(result.note?.updatedAt).toBe('2026-03-20T08:00:00.000Z')
+    })
   })
 
   describe('remove', () => {

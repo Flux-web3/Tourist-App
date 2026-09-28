@@ -100,7 +100,6 @@ function makeGeneration(overrides: Partial<GenerationState> = {}): GenerationSta
   return {
     status: 'idle',
     error: null,
-    shouldFail: false,
     startedAt: null,
     completedAt: null,
     ...overrides,

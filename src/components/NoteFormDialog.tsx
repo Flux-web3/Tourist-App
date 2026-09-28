@@ -30,7 +30,16 @@ function NoteForm({
     if (submitted && messageCount > 0) summaryRef.current?.focus()
   }, [messageCount, submitted])
 
+  /**
+   * The counter only appears once it means something. Showing `2000 characters
+   * left` against an empty field is noise, and it is wired into the field's
+   * `aria-describedby`, so a screen reader reads it on every focus.
+   */
   const remaining = NOTE_LIMITS.maxBodyLength - draft.body.length
+  const bodyHint =
+    remaining <= 200
+      ? `${remaining} characters left. Line breaks are kept exactly as you write them.`
+      : 'Line breaks are kept exactly as you write them.'
 
   return (
     <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -54,7 +63,7 @@ function NoteForm({
 
       <TextField
         label="Title"
-        hint="Optional. Leave it blank and the note is listed by its first line."
+        hint={'Optional — otherwise the note is listed by its first line.'}
         maxLength={NOTE_LIMITS.maxTitleLength}
         placeholder="Flight reference"
         value={draft.title}
@@ -65,10 +74,10 @@ function NoteForm({
       <TextAreaField
         label="Note"
         required
-        rows={8}
+        rows={6}
         maxLength={NOTE_LIMITS.maxBodyLength}
-        placeholder={'Anything worth remembering.\n\nLine breaks are kept exactly as you write them.'}
-        hint={`${remaining} characters left. New lines are preserved.`}
+        placeholder={'BA0075, 14:20 from Heathrow\nSeat 21A'}
+        hint={bodyHint}
         value={draft.body}
         error={errors.body}
         onChange={(event) => onPatch({ body: event.target.value })}
@@ -128,9 +137,9 @@ export function NoteFormDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      size="lg"
+      size="md"
       title="New note"
-      description="Your own record for this trip. Notes are never regenerated or re-costed."
+      description="Your own record. Never regenerated, never re-costed."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -184,9 +193,9 @@ export function EditNoteDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      size="lg"
+      size="md"
       title="Edit note"
-      description="Changes are saved to this device and never touch the itinerary."
+      description="Saved to this device, and never touches the itinerary."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

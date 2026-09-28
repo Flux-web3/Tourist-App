@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -89,19 +89,31 @@ export function EditTripDialog({
     }
   }, [errors, open, submitted])
 
+  /**
+   * Editing an existing trip is not creating one: a start date that has already
+   * passed is a fact about this trip, not a mistake to correct. Without this
+   * context the past-date rule froze every in-progress trip — its budget, notes,
+   * pace and name could never be changed again. A *different* past start date is
+   * still refused.
+   */
+  const validationContext = useMemo(
+    () => ({ previousStartDate: trip.startDate }),
+    [trip.startDate],
+  )
+
   const update = useCallback(
     (patch: Partial<TripDraft>) => {
       const next = { ...draft, ...patch }
       setDraft(next)
-      if (submitted) setErrors(validateTripDraft(next).errors)
+      if (submitted) setErrors(validateTripDraft(next, validationContext).errors)
     },
-    [draft, submitted],
+    [draft, submitted, validationContext],
   )
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
-    const result = validateTripDraft(draft)
+    const result = validateTripDraft(draft, validationContext)
     setErrors(result.errors)
     if (!result.isValid) return
     actions.updateTrip(trip.id, {
@@ -220,19 +232,11 @@ export function EditTripDialog({
             onValueChange={(value) => update({ travelers: Math.round(value) })}
           />
 
-          <NumberField
-            label="Trip budget"
-            required
-            min={0}
-            max={TRIP_LIMITS.maxBudget}
-            step={50}
-            value={draft.budget}
-            prefix={CURRENCY_SYMBOLS[draft.currency]}
-            suffix={draft.currency}
-            error={errors.budget}
-            onValueChange={(value) => update({ budget: value })}
-          />
-
+          {/*
+            Currency sits before the amount so the figure is typed in a known
+            unit, and the code is in the field's label rather than only in the
+            decorative suffix, which assistive technology never reads.
+          */}
           <SelectField
             label="Currency"
             required
@@ -241,7 +245,18 @@ export function EditTripDialog({
             error={errors.currency}
             hint="Every figure on this trip uses this currency."
             onChange={(event) => update({ currency: event.target.value as TripDraft['currency'] })}
-            className="sm:col-span-2"
+          />
+
+          <NumberField
+            label={`Trip budget (${draft.currency})`}
+            required
+            min={0}
+            max={TRIP_LIMITS.maxBudget}
+            step={50}
+            value={draft.budget}
+            prefix={CURRENCY_SYMBOLS[draft.currency]}
+            error={errors.budget}
+            onValueChange={(value) => update({ budget: value })}
           />
         </div>
 

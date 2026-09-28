@@ -185,12 +185,16 @@ function isExpense(value: unknown): value is Expense {
   )
 }
 
+/**
+ * `shouldFail` is accepted but no longer required: v1 snapshots carry it and
+ * must still load, while nothing written from here on includes it.
+ */
 function isGenerationState(value: unknown): value is GenerationState {
   return (
     isRecord(value) &&
     isOneOf(value.status, GENERATION_STATUSES) &&
     isNullableString(value.error) &&
-    typeof value.shouldFail === 'boolean' &&
+    (value.shouldFail === undefined || typeof value.shouldFail === 'boolean') &&
     isNullableString(value.startedAt) &&
     isNullableString(value.completedAt)
   )
@@ -229,9 +233,18 @@ function isPersistedState(value: unknown): value is PersistedState {
   )
 }
 
-/** Fills in keys added after a snapshot was written, without touching real data. */
+/**
+ * Fills in keys added after a snapshot was written, without touching real data,
+ * and drops the retired `shouldFail` flag so a stale `true` cannot be carried
+ * forward into another session.
+ */
 function normaliseState(state: PersistedState): PersistedState {
-  return { ...state, notesByTrip: state.notesByTrip ?? {} }
+  const generation: Record<string, GenerationState> = {}
+  for (const [tripId, entry] of Object.entries(state.generation)) {
+    const { shouldFail: _retired, ...rest } = entry
+    generation[tripId] = rest
+  }
+  return { ...state, notesByTrip: state.notesByTrip ?? {}, generation }
 }
 
 export function createGuestUser(overrides: Partial<User> = {}): User {
@@ -263,7 +276,6 @@ function idleGeneration(): GenerationState {
   return {
     status: 'idle',
     error: null,
-    shouldFail: false,
     startedAt: null,
     completedAt: null,
   }

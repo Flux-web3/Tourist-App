@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { EXPERIENCES } from '@/data/experiences'
 import type { Experience } from '@/domain/types'
@@ -262,9 +264,37 @@ describe('catalogue image metadata', () => {
     assertImageMetadata(records)
   })
 
-  it('uses an absolute https url for every record', async () => {
+  it('serves every image from this origin rather than hot-linking', () => {
+    // Catalogue photography used to be hot-linked from upload.wikimedia.org,
+    // which made the only imagery in the product depend on a third party at
+    // runtime. The files are ours now, under public/images.
     for (const experience of EXPERIENCES) {
-      expect(experience.imageUrl.startsWith('https://')).toBe(true)
+      expect(experience.imageUrl).toMatch(/^\/images\/[\w-]+\.(jpg|jpeg|png|webp)$/)
     }
+  })
+
+  it('points every record at a file that actually exists', () => {
+    // A typo in a path would otherwise only show up as a blank frame in
+    // production, since MediaFrame swallows the load error by design.
+    // `process.cwd()`, not `import.meta.url`: under jsdom the module url is an
+    // http:// one and `fileURLToPath` rejects it.
+    const publicDir = join(process.cwd(), 'public')
+    for (const experience of EXPERIENCES) {
+      expect(existsSync(join(publicDir, experience.imageUrl))).toBe(true)
+    }
+  })
+
+  it('credits every image with an author, a licence and a source page', () => {
+    for (const experience of EXPERIENCES) {
+      expect(experience.imageCredit).not.toBeNull()
+      expect(experience.imageCredit?.author.trim()).not.toBe('')
+      expect(experience.imageCredit?.license.trim()).not.toBe('')
+      expect(experience.imageCredit?.sourceUrl).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/)
+    }
+  })
+
+  it('gives every record its own distinct image', () => {
+    const urls = EXPERIENCES.map((experience) => experience.imageUrl)
+    expect(new Set(urls).size).toBe(urls.length)
   })
 })

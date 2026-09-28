@@ -46,7 +46,14 @@ export function createNoteService(): NoteService {
       const { isValid } = validateNoteDraft({ title: merged.title, body: merged.body })
       if (!isValid) return { state, note: null }
 
-      const updated: TripNote = { ...merged, updatedAt: nowISO() }
+      /**
+       * `updatedAt` means "when the traveller last changed what this note says".
+       * Pinning is a shelf position, not an edit, so a pin-only patch leaves the
+       * stamp where it was - the UI shows that stamp, and moving it would have
+       * the note claim its text changed when it did not.
+       */
+      const textChanged = merged.title !== existing.title || merged.body !== existing.body
+      const updated: TripNote = { ...merged, updatedAt: textChanged ? nowISO() : existing.updatedAt }
       return {
         state: withNotes(
           state,
@@ -57,13 +64,16 @@ export function createNoteService(): NoteService {
       }
     },
 
+    /**
+     * Pinning deliberately does not move `updatedAt`. A note is the traveller's
+     * own record and the UI stamps it with that field, so bumping it for a pin
+     * made the note say its text had been edited when nothing in it had changed.
+     */
     setPinned(state, tripId, noteId, pinned) {
       return withNotes(
         state,
         tripId,
-        notesFor(state, tripId).map((note) =>
-          note.id === noteId ? { ...note, pinned, updatedAt: nowISO() } : note,
-        ),
+        notesFor(state, tripId).map((note) => (note.id === noteId ? { ...note, pinned } : note)),
       )
     },
 

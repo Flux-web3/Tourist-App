@@ -33,11 +33,6 @@ function normaliseExpenseFields(fields: {
     throw new Error('Expense amount must be a finite number.')
   }
 
-  const amount = fromCents(toCents(fields.amount))
-  if (amount <= 0) {
-    throw new Error('Expense amount must be greater than zero.')
-  }
-
   if (typeof fields.description !== 'string' || fields.description.trim().length < 2) {
     throw new Error('Expense description must be at least 2 characters.')
   }
@@ -50,8 +45,16 @@ function normaliseExpenseFields(fields: {
     throw new Error('Expense category is not supported.')
   }
 
+  // The currency is checked before the amount is rounded, because how many
+  // decimals the amount may keep depends on it: 1000.5 is a real EUR figure and
+  // not a real JPY one.
   if (!isCurrency(fields.currency)) {
     throw new Error('Expense currency is not supported.')
+  }
+
+  const amount = fromCents(toCents(fields.amount, fields.currency), fields.currency)
+  if (amount <= 0) {
+    throw new Error('Expense amount must be greater than zero.')
   }
 
   return {

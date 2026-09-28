@@ -1,30 +1,41 @@
 import { useCallback, useState } from 'react'
-import { Alert } from '@/components/ui/Alert'
+import { ActionMenu } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, PageHeader } from '@/components/ui/Card'
 import { Dialog } from '@/components/ui/Dialog'
+import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { formatDateRange, tripLengthInDays } from '@/domain/format'
-import { formatMoneyCompact } from '@/domain/money'
+import { formatAmount } from '@/domain/money'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
+import { DEMO_TRIP_ID } from '@/services/persistence'
 import { selectTripSummary } from '@/state/selectors'
 import { useTourist, useTrips } from '@/state/useTourist'
 import type { Trip } from '@/domain/types'
 
 type TripSummary = ReturnType<typeof selectTripSummary>
 
+/**
+ * The demo trip is opt-in now, so once it is in the list it sits beside trips
+ * the traveller really planned. It has to say what it is on every surface it
+ * appears on, or sample data quietly starts reading as real.
+ */
 function countLabel(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`
 }
 
+function isSampleTrip(trip: Trip): boolean {
+  return trip.id === DEMO_TRIP_ID
+}
+
 function BudgetFigure({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' }) {
   return (
-    <div className="rounded-control bg-surface-low px-2 py-2.5 text-center">
+    <div className="rounded-control bg-surface-low px-2 py-2">
       <p className="text-label-sm uppercase tracking-wider text-ink-subtle">{label}</p>
-      <p className={`tnum mt-1 text-headline-sm ${tone === 'danger' ? 'text-danger' : 'text-ink'}`}>{value}</p>
+      <p className={`tnum mt-0.5 text-headline-sm ${tone === 'danger' ? 'text-danger' : 'text-ink'}`}>{value}</p>
     </div>
   )
 }
@@ -37,11 +48,11 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
 
   return (
     <li className="list-none">
-      <Card as="article" className="flex h-full flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <Card as="article" className="flex h-full flex-col gap-3">
+        <div className="flex flex-col gap-2">
           <div className="min-w-0">
             <h2 className="text-headline-md">{trip.name}</h2>
-            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-body-md text-ink-muted">
+            <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-body-md text-ink-muted">
               <Icon name="flight_takeoff" size={16} className="text-ink-subtle" />
               <span>{trip.origin}</span>
               <Icon name="arrow_forward" size={14} className="text-ink-subtle" />
@@ -49,26 +60,34 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
               <span>{trip.destination}</span>
             </p>
           </div>
-          <Badge
-            tone={ready ? 'actual' : 'ai'}
-            icon={<Icon name={ready ? 'task_alt' : 'auto_awesome'} size={14} />}
-          >
-            {ready ? 'Itinerary ready' : 'Itinerary not generated'}
-          </Badge>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {isSampleTrip(trip) ? (
+              <Badge tone="catalog" icon={<Icon name="science" size={14} />}>
+                {PROTOTYPE_LABEL.sampleTrip}
+              </Badge>
+            ) : null}
+            <Badge
+              tone={ready ? 'actual' : 'ai'}
+              icon={<Icon name={ready ? 'task_alt' : 'auto_awesome'} size={14} />}
+            >
+              {ready ? 'Itinerary ready' : 'Itinerary not generated'}
+            </Badge>
+          </div>
         </div>
 
-        <ul className="flex list-none flex-wrap items-center gap-x-4 gap-y-1.5 text-body-sm text-ink-muted">
-          <li className="flex items-center gap-1.5">
+        <ul className="flex list-none flex-wrap items-center gap-x-3 gap-y-1 text-body-sm text-ink-muted">
+          <li className="tnum flex items-center gap-1.5">
             <Icon name="calendar_month" size={16} className="text-ink-subtle" />
             {formatDateRange(trip.startDate, trip.endDate)}
+          </li>
+          <li className="tnum flex items-center gap-1.5">
+            <Icon name="hourglass_bottom" size={16} className="text-ink-subtle" />
+            {countLabel(length, 'day', 'days')}
           </li>
           <li className="flex items-center gap-1.5">
             <Icon name="group" size={16} className="text-ink-subtle" />
             {countLabel(trip.travelers, 'traveller', 'travellers')}
-          </li>
-          <li className="flex items-center gap-1.5">
-            <Icon name="hourglass_bottom" size={16} className="text-ink-subtle" />
-            {countLabel(length, 'day', 'days')}
           </li>
           <li className="flex items-center gap-1.5">
             <Icon name="pin_drop" size={16} className="text-ink-subtle" />
@@ -78,34 +97,62 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
           </li>
         </ul>
 
-        <div className="rounded-card border border-line bg-surface-low p-3">
-          <div className="grid grid-cols-3 gap-2">
-            <BudgetFigure label={PROTOTYPE_LABEL.tripBudget} value={formatMoneyCompact(trip.budget, trip.currency)} />
-            <BudgetFigure label={PROTOTYPE_LABEL.actualSpent} value={formatMoneyCompact(actualSpent, trip.currency)} />
+        {/*
+          The three figures stay separate on purpose: a ceiling, what has
+          actually been spent and what is left are different kinds of fact. The
+          currency is stated once for the card instead of against each number.
+        */}
+        <div className="rounded-card border border-line bg-surface-low p-2.5">
+          <p className="flex items-baseline justify-between gap-2 px-1 text-label-sm uppercase tracking-wider text-ink-subtle">
+            <span>Budget</span>
+            <span className="tnum">{trip.currency}</span>
+          </p>
+          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+            <BudgetFigure label={PROTOTYPE_LABEL.tripBudget} value={formatAmount(trip.budget, trip.currency)} />
+            <BudgetFigure label={PROTOTYPE_LABEL.actualSpent} value={formatAmount(actualSpent, trip.currency)} />
             <BudgetFigure
               label={PROTOTYPE_LABEL.remaining}
-              value={formatMoneyCompact(remaining, trip.currency)}
+              value={formatAmount(remaining, trip.currency)}
               tone={overBudget ? 'danger' : 'default'}
             />
           </div>
           {overBudget ? (
-            <p className="mt-2 flex items-center justify-center gap-1 text-body-sm text-danger">
+            <p className="mt-1.5 flex items-center justify-center gap-1 text-body-sm text-danger">
               <Icon name="warning" size={16} />
-              {`Over budget by ${formatMoneyCompact(Math.abs(remaining), trip.currency)}`}
+              {`Over budget by ${formatAmount(Math.abs(remaining), trip.currency)}`}
             </p>
           ) : null}
         </div>
 
-        <div className="mt-auto flex flex-col gap-2 sm:flex-row">
-          <ButtonLink to={`/trips/${trip.id}`} fullWidth variant="primary" iconAfter={<Icon name="arrow_forward" size={18} />}>
+        <div className="mt-auto flex flex-col gap-2">
+          <ButtonLink
+            to={`/trips/${trip.id}`}
+            fullWidth
+            variant="primary"
+            iconAfter={<Icon name="arrow_forward" size={18} />}
+          >
             Overview
           </ButtonLink>
-          <ButtonLink to={`/trips/${trip.id}/itinerary`} fullWidth variant="secondary" icon={<Icon name="calendar_month" size={18} />}>
-            Itinerary
-          </ButtonLink>
-          <ButtonLink to={`/trips/${trip.id}/budget`} fullWidth variant="secondary" icon={<Icon name="account_balance_wallet" size={18} />}>
-            Budget
-          </ButtonLink>
+          <div className="grid grid-cols-2 gap-2">
+            <ButtonLink
+              to={`/trips/${trip.id}/itinerary`}
+              size="sm"
+              fullWidth
+              variant="secondary"
+              icon={<Icon name="calendar_month" size={16} />}
+            >
+              Itinerary
+            </ButtonLink>
+            <ButtonLink
+              to={`/trips/${trip.id}/budget`}
+              size="sm"
+              fullWidth
+              variant="secondary"
+              icon={<Icon name="account_balance_wallet" size={16} />}
+            >
+              Budget
+            </ButtonLink>
+          </div>
         </div>
       </Card>
     </li>
@@ -137,9 +184,9 @@ export default function TripsHomePage() {
 
   const closeConfirm = useCallback(() => setConfirmOpen(false), [])
 
-  const restoreDemo = useCallback(() => {
+  const addSampleTrip = useCallback(() => {
     actions.loadDemoData()
-    setStatus('The demo trip has been restored.')
+    setStatus('The sample trip has been added to your trips.')
   }, [actions])
 
   const confirmClear = useCallback(() => {
@@ -148,46 +195,50 @@ export default function TripsHomePage() {
     setStatus('All saved trips, itineraries and expenses have been cleared.')
   }, [actions])
 
+  const hasSampleTrip = trips.some(isSampleTrip)
+  const isEmpty = hydrated && trips.length === 0
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
+      {/*
+        The traveller's trips are the page. The device-storage claim and the
+        sample-data and reset controls used to sit above them, which turned the
+        home screen into an admin panel: the reset in particular was a one-tap
+        text link that wiped everything. It now lives in a deliberate overflow
+        menu behind a confirmation, and the storage claim is one line you can
+        open, at the foot of the page.
+      */}
       <PageHeader
         eyebrow="Trips"
         title="Your trips"
-        description="Every plan, draft and expense you create is kept on this device."
         actions={
-          <ButtonLink to="/trips/new" variant="primary" size="lg" icon={<Icon name="add_location_alt" size={20} />}>
-            Plan a new trip
-          </ButtonLink>
+          <div className="flex items-center gap-2">
+            {isEmpty ? null : (
+              <ButtonLink to="/trips/new" variant="primary" icon={<Icon name="add_location_alt" size={20} />}>
+                Plan a new trip
+              </ButtonLink>
+            )}
+            <ActionMenu
+              label="Sample data and reset options"
+              items={[
+                {
+                  label: hasSampleTrip ? 'Sample trip already added' : 'Add the sample trip',
+                  icon: 'science',
+                  disabled: hasSampleTrip,
+                  onSelect: addSampleTrip,
+                },
+                {
+                  label: 'Clear all data on this device',
+                  icon: 'delete_sweep',
+                  destructive: true,
+                  disabled: trips.length === 0,
+                  onSelect: () => setConfirmOpen(true),
+                },
+              ]}
+            />
+          </div>
         }
       />
-
-      <section aria-label="Prototype notice" className="flex flex-col gap-3">
-        <Alert tone="prototype" title={PROTOTYPE_LABEL.localOnly}>
-          {`${PROTOTYPE_LABEL.noAccount}. Itinerary drafts and prices are estimates, not bookings.`}
-        </Alert>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1.5 text-label-lg text-ink-muted">
-            <Icon name="science" size={16} />
-            Demo data
-          </span>
-          <Button size="sm" variant="ghost" icon={<Icon name="auto_awesome" size={16} />} onClick={restoreDemo}>
-            Restore demo trip
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Icon name="delete_sweep" size={16} />}
-            onClick={() => setConfirmOpen(true)}
-          >
-            Clear all data
-          </Button>
-        </div>
-
-        <p aria-live="polite" className="sr-only">
-          {status}
-        </p>
-      </section>
 
       {!hydrated ? (
         <ul className="flex list-none flex-col gap-4">
@@ -196,16 +247,27 @@ export default function TripsHomePage() {
         </ul>
       ) : trips.length === 0 ? (
         <EmptyState
-          icon="travel_explore"
-          title="No trips yet"
-          description="Plan your first trip and Tourist will draft a day-by-day itinerary, price it out and keep track of what you actually spend."
+          icon="luggage"
+          title="Plan your first trip"
+          description="Tell Tourist where you are going and it drafts a day-by-day itinerary, prices every stop as an estimate, then tracks what you actually spend against it."
           action={
-            <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-              <ButtonLink to="/trips/new" variant="primary" icon={<Icon name="add_location_alt" size={18} />}>
+            <div className="mt-1 flex w-full max-w-xs flex-col gap-2">
+              <ButtonLink
+                to="/trips/new"
+                variant="primary"
+                size="lg"
+                fullWidth
+                icon={<Icon name="add_location_alt" size={20} />}
+              >
                 Plan a trip
               </ButtonLink>
-              <Button variant="secondary" icon={<Icon name="auto_awesome" size={18} />} onClick={restoreDemo}>
-                Restore the demo trip
+              <Button
+                variant="ghost"
+                fullWidth
+                icon={<Icon name="science" size={18} />}
+                onClick={addSampleTrip}
+              >
+                Look around a sample trip
               </Button>
             </div>
           }
@@ -217,6 +279,17 @@ export default function TripsHomePage() {
           ))}
         </ul>
       )}
+
+      <p aria-live="polite" className="sr-only">
+        {status}
+      </p>
+
+      <Disclosure tone="catalog" icon="smartphone" summary={PROTOTYPE_LABEL.localOnly}>
+        <p>
+          {`${PROTOTYPE_LABEL.noAccount}, and nothing is sent to a server. Your trips, itinerary drafts, expenses and notes live in this browser's storage, so they are gone if you clear site data, and they are not there if you open Tourist on another device.`}
+        </p>
+        <p className="mt-2">Itinerary drafts and prices are estimates, not bookings.</p>
+      </Disclosure>
 
       <Dialog
         open={confirmOpen}
@@ -246,7 +319,7 @@ export default function TripsHomePage() {
                 <Icon name="luggage" size={18} className="mt-0.5 shrink-0 text-ink-subtle" />
                 <span>
                   <span className="text-label-lg text-ink">{trip.name}</span>
-                  {` \u00b7 ${formatDateRange(trip.startDate, trip.endDate)}, its itinerary draft and logged expenses`}
+                  {` · ${formatDateRange(trip.startDate, trip.endDate)}, its itinerary draft and logged expenses`}
                 </span>
               </li>
             ))}

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/Alert'
 import { Button, Spinner } from '@/components/ui/Button'
 import { Disclosure } from '@/components/ui/Disclosure'
@@ -17,16 +17,32 @@ import type { ItineraryDay, Trip } from '@/domain/types'
  * itself below the fold. Errors and fresh successes still announce themselves,
  * and the standing explanation of where drafts come from now lives in a
  * `Disclosure` beside the regenerate control.
+ *
+ * At rest the wrapper carries no margin either, so a quiet panel costs the
+ * itinerary no vertical space at all.
  */
 export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay[] }) {
   const { actions } = useTourist()
   const generation = useGeneration(trip.id)
   const draft = useMemo(() => summariseDraft(days), [days])
   const loading = generation.status === 'loading'
+  const failed = generation.status === 'error'
+
+  /**
+   * `status: 'success'` is persisted, so a trip drafted last week would reopen
+   * on last week's confirmation banner instead of on its itinerary. The banner
+   * is only worth a line of the screen to someone who watched the draft being
+   * made in this session.
+   */
+  const [watchedRun, setWatchedRun] = useState(false)
+  useEffect(() => {
+    if (loading) setWatchedRun(true)
+  }, [loading])
+  const succeeded = generation.status === 'success' && watchedRun
 
   const liveMessage = (() => {
     if (loading) return 'Drafting your itinerary…'
-    if (generation.status === 'error') {
+    if (failed) {
       return 'The itinerary draft could not be generated. The plan you already had is untouched.'
     }
     if (generation.status === 'success') return 'Your itinerary draft is ready.'
@@ -34,7 +50,7 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
   })()
 
   return (
-    <div className="flex flex-col gap-3 empty:hidden">
+    <div className={loading || failed || succeeded ? 'mb-4 flex flex-col gap-3' : ''}>
       {/* Always mounted so assistive tech hears the change, visually empty at rest. */}
       <p role="status" aria-live="polite" className="sr-only">
         {liveMessage}
@@ -44,13 +60,12 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
         <div className="flex items-center gap-2 rounded-control border border-line bg-surface px-4 py-3">
           <Spinner size={18} className="text-ink-muted" />
           <p className="min-w-0 text-body-md text-ink-muted">
-            Drafting your itinerary. The days and stops already on screen stay exactly where they
-            are.
+            Drafting your itinerary. Nothing already on your plan will be moved or removed.
           </p>
         </div>
       ) : null}
 
-      {generation.status === 'error' ? (
+      {failed ? (
         <Alert
           tone="danger"
           title="The itinerary draft could not be generated"
@@ -69,11 +84,11 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
         >
           {`${
             generation.error ?? 'Something went wrong while drafting your itinerary.'
-          } Nothing was changed: the days, stops and prices you already have were left exactly as they were.`}
+          } The days, stops and prices you already have were left exactly as they were.`}
         </Alert>
       ) : null}
 
-      {generation.status === 'success' ? (
+      {succeeded ? (
         <Alert tone="success" title="Your draft is ready">
           {`${draft.dayCount} ${draft.dayCount === 1 ? 'day' : 'days'} · ${
             draft.itemCount
@@ -90,7 +105,11 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
 /**
  * The standing explanation of where a draft comes from, as one openable line.
  *
- * The claim stays on screen; the reasoning is one tap away.
+ * The claim stays on screen; the reasoning is one tap away. Both of the essays
+ * that used to sit above the itinerary live here — where the draft comes from,
+ * and what a regeneration will and will not touch — because the second one is
+ * the reassurance that makes the regenerate control safe to press, not a
+ * paragraph anyone needs to re-read on every visit.
  */
 export function DraftProvenanceNote() {
   return (
@@ -99,16 +118,24 @@ export function DraftProvenanceNote() {
       icon="auto_awesome"
       summary={
         <>
-          <strong className="font-semibold">AI draft.</strong> Assembled on this device, not booked.
+          <strong className="font-semibold">{PROTOTYPE_LABEL.aiDraft}.</strong> Made on this device,
+          not booked. Regenerating keeps your edits.
         </>
       }
     >
-      Not a live AI service. The plan is put together in your browser by a deterministic generator
-      drawing on the {PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue, so nothing leaves
-      this device and the same trip always produces the same draft. Every price is an estimate:{' '}
-      {PROTOTYPE_LABEL.informationMayChange.toLowerCase()}. Regenerating replaces AI suggestions but
-      always keeps stops you added yourself, anything from the curated guide, and anything you have
-      edited.
+      <p>
+        Not a live AI service. The plan is put together in your browser by a deterministic generator
+        drawing on the {PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue, so nothing leaves
+        this device and the same trip always produces the same draft. Every price is an estimate:{' '}
+        {PROTOTYPE_LABEL.informationMayChange.toLowerCase()}.
+      </p>
+      <p className="mt-2">
+        <strong className="font-semibold">Regenerating never takes your own work away.</strong> It
+        replaces {PROTOTYPE_LABEL.aiDraft} suggestions, but it always keeps the activities you added
+        yourself, the {PROTOTYPE_LABEL.catalogDemo.toLowerCase()} items from the{' '}
+        {PROTOTYPE_LABEL.curatedGuide.toLowerCase()}, and anything you have edited. Use Replace on a
+        single stop when you only want one thing to change.
+      </p>
     </Disclosure>
   )
 }

@@ -40,7 +40,28 @@ export function suggestTripName(destination: string, startISO: string): string {
   return `${place} in ${month}`
 }
 
-export function validateTripDraft(draft: TripDraft): { errors: TripDraftErrors; isValid: boolean } {
+/**
+ * Extra facts about *where the draft came from*, which the rules need in order
+ * to stay honest about a trip that has already begun.
+ */
+export interface TripDraftContext {
+  /**
+   * The `startDate` already stored on the trip being edited.
+   *
+   * A start date in the past is refused when it is being *chosen*, because
+   * nobody plans a trip backwards. It must not be refused when it is merely
+   * being *carried over*: once a trip begins, its own start date is in the past
+   * for the rest of the trip, and treating that as an error freezes the budget,
+   * the notes, the interests, the pace and the name for good. Leave this unset
+   * for trip creation, where there is no previous value and the rule is firm.
+   */
+  previousStartDate?: string
+}
+
+export function validateTripDraft(
+  draft: TripDraft,
+  context: TripDraftContext = {},
+): { errors: TripDraftErrors; isValid: boolean } {
   const errors: TripDraftErrors = {}
 
   const name = typeof draft.name === 'string' ? draft.name : ''
@@ -57,9 +78,11 @@ export function validateTripDraft(draft: TripDraft): { errors: TripDraftErrors; 
   }
 
   const start = parseISODate(draft.startDate)
+  const startUnchanged =
+    context.previousStartDate !== undefined && draft.startDate === context.previousStartDate
   if (!start) {
     errors.startDate = 'Choose a start date.'
-  } else if (draft.startDate < todayISO()) {
+  } else if (!startUnchanged && draft.startDate < todayISO()) {
     errors.startDate = 'Start date cannot be in the past.'
   }
 

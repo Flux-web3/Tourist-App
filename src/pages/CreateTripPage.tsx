@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
+import { Disclosure } from '@/components/ui/Disclosure'
 import {
   CheckboxChipGroup,
   NumberField,
@@ -114,16 +114,21 @@ export default function CreateTripPage() {
   }, [draft.destination, draft.startDate, update])
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         eyebrow="New trip"
         title="Plan a trip"
-        description="A handful of short answers and Tourist drafts a day-by-day itinerary you can argue with. Nothing is booked and nothing is charged."
+        description="A few short answers and Tourist drafts a day-by-day itinerary you can argue with. Nothing is booked and nothing is charged."
       />
 
-      <Alert tone="prototype" title={PROTOTYPE_LABEL.localOnly}>
-        {`${PROTOTYPE_LABEL.noAccount}. The trip, its draft itinerary and every expense stay in this browser.`}
-      </Alert>
+      {/*
+        The storage claim was a full banner above the form, which on a phone
+        pushed the first question below the fold. It is one line now, and the
+        detail is one tap away.
+      */}
+      <Disclosure tone="catalog" icon="smartphone" summary={PROTOTYPE_LABEL.localOnly}>
+        {`${PROTOTYPE_LABEL.noAccount}. The trip, its draft itinerary and every expense stay in this browser, and nothing is sent to a server.`}
+      </Disclosure>
 
       <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
         {messages.length > 0 ? (
@@ -145,9 +150,7 @@ export default function CreateTripPage() {
         ) : null}
 
         <Card className="flex flex-col gap-4">
-          <CardTitle hint="We use the destination to shape the first draft of your days.">
-            Where you are going
-          </CardTitle>
+          <CardTitle>Where and when</CardTitle>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField
@@ -169,15 +172,7 @@ export default function CreateTripPage() {
               error={errors.destination}
               onChange={(event) => update({ destination: event.target.value })}
             />
-          </div>
-        </Card>
 
-        <Card className="flex flex-col gap-4">
-          <CardTitle hint={`Up to ${TRIP_LIMITS.maxDays} days. Every day becomes a row in the draft.`}>
-            When you are going
-          </CardTitle>
-
-          <div className="grid gap-4 sm:grid-cols-2">
             <TextField
               label="Start date"
               required
@@ -195,14 +190,15 @@ export default function CreateTripPage() {
               min={draft.startDate || today}
               value={draft.endDate}
               error={errors.endDate}
+              hint={`Up to ${TRIP_LIMITS.maxDays} days.`}
               onChange={(event) => update({ endDate: event.target.value })}
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2">
             <div
               aria-live="polite"
-              className="flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-control border border-line bg-surface-low px-3 py-2"
+              className="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-line bg-surface-low px-3 py-2"
             >
               <Icon name="event_available" size={18} className="text-ink-subtle" />
               <span className="text-body-sm text-ink-muted">{rangeText}</span>
@@ -233,7 +229,7 @@ export default function CreateTripPage() {
                   aria-pressed={active}
                   onClick={() => applyPreset(preset.days)}
                 >
-                  {`${preset.label} \u00b7 ${preset.days} days`}
+                  {`${preset.label} · ${preset.days} days`}
                 </Button>
               )
             })}
@@ -241,8 +237,8 @@ export default function CreateTripPage() {
         </Card>
 
         <Card className="flex flex-col gap-4">
-          <CardTitle hint="One ceiling for the whole trip. You can log real spending against it later.">
-            Who is going, and the budget
+          <CardTitle hint="One ceiling for the whole trip. You log real spending against it later.">
+            Travellers and budget
           </CardTitle>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -257,36 +253,34 @@ export default function CreateTripPage() {
               onValueChange={(value) => update({ travelers: Math.round(value) })}
             />
 
-            <NumberField
-              label="Trip budget"
-              required
-              min={0}
-              max={TRIP_LIMITS.maxBudget}
-              step={50}
-              value={draft.budget}
-              prefix={CURRENCY_SYMBOLS[draft.currency]}
-              suffix={draft.currency}
-              error={errors.budget}
-              onValueChange={(value) => update({ budget: value })}
-            />
-
+            {/* Currency comes before the amount, so the figure is typed in a known unit. */}
             <SelectField
               label="Currency"
               required
               options={CURRENCY_OPTIONS}
               value={draft.currency}
               error={errors.currency}
-              hint="This prototype keeps one currency per trip. No live conversion."
+              hint="One currency per trip. No live conversion."
               onChange={(event) => update({ currency: event.target.value as CurrencyCode })}
+            />
+
+            <NumberField
+              label={`Trip budget (${draft.currency})`}
+              required
+              min={0}
+              max={TRIP_LIMITS.maxBudget}
+              step={50}
+              value={draft.budget}
+              prefix={CURRENCY_SYMBOLS[draft.currency]}
+              error={errors.budget}
+              onValueChange={(value) => update({ budget: value })}
               className="sm:col-span-2"
             />
           </div>
         </Card>
 
         <Card className="flex flex-col gap-4">
-          <CardTitle hint="Pick what the draft should lean towards. At least one.">
-            What you enjoy doing
-          </CardTitle>
+          <CardTitle>What the draft should lean towards</CardTitle>
 
           <CheckboxChipGroup<TravelInterest>
             legend="Interests"
@@ -294,12 +288,9 @@ export default function CreateTripPage() {
             options={INTEREST_OPTIONS}
             values={draft.interests}
             error={errors.interests}
+            hint="Pick at least one."
             onChange={(interests) => update({ interests })}
           />
-        </Card>
-
-        <Card className="flex flex-col gap-4">
-          <CardTitle hint="How hard you want the days to work.">How you like to travel</CardTitle>
 
           <RadioChipGroup<TravelPace>
             legend="Pace"
@@ -312,7 +303,7 @@ export default function CreateTripPage() {
         </Card>
 
         <Card className="flex flex-col gap-4">
-          <CardTitle hint="Both are optional — we will suggest a name.">Name and notes</CardTitle>
+          <CardTitle hint="Both optional.">Name and notes</CardTitle>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <TextField
@@ -321,7 +312,7 @@ export default function CreateTripPage() {
               maxLength={TRIP_LIMITS.maxNameLength}
               placeholder={suggestTripName(draft.destination, draft.startDate)}
               error={errors.name}
-              hint={`Leave blank and we will name it after the destination and month.`}
+              hint="Leave blank and we name it after the destination and month."
               onChange={(event) => update({ name: event.target.value })}
               className="min-w-0 flex-1"
             />
@@ -347,27 +338,26 @@ export default function CreateTripPage() {
           />
         </Card>
 
-        <Card as="div" className="flex flex-col gap-3">
+        <div className="surface-card flex flex-col gap-3 p-5">
           <p className="text-body-sm text-ink-subtle">
-            Your trip is created on this device, then we draft a first itinerary for it. You can change every
-            part of that draft afterwards.
+            The trip is created on this device, then we draft a first itinerary for it. You can change
+            every part of that draft afterwards.
           </p>
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <ButtonLink to="/trips" variant="ghost">
-              Cancel
-            </ButtonLink>
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              loading={isSubmitting}
-              loadingLabel="Creating your trip"
-              iconAfter={<Icon name="arrow_forward" size={18} />}
-            >
-              Create trip and draft itinerary
-            </Button>
-          </div>
-        </Card>
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={isSubmitting}
+            loadingLabel="Creating your trip"
+            iconAfter={<Icon name="arrow_forward" size={18} />}
+          >
+            Create trip and draft itinerary
+          </Button>
+          <ButtonLink to="/trips" variant="ghost" fullWidth>
+            Cancel
+          </ButtonLink>
+        </div>
       </form>
     </div>
   )

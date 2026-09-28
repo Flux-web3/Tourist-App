@@ -1,5 +1,5 @@
 import { estimateTotal } from '@/domain/itinerary'
-import { summariseBudget, type BudgetSummary } from '@/domain/money'
+import { fromCents, summariseBudget, toCents, type BudgetSummary } from '@/domain/money'
 import type { Expense, ItineraryDay, ItineraryItem, Trip, TripNote } from '@/domain/types'
 import type { PersistedState } from '@/services/contracts'
 
@@ -25,19 +25,33 @@ export function selectExpenses(state: PersistedState, tripId: string | undefined
   })
 }
 
+/**
+ * Groups by category on the exact cent scale. Accumulating in major units and
+ * re-rounding after every addition loses whole cents on amounts the float
+ * representation cannot hold, so the running total is kept as integer cents and
+ * converted back once.
+ */
 export function selectExpensesByCategory(
   expenses: readonly Expense[],
 ): Array<{ category: Expense['category']; total: number; count: number }> {
-  const buckets = new Map<Expense['category'], { category: Expense['category']; total: number; count: number }>()
+  const buckets = new Map<Expense['category'], { category: Expense['category']; cents: number; count: number }>()
   for (const expense of expenses) {
-    const existing = buckets.get(expense.category) ?? { category: expense.category, total: 0, count: 0 }
-    existing.total = Math.round((existing.total + expense.amount) * 100) / 100
+    const existing = buckets.get(expense.category) ?? { category: expense.category, cents: 0, count: 0 }
+    existing.cents += toCents(expense.amount)
     existing.count += 1
     buckets.set(expense.category, existing)
   }
-  return [...buckets.values()].sort((a, b) => b.total - a.total)
+  return [...buckets.values()]
+    .sort((a, b) => b.cents - a.cents)
+    .map(({ category, cents, count }) => ({ category, total: fromCents(cents), count }))
 }
 
+/**
+ * Each expense carries the currency it was logged in, and switching a trip's
+ * currency does not rewrite them. The codes therefore travel with the amounts
+ * so the summary can total only what is genuinely in the trip currency and
+ * report the rest instead of silently mixing scales.
+ */
 export function selectBudget(state: PersistedState, trip: Trip | null): BudgetSummary | null {
   if (!trip) return null
   const days = selectDays(state, trip.id)
@@ -46,6 +60,7 @@ export function selectBudget(state: PersistedState, trip: Trip | null): BudgetSu
     tripBudget: trip.budget,
     itineraryEstimates: days.flatMap((day) => day.items.map((item) => item.estimatedCost)),
     expenseAmounts: expenses.map((expense) => expense.amount),
+    expenseCurrencies: expenses.map((expense) => expense.currency),
     currency: trip.currency,
   })
 }

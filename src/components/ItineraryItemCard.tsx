@@ -1,11 +1,12 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { ActionMenu, type ActionMenuItem } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, Spinner } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { SelectField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { formatShortDate, formatTime } from '@/domain/format'
-import { formatMoney } from '@/domain/money'
+import { formatPrice, toCents } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import type { CurrencyCode, ItineraryDay, ItineraryItem } from '@/domain/types'
 
@@ -23,6 +24,20 @@ interface ItineraryItemCardProps {
   onRemove: () => void
 }
 
+/**
+ * One stop on the itinerary.
+ *
+ * Edit, Replace, Move and Remove used to be four visible buttons on every card,
+ * so a week-long plan put roughly ninety buttons on one page and the stops
+ * themselves stopped being the thing you read. They now sit behind a single
+ * overflow menu per card, named after the stop so twenty-two of them are
+ * distinguishable to a screen reader. Nothing was dropped: every action is one
+ * tap away, and the catalogue link stays a real link.
+ *
+ * The price keeps its estimate marking, but as a compact `≈ €24` figure rather
+ * than an ESTIMATED PRICE caption above it, and a free stop reads `Free`
+ * instead of `€0.00 EUR`, which looked like missing data.
+ */
 export function ItineraryItemCard({
   item,
   day,
@@ -38,7 +53,7 @@ export function ItineraryItemCard({
 }: ItineraryItemCardProps) {
   const [targetDayId, setTargetDayId] = useState('')
   const titleId = useId()
-  const moveRegionId = useId()
+  const movePanelRef = useRef<HTMLDivElement>(null)
 
   const pending = pendingItemId === item.id
   const swapBlocked = pendingItemId !== null && !pending
@@ -51,20 +66,73 @@ export function ItineraryItemCard({
       label: `Day ${entry.position + 1} · ${formatShortDate(entry.candidate.date)}`,
     }))
 
+  /**
+   * The menu hands focus back to its trigger when a row is chosen, so the day
+   * picker it reveals has to claim focus itself or a keyboard user would have to
+   * hunt for it.
+   */
+  useEffect(() => {
+    if (moving) movePanelRef.current?.querySelector('select')?.focus()
+  }, [moving])
+
   const timeParts = [formatTime(item.startTime), item.endTime ? formatTime(item.endTime) : null]
   const timeRange = timeParts.filter((part) => part !== null).join(' – ')
 
-  return (
-    <article aria-labelledby={titleId} className="surface-card p-4">
-      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-start sm:gap-4">
-        {timeRange ? (
-          <p className="tnum w-fit rounded-badge bg-surface-high px-2 py-1 text-label-md text-ink-muted">
-            {timeRange}
-          </p>
-        ) : null}
+  const free = toCents(item.estimatedCost) === 0
+  const price = formatPrice(item.estimatedCost, currency)
 
-        <div className="min-w-0">
-          <h4 id={titleId} className="break-words text-label-lg text-ink">
+  const actions: ActionMenuItem[] = [
+    { label: 'Edit', icon: 'edit', onSelect: onEdit },
+    {
+      label: pending ? 'Swapping' : 'Replace',
+      icon: 'swap_horiz',
+      onSelect: onReplace,
+      disabled: pending || swapBlocked,
+    },
+    ...(moveOptions.length > 0
+      ? [
+          {
+            label: 'Move to another day',
+            icon: 'drive_file_move_outline',
+            onSelect: onToggleMove,
+          },
+        ]
+      : []),
+    { label: 'Remove', icon: 'delete_outline', onSelect: onRemove, destructive: true },
+  ]
+
+  return (
+    <article
+      aria-labelledby={titleId}
+      aria-busy={pending || undefined}
+      className="surface-card p-4"
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {timeRange ? (
+              <p className="tnum rounded-badge bg-surface-high px-2 py-0.5 text-label-md text-ink-muted">
+                {timeRange}
+              </p>
+            ) : null}
+
+            <p className="tnum text-label-md text-ink-muted">
+              <span className="sr-only">{`${PROTOTYPE_LABEL.estimatedPrice}: `}</span>
+              {free ? price : `≈ ${price}`}
+            </p>
+
+            {pending ? (
+              <p
+                role="status"
+                className="inline-flex items-center gap-1.5 rounded-badge border border-ai-border bg-ai-bg px-2 py-0.5 text-label-md text-ai-ink"
+              >
+                <Spinner size={12} />
+                Swapping
+              </p>
+            ) : null}
+          </div>
+
+          <h4 id={titleId} className="mt-1.5 break-words text-label-lg text-ink">
             {item.title}
           </h4>
 
@@ -113,79 +181,32 @@ export function ItineraryItemCard({
               <span className="font-semibold">Note:</span> {item.notes}
             </p>
           ) : null}
+
+          {item.source === 'catalog' && item.experienceId ? (
+            <ButtonLink
+              to={`/places/${item.experienceId}`}
+              variant="ghost"
+              icon={<Icon name="open_in_new" size={16} />}
+              className="-ml-3 mt-1"
+            >
+              Open in Explore
+            </ButtonLink>
+          ) : null}
         </div>
 
-        <div className="sm:text-right">
-          <p className="text-label-sm uppercase tracking-wider text-ink-subtle">
-            {PROTOTYPE_LABEL.estimatedPrice}
-          </p>
-          <p className="tnum text-label-lg text-ink">{formatMoney(item.estimatedCost, currency)}</p>
+        <div className="shrink-0">
+          <ActionMenu label={`Actions for ${item.title}`} items={actions} />
         </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-        {item.source === 'catalog' && item.experienceId ? (
-          <ButtonLink
-            to={`/places/${item.experienceId}`}
-            variant="ghost"
-            size="sm"
-            icon={<Icon name="open_in_new" size={16} />}
-          >
-            Open in Explore
-          </ButtonLink>
-        ) : null}
-
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Icon name="edit" size={16} />}
-          onClick={onEdit}
-        >
-          Edit
-        </Button>
-
-        <Button
-          variant="secondary"
-          size="sm"
-          loading={pending}
-          loadingLabel="Swapping"
-          disabled={swapBlocked}
-          icon={<Icon name="swap_horiz" size={16} />}
-          onClick={onReplace}
-        >
-          Replace
-        </Button>
-
-        {moveOptions.length > 0 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Icon name="drive_file_move_outline" size={16} />}
-            aria-expanded={moving}
-            aria-controls={moving ? moveRegionId : undefined}
-            onClick={onToggleMove}
-          >
-            Move
-          </Button>
-        ) : null}
-
-        <Button
-          variant="danger"
-          size="sm"
-          icon={<Icon name="delete_outline" size={16} />}
-          onClick={onRemove}
-        >
-          Remove
-        </Button>
       </div>
 
       {moving && moveOptions.length > 0 ? (
-        <div id={moveRegionId} className="mt-3 w-full sm:w-72">
+        <div ref={movePanelRef} className="mt-3 flex flex-wrap items-end gap-2">
           <SelectField
             label={`Move ${item.title} to another day`}
             options={moveOptions}
             value={targetDayId}
             placeholder="Choose a day"
+            className="min-w-0 flex-1 sm:max-w-72"
             onChange={(event) => {
               const next = event.target.value
               if (next === '') return
@@ -193,6 +214,9 @@ export function ItineraryItemCard({
               onMove(next)
             }}
           />
+          <Button variant="ghost" onClick={onToggleMove}>
+            Cancel
+          </Button>
         </div>
       ) : null}
     </article>

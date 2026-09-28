@@ -31,8 +31,15 @@ export function Dialog({ open, onClose, title, description, children, footer, si
     if (!open) return
     restoreRef.current = document.activeElement as HTMLElement | null
     const panel = panelRef.current
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE)
-    ;(first ?? panel)?.focus()
+    /*
+     * Land on the first control in the body, not on Close. Close comes first in
+     * the DOM, so the naive "first focusable" put every form dialog's opening
+     * focus on the dismiss button — the one control the traveller did not open
+     * the dialog to use. Falls back to Close, then to the panel itself.
+     */
+    const focusable = [...(panel?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
+    const target = focusable.find((element) => element.dataset.dialogClose !== 'true')
+    ;(target ?? focusable[0] ?? panel)?.focus()
 
     const close = () => onCloseRef.current()
 
@@ -106,6 +113,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
           </div>
           <button
             type="button"
+            data-dialog-close="true"
             onClick={onClose}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
           >

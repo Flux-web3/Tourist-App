@@ -1,32 +1,80 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { EditExpenseDialog, ExpenseFormDialog } from '@/components/ExpenseFormDialog'
-import { Alert } from '@/components/ui/Alert'
+import { ActionMenu } from '@/components/ui/ActionMenu'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
 import { Dialog } from '@/components/ui/Dialog'
+import { Alert } from '@/components/ui/Alert'
+import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
-import { ProgressBar, StatTile } from '@/components/ui/StatTile'
+import { ProgressBar } from '@/components/ui/StatTile'
 import { formatDate, formatShortDate } from '@/domain/format'
 import { estimateTotal } from '@/domain/itinerary'
-import { CURRENCY_SYMBOLS, formatMoney } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatAmount } from '@/domain/money'
 import { EXPENSE_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { selectExpensesByCategory } from '@/state/selectors'
 import { useTourist, useTrip, useTripBudget, useTripDays, useTripExpenses } from '@/state/useTourist'
-import type { Expense } from '@/domain/types'
+import type { CurrencyCode, Expense } from '@/domain/types'
 
 function countLabel(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`
 }
 
-function Definition({ term, children }: { term: string; children: ReactNode }) {
+/**
+ * Provenance tints for the three supporting figures.
+ *
+ * The four figures on this page each come from a different place, and the
+ * design system encodes that in colour: `planned-*` is the traveller's own
+ * ceiling, `ai-*` is a projection, `actual-*` is settled money. Losing that
+ * coding would be losing the product's whole argument about financial honesty,
+ * so the figures got denser rather than plainer.
+ */
+type FigureTone = 'planned' | 'ai' | 'actual'
+
+const FIGURE_TONE: Record<FigureTone, string> = {
+  planned: 'border-planned-border bg-planned-bg text-planned-ink',
+  ai: 'border-ai-border bg-ai-bg text-ai-ink',
+  actual: 'border-actual-border bg-actual-bg text-actual-ink',
+}
+
+function FigureRow({
+  tone,
+  icon,
+  label,
+  note,
+  amount,
+  currency,
+}: {
+  tone: FigureTone
+  icon: string
+  label: string
+  note?: string
+  amount: number
+  currency: CurrencyCode
+}) {
   return (
-    <div className="flex flex-col gap-0.5 border-b border-line pb-3">
-      <dt className="text-label-sm uppercase tracking-wider text-ink-subtle">{term}</dt>
-      <dd className="text-body-md text-ink-muted">{children}</dd>
+    <div
+      className={`flex items-center justify-between gap-3 rounded-control border px-3 py-2 ${FIGURE_TONE[tone]}`}
+    >
+      <dt className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-label-lg">
+        <Icon name={icon} size={14} className="shrink-0 opacity-70" />
+        <span className="min-w-0">{label}</span>
+        {note ? <span className="text-body-sm opacity-80">{note}</span> : null}
+      </dt>
+      <dd className="tnum shrink-0 text-headline-sm">{formatAmount(amount, currency)}</dd>
+    </div>
+  )
+}
+
+function Definition({ term, children }: { term: string; children: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-label-md">{term}</dt>
+      <dd className="opacity-90">{children}</dd>
     </div>
   )
 }
@@ -53,8 +101,7 @@ export default function BudgetPage() {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title="Budget" description="Restoring this trip from your device." />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-56 w-full" />
         <Skeleton className="h-64 w-full" />
       </div>
     )
@@ -88,6 +135,8 @@ export default function BudgetPage() {
   const hasBudget = budget.tripBudget > 0
   const percent = hasBudget ? Math.round((budget.actualSpent / budget.tripBudget) * 100) : 0
   const currency = trip.currency
+  const over = budget.isOverBudget
+  const overBy = formatAmount(Math.abs(budget.remaining), currency)
 
   const confirmDelete = () => {
     if (!deleting) return
@@ -96,11 +145,11 @@ export default function BudgetPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         eyebrow="Budget"
         title={trip.name}
-        description="Log what you actually spend and this budget stays honest. The itinerary estimate stays a projection and is never counted as a bill."
+        description="Log what you spend and this stays honest: the itinerary estimate is a projection, never a bill."
         actions={
           <>
             <ButtonLink
@@ -117,84 +166,137 @@ export default function BudgetPage() {
         }
       />
 
-      <section aria-label="Budget summary" className="flex flex-col gap-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatTile
-            label={PROTOTYPE_LABEL.tripBudget}
-            value={formatMoney(budget.tripBudget, currency)}
-            caption="Your ceiling for the whole trip"
-            icon={<Icon name="savings" size={14} />}
-          />
-          <StatTile
-            label={PROTOTYPE_LABEL.aiDraftEstimate}
-            value={formatMoney(budget.itineraryEstimate, currency)}
-            caption="A projection from the itinerary, not a booking or a bill"
-            tone="accent"
-            icon={<Icon name="auto_awesome" size={14} />}
-          />
-          <StatTile
-            label={PROTOTYPE_LABEL.actualSpent}
-            value={formatMoney(budget.actualSpent, currency)}
-            caption="Expenses you have logged"
-            tone="actual"
-            icon={<Icon name="receipt_long" size={14} />}
-          />
-          <StatTile
-            label={PROTOTYPE_LABEL.remaining}
-            value={formatMoney(budget.remaining, currency)}
-            caption={
-              budget.isOverBudget
-                ? `Trip budget minus actual spent. You are ${formatMoney(Math.abs(budget.remaining), currency)} over budget.`
-                : 'Trip budget minus actual spent'
-            }
-            tone={budget.isOverBudget ? 'danger' : 'neutral'}
-            icon={<Icon name={budget.isOverBudget ? 'warning' : 'account_balance_wallet'} size={14} />}
-          />
+      {/*
+        One card, four figures, roughly one phone screen. These used to be four
+        full-width tiles carrying `€1,385.00 EUR` each, which pushed the expense
+        list — the only part of the page a traveller acts on — below the fold.
+      */}
+      <section aria-label="Budget summary" className="surface-card flex flex-col gap-3 p-4 sm:p-5">
+        {/*
+          Over budget reads through the `danger` border and figure plus the
+          wording, not through a flooded red panel or an alarm icon. The minus
+          sign and the sentence carry it without depending on colour, and
+          `danger-bg` as a fill is a saturated block in the dark theme, which
+          made a normal trip overspend look like a system failure.
+        */}
+        <div
+          role="status"
+          className={`rounded-control border bg-surface-low px-4 py-3 ${
+            over ? 'border-danger/50' : 'border-line'
+          }`}
+        >
+          <p
+            className={`flex items-center gap-1.5 text-label-sm uppercase tracking-wider ${
+              over ? 'text-danger' : 'text-ink-subtle'
+            }`}
+          >
+            <Icon name="account_balance_wallet" size={14} className="shrink-0" />
+            <span>{PROTOTYPE_LABEL.remaining}</span>
+          </p>
+          <p
+            className={`tnum mt-0.5 text-headline-lg sm:text-display ${
+              over ? 'text-danger' : 'text-ink'
+            }`}
+          >
+            {formatAmount(budget.remaining, currency)}
+          </p>
+          <p className="mt-0.5 text-body-sm text-ink-muted">
+            {over
+              ? `${overBy} past your ${PROTOTYPE_LABEL.tripBudget}. Log less, remove an expense, or raise the budget.`
+              : `${PROTOTYPE_LABEL.tripBudget} minus ${PROTOTYPE_LABEL.actualSpent}.`}
+          </p>
         </div>
 
-        <div className="surface-card flex flex-col gap-2 p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <p className="text-label-lg text-ink">{`${PROTOTYPE_LABEL.actualSpent} against ${PROTOTYPE_LABEL.tripBudget}`}</p>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="text-label-lg text-ink">Budget used</p>
             <p className="tnum text-body-sm text-ink-muted">
               {hasBudget
-                ? `${percent}% of ${formatMoney(budget.tripBudget, currency)}`
+                ? `${percent}% of ${formatAmount(budget.tripBudget, currency)}`
                 : 'No trip budget set yet'}
             </p>
           </div>
           <ProgressBar
             value={budget.actualSpent}
             max={budget.tripBudget}
-            label={`${PROTOTYPE_LABEL.actualSpent} against ${PROTOTYPE_LABEL.tripBudget}`}
-            tone={budget.isOverBudget ? 'danger' : 'actual'}
+            label="Budget used"
+            tone={over ? 'danger' : 'actual'}
           />
-          <p className="tnum text-body-sm text-ink-muted">
-            {hasBudget
-              ? budget.isOverBudget
-                ? `Over budget by ${formatMoney(Math.abs(budget.remaining), currency)}. Remove an expense, or raise the trip budget.`
-                : `${formatMoney(budget.remaining, currency)} of ${formatMoney(budget.tripBudget, currency)} still unspent.`
-              : 'Add a trip budget and this bar starts tracking how far the trip has gone.'}
-          </p>
+          {hasBudget ? null : (
+            <p className="text-body-sm text-ink-subtle">
+              Add a trip budget and this bar starts tracking how far the trip has gone.
+            </p>
+          )}
         </div>
+
+        <dl className="flex flex-col gap-1.5">
+          <FigureRow
+            tone="planned"
+            icon="savings"
+            label={PROTOTYPE_LABEL.tripBudget}
+            note="your ceiling"
+            amount={budget.tripBudget}
+            currency={currency}
+          />
+          <FigureRow
+            tone="ai"
+            icon="auto_awesome"
+            label={PROTOTYPE_LABEL.aiDraftEstimate}
+            note="a projection"
+            amount={budget.itineraryEstimate}
+            currency={currency}
+          />
+          <FigureRow
+            tone="actual"
+            icon="receipt_long"
+            label={PROTOTYPE_LABEL.actualSpent}
+            note="settled"
+            amount={budget.actualSpent}
+            currency={currency}
+          />
+        </dl>
       </section>
 
-      {budget.isOverBudget ? (
-        <Alert tone="danger" title="You are over budget">
-          {`Logged spending exceeds the trip budget by ${formatMoney(Math.abs(budget.remaining), currency)}. ${PROTOTYPE_LABEL.aiDraftEstimate} is not part of this figure: it stays a separate projection and is never added to what you have spent.`}
+      {/*
+        The standing explanation of the four figures, as one openable line. It
+        used to be a full card of definitions plus an alert, which is where a
+        third of the first screen went.
+      */}
+      {/*
+        Changing a trip's currency leaves already-logged expenses in the one
+        they were paid in. Those are left out of Actual Spent rather than summed
+        across currencies, so the total stays true — but a total that quietly
+        omits expenses would be the worst kind of wrong, so it says so.
+      */}
+      {budget.mixedCurrency ? (
+        <Alert
+          tone="warning"
+          title={`${budget.uncountedExpenseCount} ${
+            budget.uncountedExpenseCount === 1 ? 'expense is' : 'expenses are'
+          } not counted in this total`}
+          className="mb-4"
+        >
+          {`They were logged in ${budget.otherCurrencies.join(', ')} and this trip is in ${currency}. Tourist does not convert between currencies, so adding them together would give you a number that means nothing. Edit them to ${currency}, or change the trip back, and they will count again.`}
         </Alert>
       ) : null}
 
-      <Card>
-        <CardTitle hint="Four figures, defined once, so nothing on this page can be read two ways.">
-          How these numbers work
-        </CardTitle>
-        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+      <Disclosure
+        icon="info"
+        summary={
+          <>
+            <strong className="font-semibold">{`All amounts in ${currency} (${CURRENCY_SYMBOLS[currency]}).`}</strong>{' '}
+            Four figures, each from somewhere different.
+          </>
+        }
+      >
+        <dl className="flex flex-col gap-2 sm:grid sm:grid-cols-2 sm:gap-x-6">
           <Definition term={PROTOTYPE_LABEL.tripBudget}>
-            Your ceiling for the whole trip. You set it when planning the trip and can change it at any
-            time.
+            Your ceiling for the whole trip. You set it when planning the trip and can change it at
+            any time.
           </Definition>
           <Definition term={PROTOTYPE_LABEL.aiDraftEstimate}>
-            A projection from the itinerary, not a booking or a bill. It adds up the estimated cost of
-            every planned stop.
+            A projection from the itinerary, not a booking or a bill. It adds up the estimated cost
+            of every planned stop.
           </Definition>
           <Definition term={PROTOTYPE_LABEL.actualSpent}>
             Expenses you have logged. This is the only settled figure on the page.
@@ -203,17 +305,81 @@ export default function BudgetPage() {
             Trip budget minus actual spent. It can go negative, which means you are over budget.
           </Definition>
         </dl>
-        <Alert tone="prototype" title="Two rules that never bend" className="mt-4">
-          {`The ${PROTOTYPE_LABEL.aiDraftEstimate} is never added to your actual spend: ${PROTOTYPE_LABEL.remaining} is worked out from logged expenses only. And no currency conversion happens anywhere in Tourist, so a trip is only ever tracked in its own currency.`}
-        </Alert>
-      </Card>
+        <p className="mt-3 opacity-90">
+          {`Two rules that never bend. The ${PROTOTYPE_LABEL.aiDraftEstimate} is never added to your actual spend, so ${PROTOTYPE_LABEL.remaining} is worked out from logged expenses only. And no currency conversion happens anywhere in Tourist, so a trip is only ever tracked in its own currency.`}
+        </p>
+      </Disclosure>
 
-      <Alert
-        tone="info"
-        title={`All amounts are in ${currency} (${CURRENCY_SYMBOLS[currency]})`}
-      >
-        This prototype does not convert between currencies.
-      </Alert>
+      <Card>
+        <CardTitle
+          hint={`${countLabel(expenses.length, 'expense', 'expenses')} logged, newest first.`}
+          action={
+            <Button variant="secondary" icon={<Icon name="add" size={18} />} onClick={openAdd}>
+              Add expense
+            </Button>
+          }
+        >
+          Expenses
+        </CardTitle>
+        {expenses.length === 0 ? (
+          <EmptyState
+            icon="receipt_long"
+            title="No expenses logged yet"
+            description="Logging real spending is what makes this budget useful. Until then the only figure with any weight is your own trip budget."
+            action={
+              <Button variant="accent" icon={<Icon name="add" size={18} />} onClick={openAdd}>
+                Add expense
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <ul className="flex list-none flex-col">
+              {expenses.map((expense) => (
+                <li
+                  key={expense.id}
+                  className="flex items-start gap-2 border-b border-line py-2.5 first:pt-0 last:border-b-0 last:pb-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-label-lg text-ink">{expense.description}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-2">
+                      <Badge tone="actual">{EXPENSE_CATEGORY_LABEL[expense.category]}</Badge>
+                      <span className="tnum text-body-sm text-ink-subtle">
+                        {formatShortDate(expense.date)}
+                      </span>
+                    </p>
+                    {expense.notes ? (
+                      <p className="mt-1 text-body-sm text-ink-muted">{expense.notes}</p>
+                    ) : null}
+                  </div>
+                  {/* Amounts keep their own right-hand column so the list stays scannable. */}
+                  <div className="flex shrink-0 items-center gap-1">
+                    <p className="tnum text-label-lg text-ink">
+                      {formatAmount(expense.amount, currency)}
+                    </p>
+                    <ActionMenu
+                      label={`Actions for ${expense.description}`}
+                      items={[
+                        { label: 'Edit', icon: 'edit', onSelect: () => setEditing(expense) },
+                        {
+                          label: 'Delete',
+                          icon: 'delete_outline',
+                          destructive: true,
+                          onSelect: () => setDeleting(expense),
+                        },
+                      ]}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
+              <span>{PROTOTYPE_LABEL.actualSpent}</span>
+              <span className="tnum">{formatAmount(budget.actualSpent, currency)}</span>
+            </p>
+          </>
+        )}
+      </Card>
 
       <Card>
         <CardTitle hint="Share of what you have already spent, largest share first.">
@@ -227,17 +393,17 @@ export default function BudgetPage() {
           />
         ) : (
           <>
-            <ul className="flex list-none flex-col gap-4">
+            <ul className="flex list-none flex-col gap-3">
               {breakdown.map((row) => {
                 const share =
                   budget.actualSpent > 0 ? Math.round((row.total / budget.actualSpent) * 100) : 0
                 const label = EXPENSE_CATEGORY_LABEL[row.category]
                 return (
-                  <li key={row.category} className="flex flex-col gap-1.5">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <li key={row.category} className="flex flex-col gap-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="text-label-lg text-ink">{label}</span>
-                      <span className="tnum text-body-md text-ink">
-                        {formatMoney(row.total, currency)}
+                      <span className="tnum text-label-lg text-ink">
+                        {formatAmount(row.total, currency)}
                       </span>
                     </div>
                     <ProgressBar
@@ -247,19 +413,15 @@ export default function BudgetPage() {
                       tone="actual"
                     />
                     <p className="tnum text-body-sm text-ink-subtle">
-                      {`${share}% of ${formatMoney(budget.actualSpent, currency)} \u00b7 ${countLabel(
-                        row.count,
-                        'expense',
-                        'expenses',
-                      )}`}
+                      {`${share}% · ${countLabel(row.count, 'expense', 'expenses')}`}
                     </p>
                   </li>
                 )
               })}
             </ul>
-            <p className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
+            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
               <span>Total logged</span>
-              <span className="tnum">{formatMoney(budget.actualSpent, currency)}</span>
+              <span className="tnum">{formatAmount(budget.actualSpent, currency)}</span>
             </p>
           </>
         )}
@@ -267,86 +429,7 @@ export default function BudgetPage() {
 
       <Card>
         <CardTitle
-          hint={`${countLabel(expenses.length, 'expense', 'expenses')} logged, newest first.`}
-          action={
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Icon name="add" size={16} />}
-              onClick={openAdd}
-            >
-              Add expense
-            </Button>
-          }
-        >
-          Expenses
-        </CardTitle>
-        {expenses.length === 0 ? (
-          <EmptyState
-            icon="receipt_long"
-            title="No expenses logged yet"
-            description="Logging real spending is what makes this budget useful. Until then the only figure with any weight is your own trip budget, and the itinerary estimate is just a projection."
-            action={
-              <Button variant="accent" icon={<Icon name="add" size={18} />} onClick={openAdd}>
-                Add expense
-              </Button>
-            }
-          />
-        ) : (
-          <>
-            <ul className="flex list-none flex-col">
-              {expenses.map((expense) => (
-                <li
-                  key={expense.id}
-                  className="flex flex-wrap items-start justify-between gap-3 border-b border-line py-3 first:pt-0 last:border-b-0 last:pb-0"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-label-lg text-ink">{expense.description}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <Badge tone="actual">{EXPENSE_CATEGORY_LABEL[expense.category]}</Badge>
-                      <span className="tnum text-body-sm text-ink-subtle">
-                        {formatShortDate(expense.date)}
-                      </span>
-                    </div>
-                    {expense.notes ? (
-                      <p className="mt-1 text-body-sm text-ink-muted">{expense.notes}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <span className="tnum mr-1 text-headline-sm text-ink">
-                      {formatMoney(expense.amount, currency)}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<Icon name="edit" size={16} />}
-                      onClick={() => setEditing(expense)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon={<Icon name="delete_outline" size={16} />}
-                      onClick={() => setDeleting(expense)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
-              <span>{PROTOTYPE_LABEL.actualSpent}</span>
-              <span className="tnum">{formatMoney(budget.actualSpent, currency)}</span>
-            </p>
-          </>
-        )}
-      </Card>
-
-      <Card>
-        <CardTitle
-          hint={`${PROTOTYPE_LABEL.aiDraft} projections, one per day. They are never added to what you actually spend.`}
+          hint="Projected from the itinerary, one line per day. Never added to what you actually spend."
           action={
             <Badge tone="ai" icon={<Icon name="auto_awesome" size={12} />}>
               {PROTOTYPE_LABEL.aiDraft}
@@ -385,14 +468,14 @@ export default function BudgetPage() {
                     </span>
                   </span>
                   <span className="tnum text-body-md text-ink">
-                    {formatMoney(estimateTotal([day]), currency)}
+                    {formatAmount(estimateTotal([day]), currency)}
                   </span>
                 </li>
               ))}
             </ul>
-            <p className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
+            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
               <span>{PROTOTYPE_LABEL.aiDraftEstimate}</span>
-              <span className="tnum">{formatMoney(budget.itineraryEstimate, currency)}</span>
+              <span className="tnum">{formatAmount(budget.itineraryEstimate, currency)}</span>
             </p>
           </>
         )}
@@ -427,18 +510,15 @@ export default function BudgetPage() {
       >
         {deleting ? (
           <>
-            <p className="text-body-md text-ink-muted">
-              This entry will be permanently removed from this device:
-            </p>
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-label-lg text-ink">
+            <p className="flex flex-wrap items-center gap-2 text-label-lg text-ink">
               <Icon name="receipt_long" size={16} className="shrink-0 text-ink-subtle" />
               {deleting.description}
               <span className="tnum text-body-md text-ink-muted">
-                {formatMoney(deleting.amount, currency)}
+                {formatAmount(deleting.amount, currency)}
               </span>
             </p>
-            <p className="tnum mt-2 text-body-sm text-ink-subtle">
-              {`${formatDate(deleting.date)} \u00b7 ${EXPENSE_CATEGORY_LABEL[deleting.category]}`}
+            <p className="tnum mt-1 text-body-sm text-ink-subtle">
+              {`${formatDate(deleting.date)} · ${EXPENSE_CATEGORY_LABEL[deleting.category]}`}
             </p>
             <p className="mt-3 text-body-sm text-ink-muted">
               {`${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} are recalculated without it. The ${PROTOTYPE_LABEL.aiDraftEstimate} is never touched.`}

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { DraftProvenanceNote, GenerationPanel } from '@/components/GenerationPanel'
 import { ItineraryItemCard } from '@/components/ItineraryItemCard'
 import { Alert } from '@/components/ui/Alert'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { PageHeader } from '@/components/ui/Card'
@@ -10,7 +11,6 @@ import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
-import { StatTile } from '@/components/ui/StatTile'
 import { formatDateRange, formatLongDate, formatShortDate, isValidTime, todayISO } from '@/domain/format'
 import {
   countItems,
@@ -19,7 +19,7 @@ import {
   findItemInDays,
   nextEmptySlotStartTime,
 } from '@/domain/itinerary'
-import { CURRENCY_SYMBOLS, formatMoney, formatMoneyCompact, sumAmounts } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatAmount, formatPrice, sumAmounts, toCents } from '@/domain/money'
 import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { describePlan } from '@/services'
 import { useGeneration, useTourist, useTrip, useTripDays } from '@/state/useTourist'
@@ -392,72 +392,55 @@ export default function ItineraryPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div>
       <PageHeader
-        eyebrow={`${formatDateRange(trip.startDate, trip.endDate)} · ${trip.destination}`}
+        eyebrow={formatDateRange(trip.startDate, trip.endDate)}
         title={trip.name}
-        description={describePlan(trip, days)}
+        description={
+          <div className="flex flex-col gap-2">
+            {/* Three stat tiles' worth of information, on one line. */}
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body-sm">
+              <span className="tnum">{describePlan(trip, days)}</span>
+              <Badge tone="ai" icon={<Icon name="auto_awesome" size={14} />}>
+                {PROTOTYPE_LABEL.aiDraftEstimate}
+                <span className="tnum">
+                  {`${formatAmount(planEstimate, trip.currency)} ${trip.currency}`}
+                </span>
+              </Badge>
+            </p>
+            <DraftProvenanceNote />
+          </div>
+        }
         actions={
           <>
             <Button
-              variant="secondary"
+              variant={hasItems ? 'primary' : 'secondary'}
               icon={<Icon name="add" size={18} />}
               disabled={noDaysYet}
               onClick={() => openAdd()}
             >
               Add activity
             </Button>
-            {!hasItems ? (
+            {hasItems ? (
               <Button
-                variant="primary"
-                icon={<Icon name="auto_awesome" size={18} />}
+                variant="secondary"
+                icon={<Icon name="refresh" size={18} />}
                 loading={loading}
-                loadingLabel="Drafting"
-                onClick={generate}
+                loadingLabel="Regenerating"
+                onClick={regenerate}
               >
-                Generate itinerary
+                Regenerate
               </Button>
             ) : null}
-            <Button
-              variant="accent"
-              icon={<Icon name="refresh" size={18} />}
-              loading={loading}
-              loadingLabel="Regenerating"
-              onClick={regenerate}
-            >
-              Regenerate itinerary
-            </Button>
           </>
         }
       />
 
       <GenerationPanel trip={trip} days={days} />
-      <DraftProvenanceNote />
-
-      <section aria-label="Plan summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <StatTile
-          label="Planned stops"
-          value={itemCount}
-          caption={`Across ${days.length} ${days.length === 1 ? 'day' : 'days'}`}
-          icon={<Icon name="flag" size={14} />}
-        />
-        <StatTile
-          label="Days"
-          value={days.length}
-          caption={formatDateRange(trip.startDate, trip.endDate)}
-          icon={<Icon name="calendar_month" size={14} />}
-        />
-        <StatTile
-          label={PROTOTYPE_LABEL.aiDraftEstimate}
-          value={formatMoneyCompact(planEstimate, trip.currency)}
-          caption="A projection from this draft, not a booking"
-          tone="accent"
-          icon={<Icon name="auto_awesome" size={14} />}
-        />
-      </section>
 
       {swapError ? (
         <Alert
+          className="mb-4"
           tone="danger"
           title="We could not swap that activity"
           action={
@@ -475,39 +458,44 @@ export default function ItineraryPage() {
         </Alert>
       ) : null}
 
-      <Alert tone="info" title="Regenerating never takes your own work away">
-        {`Regeneration replaces ${PROTOTYPE_LABEL.aiDraft} suggestions, but it always keeps the activities you added yourself, the ${PROTOTYPE_LABEL.catalogDemo.toLowerCase()} items from the ${PROTOTYPE_LABEL.curatedGuide.toLowerCase()}, and anything you have edited. Use Replace on a single stop when you only want one thing to change.`}
-      </Alert>
-
       <section aria-labelledby="itinerary-days" className="flex flex-col gap-4">
-        <div>
-          <h2 id="itinerary-days" className="text-headline-md">
-            Day by day
-          </h2>
-          <p className="mt-1 text-body-sm text-ink-subtle">
-            Every stop says where it came from, so you always know what a regeneration would replace.
-          </p>
-        </div>
+        {/* The day headings below are the visible structure; this only names the region. */}
+        <h2 id="itinerary-days" className="sr-only">
+          Day by day
+        </h2>
 
-        {noDaysYet ? (
+        {showSkeletons ? (
+          <TimelineSkeleton />
+        ) : noDaysYet ? (
           <EmptyState
             icon="calendar_month"
             title="This trip has no days yet"
-            description={`${formatDateRange(trip.startDate, trip.endDate)} should give you at least one day. Regenerating re-reads the trip dates and rebuilds the plan.`}
+            description={`${formatDateRange(trip.startDate, trip.endDate)} should give you at least one day. Generating re-reads the trip dates and rebuilds the plan.`}
             action={
               <Button
                 variant="primary"
                 icon={<Icon name="auto_awesome" size={18} />}
-                loading={loading}
-                loadingLabel="Drafting"
                 onClick={generate}
               >
                 Generate itinerary
               </Button>
             }
           />
-        ) : showSkeletons ? (
-          <TimelineSkeleton />
+        ) : !hasItems ? (
+          <EmptyState
+            icon="auto_awesome"
+            title={`Your ${days.length} ${days.length === 1 ? 'day' : 'days'} in ${trip.destination} are wide open`}
+            description="Draft a plan to start from, then change anything you like. Whatever you add yourself is always kept."
+            action={
+              <Button
+                variant="primary"
+                icon={<Icon name="auto_awesome" size={18} />}
+                onClick={generate}
+              >
+                Generate itinerary
+              </Button>
+            }
+          />
         ) : (
           <ol className="flex list-none flex-col gap-8">
             {days.map((day, position) => {
@@ -524,12 +512,13 @@ export default function ItineraryPage() {
                         <p className="mt-0.5 text-body-md text-ink-muted">{day.title}</p>
                       ) : null}
                     </div>
-                    <p className="tnum shrink-0 text-label-md text-ink-muted">
-                      {`${day.items.length} ${day.items.length === 1 ? 'stop' : 'stops'} · ${formatMoney(
-                        dayTotal,
-                        trip.currency,
-                      )} estimated`}
-                    </p>
+                    {day.items.length > 0 ? (
+                      <p className="tnum shrink-0 text-label-md text-ink-muted">
+                        {`${day.items.length} ${
+                          day.items.length === 1 ? 'stop' : 'stops'
+                        } · ${formatAmount(dayTotal, trip.currency)} estimated`}
+                      </p>
+                    ) : null}
                   </div>
 
                   {day.items.length === 0 ? (
@@ -635,11 +624,13 @@ export default function ItineraryPage() {
           </>
         }
       >
-        <p className="text-body-md text-ink-muted">
+        <p className="tnum text-body-md text-ink-muted">
           {removing
             ? `${removing.endTime ? `${removing.startTime}–${removing.endTime}` : removing.startTime} · ${
                 removing.location || 'No location set'
-              } · ${formatMoney(removing.estimatedCost, trip.currency)} estimated.`
+              } · ${formatPrice(removing.estimatedCost, trip.currency)}${
+                toCents(removing.estimatedCost) === 0 ? '.' : ' estimated.'
+              }`
             : ''}
         </p>
       </Dialog>

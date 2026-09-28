@@ -347,6 +347,89 @@ describe('validateTripDraft rejects dates', () => {
   })
 })
 
+/**
+ * A start date in the past is refused when it is being chosen and allowed when it
+ * is being carried over. Without the distinction a trip became permanently
+ * uneditable the day it began: its budget, notes, interests, pace and name were
+ * all frozen behind a start date the traveller had no way to make valid again.
+ */
+describe('validateTripDraft and a trip that has already started', () => {
+  const STARTED = '2025-02-20'
+
+  it('accepts an in-progress trip whose start date is unchanged', () => {
+    freezeClock()
+    const result = validateTripDraft(
+      draftWith({ startDate: STARTED, endDate: '2025-03-05' }),
+      { previousStartDate: STARTED },
+    )
+    expect(result.errors.startDate).toBeUndefined()
+    expect(result.isValid).toBe(true)
+  })
+
+  it('lets the rest of an in-progress trip be edited', () => {
+    freezeClock()
+    const result = validateTripDraft(
+      draftWith({ startDate: STARTED, endDate: '2025-03-05', budget: 4000, notes: 'Extra night' }),
+      { previousStartDate: STARTED },
+    )
+    expect(result.isValid).toBe(true)
+  })
+
+  it('still refuses a different start date that is in the past', () => {
+    freezeClock()
+    const result = validateTripDraft(
+      draftWith({ startDate: '2025-02-10', endDate: '2025-03-05' }),
+      { previousStartDate: STARTED },
+    )
+    expect(result.errors.startDate).toBe('Start date cannot be in the past.')
+  })
+
+  it('still refuses an unchanged start date that is not a real calendar date', () => {
+    freezeClock()
+    const result = validateTripDraft(
+      draftWith({ startDate: '2025-02-30', endDate: '2025-03-05' }),
+      { previousStartDate: '2025-02-30' },
+    )
+    expect(result.errors.startDate).toBe('Choose a start date.')
+  })
+
+  it('still applies the ordering and length rules to an in-progress trip', () => {
+    freezeClock()
+    const tooShort = validateTripDraft(
+      draftWith({ startDate: STARTED, endDate: '2025-02-19' }),
+      { previousStartDate: STARTED },
+    )
+    expect(tooShort.errors.endDate).toBe('End date must be on or after the start date.')
+
+    const tooLong = validateTripDraft(
+      draftWith({ startDate: STARTED, endDate: '2025-04-30' }),
+      { previousStartDate: STARTED },
+    )
+    expect(tooLong.errors.endDate).toBe('Keep trips to 30 days or fewer.')
+  })
+
+  it('keeps the rule firm for creation, where there is no previous value', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ startDate: STARTED, endDate: '2025-03-05' }))
+    expect(result.errors.startDate).toBe('Start date cannot be in the past.')
+  })
+
+  it('keeps the rule firm when the context is supplied but empty', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ startDate: STARTED, endDate: '2025-03-05' }), {})
+    expect(result.errors.startDate).toBe('Start date cannot be in the past.')
+  })
+
+  it('does not excuse a past start date just because some other value matches', () => {
+    freezeClock()
+    const result = validateTripDraft(
+      draftWith({ startDate: STARTED, endDate: '2025-03-05' }),
+      { previousStartDate: '2025-03-10' },
+    )
+    expect(result.errors.startDate).toBe('Start date cannot be in the past.')
+  })
+})
+
 describe('validateTripDraft rejects travellers', () => {
   it('rejects 0 travellers', () => {
     freezeClock()

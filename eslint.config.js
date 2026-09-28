@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'node_modules'] },
+  // `.vite` is the dev server's dependency-optimiser cache. It holds prebundled
+  // third-party code, so linting it reports rules our config never loaded.
+  { ignores: ['dist', 'coverage', 'node_modules', '.vite'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
