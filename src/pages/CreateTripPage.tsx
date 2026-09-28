@@ -113,12 +113,57 @@ export default function CreateTripPage() {
     update({ name: suggestTripName(draft.destination, draft.startDate) })
   }, [draft.destination, draft.startDate, update])
 
+  /*
+    The only two optional answers on the form, and the only two that the
+    itinerary generator never reads: it drafts from destination, dates, pace and
+    interests alone, so leaving both blank costs the traveller nothing. Both are
+    also editable afterwards from Edit trip on the overview.
+    Expanded they were the second-tallest block on the page, sitting between the
+    last required answer and the submit button, so they are collapsed by default
+    and labelled Optional rather than merely described as optional.
+  */
+  const optionalAnswers = (
+    <>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <TextField
+          label="Trip name"
+          value={draft.name}
+          maxLength={TRIP_LIMITS.maxNameLength}
+          placeholder={suggestTripName(draft.destination, draft.startDate)}
+          error={errors.name}
+          hint="Leave blank and we name it after the destination and month."
+          onChange={(event) => update({ name: event.target.value })}
+          className="min-w-0 flex-1"
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={draft.destination.trim().length === 0}
+          onClick={applySuggestedName}
+          icon={<Icon name="auto_fix_high" size={16} />}
+        >
+          Use suggested name
+        </Button>
+      </div>
+
+      <TextAreaField
+        label="Notes"
+        rows={3}
+        maxLength={500}
+        value={draft.notes}
+        placeholder="Anything to remember, from dietary needs to must-see lists."
+        hint="Only you can read this, and only on this device."
+        onChange={(event) => update({ notes: event.target.value })}
+      />
+    </>
+  )
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         eyebrow="New trip"
         title="Plan a trip"
-        description="A few short answers and Tourist drafts a day-by-day itinerary you can argue with. Nothing is booked and nothing is charged."
+        description="A few short answers and Tourist drafts a day-by-day itinerary you can argue with. Nothing is booked or charged."
       />
 
       {/*
@@ -172,7 +217,34 @@ export default function CreateTripPage() {
               error={errors.destination}
               onChange={(event) => update({ destination: event.target.value })}
             />
+          </div>
 
+          {/*
+            The presets used to sit at the foot of the card, below the two date
+            inputs. A shortcut that only appears after you have already scrolled
+            past the work it saves is not a shortcut, so it now comes first: tap
+            one and both date fields below are already answered.
+          */}
+          <div role="group" aria-label="Quick date presets" className="flex flex-wrap items-center gap-2">
+            <span className="text-label-md uppercase tracking-wider text-ink-subtle">Quick pick</span>
+            {DATE_PRESETS.map((preset) => {
+              const active = isPresetActive(preset.days)
+              return (
+                <Button
+                  key={preset.label}
+                  type="button"
+                  size="sm"
+                  variant={active ? 'primary' : 'secondary'}
+                  aria-pressed={active}
+                  onClick={() => applyPreset(preset.days)}
+                >
+                  {`${preset.label} · ${preset.days} days`}
+                </Button>
+              )
+            })}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <TextField
               label="Start date"
               required
@@ -215,33 +287,25 @@ export default function CreateTripPage() {
               </p>
             ) : null}
           </div>
-
-          <div role="group" aria-label="Quick date presets" className="flex flex-wrap items-center gap-2">
-            <span className="text-label-md uppercase tracking-wider text-ink-subtle">Quick pick</span>
-            {DATE_PRESETS.map((preset) => {
-              const active = isPresetActive(preset.days)
-              return (
-                <Button
-                  key={preset.label}
-                  type="button"
-                  size="sm"
-                  variant={active ? 'primary' : 'secondary'}
-                  aria-pressed={active}
-                  onClick={() => applyPreset(preset.days)}
-                >
-                  {`${preset.label} · ${preset.days} days`}
-                </Button>
-              )
-            })}
-          </div>
         </Card>
 
         <Card className="flex flex-col gap-4">
-          <CardTitle hint="One ceiling for the whole trip. You log real spending against it later.">
+          {/*
+            The currency caveat used to be a hint under the Currency field. It
+            is a fact about the whole card, not about that one control, and as a
+            field hint it both repeated this sentence and stopped the two short
+            controls from sharing a row on a phone.
+          */}
+          <CardTitle hint="One currency and one ceiling for the whole trip, with no live conversion. You log real spending against it later.">
             Travellers and budget
           </CardTitle>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          {/*
+            Travellers is a two-digit count and Currency is a four-character
+            code: neither needs a full phone width, and stacking them cost a
+            whole field row on the way to the submit button.
+          */}
+          <div className="grid grid-cols-2 gap-4">
             <NumberField
               label="Travellers"
               required
@@ -260,23 +324,21 @@ export default function CreateTripPage() {
               options={CURRENCY_OPTIONS}
               value={draft.currency}
               error={errors.currency}
-              hint="One currency per trip. No live conversion."
               onChange={(event) => update({ currency: event.target.value as CurrencyCode })}
             />
-
-            <NumberField
-              label={`Trip budget (${draft.currency})`}
-              required
-              min={0}
-              max={TRIP_LIMITS.maxBudget}
-              step={50}
-              value={draft.budget}
-              prefix={CURRENCY_SYMBOLS[draft.currency]}
-              error={errors.budget}
-              onValueChange={(value) => update({ budget: value })}
-              className="sm:col-span-2"
-            />
           </div>
+
+          <NumberField
+            label={`Trip budget (${draft.currency})`}
+            required
+            min={0}
+            max={TRIP_LIMITS.maxBudget}
+            step={50}
+            value={draft.budget}
+            prefix={CURRENCY_SYMBOLS[draft.currency]}
+            error={errors.budget}
+            onValueChange={(value) => update({ budget: value })}
+          />
         </Card>
 
         <Card className="flex flex-col gap-4">
@@ -302,46 +364,34 @@ export default function CreateTripPage() {
           />
         </Card>
 
-        <Card className="flex flex-col gap-4">
-          <CardTitle hint="Both optional.">Name and notes</CardTitle>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <TextField
-              label="Trip name"
-              value={draft.name}
-              maxLength={TRIP_LIMITS.maxNameLength}
-              placeholder={suggestTripName(draft.destination, draft.startDate)}
-              error={errors.name}
-              hint="Leave blank and we name it after the destination and month."
-              onChange={(event) => update({ name: event.target.value })}
-              className="min-w-0 flex-1"
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={draft.destination.trim().length === 0}
-              onClick={applySuggestedName}
-              icon={<Icon name="auto_fix_high" size={16} />}
-            >
-              Use suggested name
-            </Button>
-          </div>
-
-          <TextAreaField
-            label="Notes"
-            rows={3}
-            maxLength={500}
-            value={draft.notes}
-            placeholder="Anything to remember, from dietary needs to must-see lists."
-            hint="Only you can read this, and only on this device."
-            onChange={(event) => update({ notes: event.target.value })}
-          />
-        </Card>
+        {/*
+          The one error these two fields can raise is a name over the limit,
+          and an error must never sit behind a closed summary. That case keeps
+          the old expanded card so the message stays visible next to its field.
+        */}
+        {errors.name ? (
+          <Card className="flex flex-col gap-4">
+            <CardTitle hint="Both optional.">Name and notes</CardTitle>
+            {optionalAnswers}
+          </Card>
+        ) : (
+          <Disclosure
+            tone="quiet"
+            icon="edit_note"
+            summary={
+              <span className="flex flex-wrap items-center gap-2">
+                Trip name and notes
+                <Badge tone="neutral">Optional</Badge>
+              </span>
+            }
+          >
+            <div className="flex flex-col gap-4 pt-1">{optionalAnswers}</div>
+          </Disclosure>
+        )}
 
         <div className="surface-card flex flex-col gap-3 p-5">
           <p className="text-body-sm text-ink-subtle">
-            The trip is created on this device, then we draft a first itinerary for it. You can change
-            every part of that draft afterwards.
+            We draft a first itinerary from these answers. You can change every part of it afterwards.
           </p>
           <Button
             type="submit"

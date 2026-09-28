@@ -38,6 +38,25 @@ async function fillMinimalTrip(): Promise<void> {
   await user.click(screen.getByRole('checkbox', { name: 'Culture' }))
 }
 
+const OPTIONAL_SUMMARY = 'Trip name and notes'
+
+/**
+ * Trip name and Notes are collapsed by default, so anything that reaches them
+ * has to open the section first. jsdom will happily hand back a control inside
+ * a closed `<details>`, which a real screen reader would not, so a test that
+ * skips this would be testing a field the traveller cannot see.
+ */
+async function openOptionalAnswers(): Promise<void> {
+  const user = userEvent.setup()
+  await user.click(screen.getByText(OPTIONAL_SUMMARY))
+}
+
+function optionalSection(): HTMLDetailsElement {
+  const node = screen.getByText(OPTIONAL_SUMMARY).closest('details')
+  if (node === null) throw new Error('the optional answers are not in a disclosure')
+  return node as HTMLDetailsElement
+}
+
 function setDate(label: RegExp, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 }
@@ -90,16 +109,49 @@ describe('CreateTripPage', () => {
   it('shows a first-timer which answers are required and which are not', () => {
     renderCreate()
 
-    expect(screen.getByLabelText(/Travelling from/)).toBeRequired()
-    expect(screen.getByLabelText(/Destination/)).toBeRequired()
-    expect(screen.getByLabelText(/Start date/)).toBeRequired()
-    expect(screen.getByLabelText(/End date/)).toBeRequired()
-    expect(screen.getByLabelText(/Travellers/)).toBeRequired()
-    expect(screen.getByLabelText(/Trip budget/)).toBeRequired()
-    expect(screen.getByLabelText(/Currency/)).toBeRequired()
+    const required = [
+      screen.getByLabelText(/Travelling from/),
+      screen.getByLabelText(/Destination/),
+      screen.getByLabelText(/Start date/),
+      screen.getByLabelText(/End date/),
+      screen.getByLabelText(/Travellers/),
+      screen.getByLabelText(/Trip budget/),
+      screen.getByLabelText(/Currency/),
+    ]
+    required.forEach((field) => expect(field).toBeRequired())
 
     expect(screen.getByLabelText(/Trip name/)).not.toBeRequired()
     expect(screen.getByLabelText(/Notes/)).not.toBeRequired()
+
+    // Shortening the page must never be paid for by hiding something the
+    // traveller has to answer: nothing required sits behind a disclosure.
+    required.forEach((field) => expect(field.closest('details')).toBeNull())
+    expect(screen.getByRole('group', { name: 'Interests' }).closest('details')).toBeNull()
+  })
+
+  it('keeps the two optional answers folded away until they are wanted', async () => {
+    renderCreate()
+
+    // Neither reaches the itinerary generator and both can be changed later, so
+    // they start collapsed rather than standing between the last required
+    // answer and the submit button.
+    expect(optionalSection().open).toBe(false)
+    expect(within(optionalSection()).getByText('Optional')).toBeInTheDocument()
+
+    await openOptionalAnswers()
+
+    expect(optionalSection().open).toBe(true)
+    expect(screen.getByLabelText(/Trip name/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Notes/)).toBeInTheDocument()
+  })
+
+  it('puts the quick picks ahead of the date fields they fill', () => {
+    renderCreate()
+
+    // A shortcut that only turns up after the work it saves is not a shortcut.
+    const presets = screen.getByRole('group', { name: 'Quick date presets' })
+    const start = screen.getByLabelText(/Start date/)
+    expect(presets.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('names the budget field after the chosen currency, which the symbol alone cannot announce', () => {
@@ -155,6 +207,7 @@ describe('CreateTripPage', () => {
     const user = userEvent.setup()
     renderCreate()
     await fillMinimalTrip()
+    await openOptionalAnswers()
     await user.type(screen.getByLabelText(/Notes/), 'Vegetarian, no museums before 11am.')
     await user.clear(screen.getByLabelText(/Trip budget/))
     await user.type(screen.getByLabelText(/Trip budget/), '1800')
@@ -195,6 +248,7 @@ describe('CreateTripPage', () => {
     const user = userEvent.setup()
     renderCreate()
     await fillMinimalTrip()
+    await openOptionalAnswers()
     await user.type(screen.getByLabelText(/Trip name/), '   ')
 
     await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
@@ -208,6 +262,7 @@ describe('CreateTripPage', () => {
     const user = userEvent.setup()
     renderCreate()
     await fillMinimalTrip()
+    await openOptionalAnswers()
     await user.type(screen.getByLabelText(/Trip name/), '  Long weekend in Lisbon  ')
 
     await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
@@ -230,6 +285,10 @@ describe('CreateTripPage', () => {
       `Keep the name to ${TRIP_LIMITS.maxNameLength} characters or fewer.`,
       /Trip name/,
     )
+    // An error must not be reported about a field that is folded out of sight,
+    // so this is the one case where the optional answers render expanded.
+    expect(screen.getByLabelText(/Trip name/).closest('details')).toBeNull()
+    expect(screen.queryByText(OPTIONAL_SUMMARY)).not.toBeInTheDocument()
     expect(storedTrips()).toHaveLength(0)
   })
 
@@ -384,6 +443,7 @@ describe('CreateTripPage', () => {
   it('only offers a suggested name once there is a destination to name it after', async () => {
     const user = userEvent.setup()
     renderCreate()
+    await openOptionalAnswers()
 
     const suggest = screen.getByRole('button', { name: 'Use suggested name' })
     expect(suggest).toBeDisabled()
