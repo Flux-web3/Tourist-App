@@ -53,5 +53,9 @@ Pushing `main` deploys to production on Vercel.
 - **Swapped alternatives can crowd the next stop.** A swap prefers a stop of a
   similar kind over one that fits the gap exactly, so about 6% of swaps overlap
   the following stop's start time.
+- **Adding a place ignores its opening hours.** Without a chosen start time,
+  a place from Explore goes straight after the day's last stop, even past
+  closing time. The hours are free text, copied into the stop's notes, and the
+  add dialog accepts a start time.
 - **Estimates are illustrative.** Prices and places are sample data, not live
   quotes.
