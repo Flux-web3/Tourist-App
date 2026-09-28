@@ -1062,16 +1062,63 @@ describe('TouristProvider persistence', () => {
     expect(readStored().trips[0].id).toBe(trip.id)
   })
 
-  it('replaces a populated store with the demo trip', () => {
+  it('adds the demo trip to a populated store without touching the traveller data', () => {
     vi.useFakeTimers({ now: FIXED_NOW })
     seedState(seededState())
     renderProvider()
+    const before = ctx().state
+
     act(() => {
       ctx().actions.loadDemoData()
     })
+
+    const state = ctx().state
+    const demoTrip = state.trips[1]
+    expect(state.hasDemoData).toBe(true)
+    expect(state.trips).toHaveLength(2)
+    expect(demoTrip.name).toBe('Paris in the Spring')
+    expect(before.trips[0].id).toBe(TRIP_ID)
+
+    expect(state.daysByTrip[TRIP_ID]).toBe(before.daysByTrip[TRIP_ID])
+    expect(state.expensesByTrip[TRIP_ID]).toBe(before.expensesByTrip[TRIP_ID])
+    expect(state.daysByTrip[demoTrip.id]).toHaveLength(7)
+    expect(state.expensesByTrip[demoTrip.id]).toHaveLength(5)
+    expect(state.notesByTrip?.[demoTrip.id]?.length ?? 0).toBeGreaterThan(0)
+
+    expect(readStored().trips.map((trip) => trip.id)).toEqual([TRIP_ID, demoTrip.id])
+    expect(readStored().daysByTrip[TRIP_ID]).toBeDefined()
+  })
+
+  it('keeps the traveller theme when the demo is added', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(seededState())
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    renderProvider()
+    expect(ctx().state.themePreference).toBe('dark')
+
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+
+    expect(ctx().state.themePreference).toBe('dark')
+  })
+
+  it('does not add a second demo trip when one is already loaded', () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    seedState(emptyState())
+    renderProvider()
+
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+    const demoId = ctx().state.trips[0].id
+
+    act(() => {
+      ctx().actions.loadDemoData()
+    })
+
     expect(ctx().state.trips).toHaveLength(1)
-    expect(ctx().state.trips[0].id).not.toBe(TRIP_ID)
-    expect(ctx().state.daysByTrip[TRIP_ID]).toBeUndefined()
+    expect(ctx().state.trips[0].id).toBe(demoId)
   })
 
   it('clears every trip and empties the stored payload', () => {

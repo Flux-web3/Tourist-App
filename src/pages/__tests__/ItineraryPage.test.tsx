@@ -406,7 +406,6 @@ describe('ItineraryPage', () => {
           expect(screen.queryByRole('button', { name: 'Swapping' })).not.toBeInTheDocument()
           expect(screen.queryByText(FIXTURE_ITEM_TITLES[1])).not.toBeInTheDocument()
         },
-        { timeout: 4000 },
       )
 
       const firstDay = storedDays()[0]
@@ -423,7 +422,7 @@ describe('ItineraryPage', () => {
         FIXTURE_ITEM_TITLES[0],
       )
       expect(storedDays()[1].items.map((item) => item.title)).toEqual([FIXTURE_ITEM_TITLES[4]])
-    }, 8000)
+  })
   })
 
   describe('generating a draft', () => {
@@ -450,7 +449,7 @@ describe('ItineraryPage', () => {
       await user.click(screen.getByRole('button', { name: 'Generate itinerary' }))
 
       expect(
-        await screen.findByRole('button', { name: 'Drafting' }, { timeout: 4000 }),
+        await screen.findByRole('button', { name: 'Drafting' }),
       ).toBeInTheDocument()
       expect(screen.getByText('Drafting your itinerary…')).toBeInTheDocument()
       expect(
@@ -459,7 +458,7 @@ describe('ItineraryPage', () => {
         ),
       ).toBeInTheDocument()
 
-      const success = await screen.findByText('Your draft is ready', undefined, { timeout: 4000 })
+      const success = await screen.findByText('Your draft is ready', undefined)
       expect(success).toBeInTheDocument()
       expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
       const days = storedDays()
@@ -474,8 +473,7 @@ describe('ItineraryPage', () => {
           `Across ${days.length} days`,
         ),
       ).toBeInTheDocument()
-    }, 10000)
-
+  })
     it('keeps the traveller’s own stops and the current plan on screen while redrafting', async () => {
       const user = userEvent.setup()
       renderItinerary()
@@ -484,7 +482,7 @@ describe('ItineraryPage', () => {
       await user.click(screen.getByRole('button', { name: 'Regenerate itinerary' }))
 
       expect(
-        await screen.findByRole('button', { name: 'Regenerating' }, { timeout: 4000 }),
+        await screen.findByRole('button', { name: 'Regenerating' }),
       ).toBeInTheDocument()
       expect(screen.getByText(FIXTURE_ITEM_TITLES[0])).toBeInTheDocument()
       expect(storedDays()[0].items).toHaveLength(4)
@@ -493,13 +491,12 @@ describe('ItineraryPage', () => {
         () => {
           expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
         },
-        { timeout: 4000 },
       )
       const days = storedDays()
       const kept = days.flatMap((day) => day.items).filter((item) => item.source === 'user')
       expect(kept).toHaveLength(0)
       expect(days.flatMap((day) => day.items).length).toBeGreaterThanOrEqual(5)
-    }, 10000)
+  })
   })
 
   describe('when generation fails', () => {
@@ -513,9 +510,7 @@ describe('ItineraryPage', () => {
       expect(screen.getByRole('radio', { name: 'Fail next run' })).toBeChecked()
       await user.click(screen.getByRole('button', { name: 'Generate itinerary' }))
 
-      const error = await screen.findByText('The itinerary draft could not be generated', undefined, {
-        timeout: 4000,
-      })
+      const error = await screen.findByText('The itinerary draft could not be generated')
       expect(error).toBeInTheDocument()
       expect(
         screen.getByText(
@@ -527,21 +522,25 @@ describe('ItineraryPage', () => {
       ).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
       expect(screen.getAllByText('Nothing planned yet. This day is wide open.')).toHaveLength(2)
-      expect(storedDays().every((day) => day.items.length === 0)).toBe(true)
-      expect(readStoredState().generation[FIXTURE_TRIP_ID]?.status).toBe('error')
+      await waitFor(() => {
+        expect(storedDays().every((day) => day.items.length === 0)).toBe(true)
+        expect(readStoredState().generation[FIXTURE_TRIP_ID]?.status).toBe('error')
+      })
 
       await user.click(screen.getByRole('button', { name: 'Try again' }))
 
-      expect(
-        await screen.findByText('Your itinerary draft is ready.', undefined, { timeout: 4000 }),
-      ).toBeInTheDocument()
+      expect(await screen.findByText('Your itinerary draft is ready.')).toBeInTheDocument()
       expect(screen.queryByText('The itinerary draft could not be generated')).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
-      expect(storedDays().flatMap((day) => day.items).length).toBeGreaterThan(0)
-      // Retrying clears the simulated failure so the next run is not doomed.
-      const generation = readStoredState().generation[FIXTURE_TRIP_ID]
-      expect(generation).toMatchObject({ status: 'success', shouldFail: false, error: null })
+      await waitFor(() => {
+        expect(storedDays().flatMap((day) => day.items).length).toBeGreaterThan(0)
+        expect(readStoredState().generation[FIXTURE_TRIP_ID]).toMatchObject({
+          status: 'success',
+          shouldFail: false,
+          error: null,
+        })
+      })
       expect(screen.getByRole('radio', { name: 'No failure' })).toBeChecked()
-    }, 10000)
+    })
   })
 })

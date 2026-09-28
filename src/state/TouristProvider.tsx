@@ -193,9 +193,19 @@ export function TouristProvider({ children }: { children: ReactNode }) {
 
     const loadDemoData = () => {
       const current = stateRef.current
+      const demo = createDemoState(current.user)
+      const [demoTrip] = demo.trips
+      if (!demoTrip) return
+      if (current.trips.some((trip) => trip.id === demoTrip.id)) return
+
       const fresh: PersistedState = {
-        ...createDemoState(current.user),
-        themePreference: current.themePreference,
+        ...current,
+        trips: [...current.trips, demoTrip],
+        daysByTrip: { ...current.daysByTrip, ...demo.daysByTrip },
+        expensesByTrip: { ...current.expensesByTrip, ...demo.expensesByTrip },
+        notesByTrip: { ...current.notesByTrip, ...demo.notesByTrip },
+        generation: { ...current.generation, ...demo.generation },
+        hasDemoData: true,
       }
       services.persistence.save(fresh)
       commit(fresh)

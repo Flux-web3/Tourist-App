@@ -269,6 +269,8 @@ function idleGeneration(): GenerationState {
   }
 }
 
+export const DEMO_TRIP_ID = 'trip_demo_paris'
+
 function buildDemoTrip(user: User): {
   trip: Trip
   days: ItineraryDay[]
@@ -280,7 +282,7 @@ function buildDemoTrip(user: User): {
   const timestamp = nowISO()
 
   const trip: Trip = {
-    id: createId('trip'),
+    id: DEMO_TRIP_ID,
     userId: user.id,
     name: 'Paris in the Spring',
     origin: 'Lagos, Nigeria',

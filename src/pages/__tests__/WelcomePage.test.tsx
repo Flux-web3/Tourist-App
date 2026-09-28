@@ -2,15 +2,12 @@ import { Route, Routes } from 'react-router-dom'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { EXPERIENCES } from '@/data/experiences'
 import type { User } from '@/domain/types'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import type { PersistedState } from '@/services/contracts'
 import { STORAGE_KEY, createEmptyState, createGuestUser } from '@/services/persistence'
 import WelcomePage from '@/pages/WelcomePage'
 import { renderWithProviders } from '@/test/renderWithProviders'
-
-const FEATURED = EXPERIENCES[0]
 
 function readPersisted(): PersistedState {
   const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -20,23 +17,30 @@ function readPersisted(): PersistedState {
 function renderWelcome(user?: User) {
   return renderWithProviders(
     <Routes>
-      <Route path="/" element={<WelcomePage />} />
+      <Route path="/welcome" element={<WelcomePage />} />
       <Route path="/trips" element={<p>Trips list</p>} />
+      <Route path="/trips/new" element={<p>Create trip form</p>} />
     </Routes>,
-    { route: '/', user },
+    { route: '/welcome', user },
   )
 }
 
 describe('WelcomePage', () => {
-  it('states the promise up front and offers both ways into the product', () => {
+  it('asks only for a name, and makes clear that is all a profile does', () => {
     renderWelcome()
 
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Plan the trip first. Then plan the days inside it.' }),
+      screen.getByRole('heading', { level: 1, name: 'Let us name the trip, or skip it' }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Your name' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Email' })).toBeInTheDocument()
+  })
+
+  it('offers a real way in even when the name is skipped', () => {
+    renderWelcome()
+
     expect(screen.getByRole('link', { name: 'Plan a trip' })).toHaveAttribute('href', '/trips/new')
-    expect(screen.getByRole('link', { name: 'Open the demo trip' })).toHaveAttribute('href', '/trips')
-    expect(screen.getByText(/Nothing here books anything/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try the demo trip' })).toBeEnabled()
   })
 
   it('labels the prototype honestly and leaves social sign-in disabled', () => {
@@ -51,29 +55,69 @@ describe('WelcomePage', () => {
     ).toBeInTheDocument()
   })
 
-  it('credits the featured photograph and opens the credit in a new tab', () => {
+  it('loads the demo rather than linking to a trip that may not exist', async () => {
+    const user = userEvent.setup()
     renderWelcome()
 
-    expect(screen.getByRole('img', { name: FEATURED.imageAlt })).toBeInTheDocument()
-    expect(
-      screen.getByText(`${FEATURED.name}, ${FEATURED.neighborhood}.`, { exact: false }),
-    ).toBeInTheDocument()
+    expect(readPersisted().trips).toHaveLength(0)
 
-    const credit = screen.getByRole('link', { name: 'Benh LIEU SONG' })
-    expect(credit).toHaveAttribute('href', expect.stringContaining('wikimedia.org'))
-    expect(credit).toHaveAttribute('target', '_blank')
-    expect(credit).toHaveAttribute('rel', 'noreferrer')
+    await user.click(screen.getByRole('button', { name: 'Try the demo trip' }))
+
+    expect(await screen.findByText('Trips list')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(readPersisted().trips.map((trip) => trip.name)).toEqual(['Paris in the Spring'])
+    })
   })
 
-  it('explains the three steps and the four product areas', () => {
+  it('keeps the traveller trips when the demo is loaded from the entry flow', async () => {
+    const user = userEvent.setup()
+    const state = createEmptyState()
+    state.trips = [
+      {
+        id: 'trip-mine',
+        userId: state.user.id,
+        name: 'My Own Trip',
+        origin: 'Accra, Ghana',
+        destination: 'Lisbon, Portugal',
+        startDate: '2026-03-01',
+        endDate: '2026-03-05',
+        travelers: 1,
+        budget: 900,
+        currency: 'EUR',
+        interests: ['food'],
+        pace: 'relaxed',
+        notes: '',
+        status: 'itinerary_ready',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]
+    renderWithProviders(
+      <Routes>
+        <Route path="/welcome" element={<WelcomePage />} />
+        <Route path="/trips" element={<p>Trips list</p>} />
+      </Routes>,
+      { route: '/welcome', state },
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Try the demo trip' }))
+
+    expect(await screen.findByText('Trips list')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(readPersisted().trips.map((trip) => trip.name)).toEqual([
+        'My Own Trip',
+        'Paris in the Spring',
+      ])
+    })
+  })
+
+  it('goes straight to the create form from the secondary action', async () => {
+    const user = userEvent.setup()
     renderWelcome()
 
-    expect(screen.getByText('Tell us the trip')).toBeInTheDocument()
-    expect(screen.getByText('Get a draft itinerary you can edit')).toBeInTheDocument()
-    expect(screen.getByText('Track what you actually spend')).toBeInTheDocument()
-    expect(screen.getByText('Every journey you are planning, in one list.')).toBeInTheDocument()
-    expect(screen.getByText('A curated Paris catalog with honest, estimated prices.')).toBeInTheDocument()
-    expect(screen.getByText('Planned estimates kept separate from what you really spent.')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Plan a trip' }))
+
+    expect(await screen.findByText('Create trip form')).toBeInTheDocument()
   })
 
   it('saves the entered name and email on this device, then continues to the trips list', async () => {
@@ -117,5 +161,13 @@ describe('WelcomePage', () => {
     renderWelcome()
 
     expect(screen.queryByText(/Saved on this device as/)).not.toBeInTheDocument()
+  })
+
+  it('explains what happens after the entry step', () => {
+    const { container } = renderWelcome()
+
+    expect(screen.getByRole('heading', { name: 'What happens next' })).toBeInTheDocument()
+    expect(container).toHaveTextContent(/day-by-day itinerary and prices every stop/)
+    expect(container).toHaveTextContent(/draft never looks like a quote/)
   })
 })

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import { buttonClasses, type ButtonSize, type ButtonVariant } from '@/lib/buttonStyles'
 
 export type { ButtonSize, ButtonVariant }
@@ -11,6 +11,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
   iconAfter?: ReactNode
   fullWidth?: boolean
+  ref?: Ref<HTMLButtonElement>
 }
 
 export function Button({
@@ -25,11 +26,13 @@ export function Button({
   children,
   disabled,
   type = 'button',
+  ref,
   ...rest
 }: ButtonProps) {
   return (
     <button
       {...rest}
+      ref={ref}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}

@@ -108,11 +108,7 @@ export function formatDuration(minutes: number): string {
   return `${hours} hr ${rest} min`
 }
 
-/**
- * A full ISO timestamp to a readable local date and time, or `null` when the
- * value is not a real date. Callers must handle the `null` case rather than
- * rendering the raw string, so corrupt persistence never shows as "Invalid".
- */
+/** A full ISO timestamp to a readable local date and time, or `null` when it is not a real date. */
 export function formatDateTime(iso: string): string | null {
   if (typeof iso !== 'string' || iso.trim().length === 0) return null
   const parsed = new Date(iso)

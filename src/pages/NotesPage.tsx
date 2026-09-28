@@ -14,7 +14,6 @@ import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTrip, useTripNotes } from '@/state/useTourist'
 import type { TripNote } from '@/domain/types'
 
-/** An untitled note is identified by its first line, so it still reads clearly. */
 function displayTitle(note: TripNote): string {
   const trimmed = note.title.trim()
   if (trimmed) return trimmed

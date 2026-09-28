@@ -16,17 +16,21 @@ export function CardTitle({
   children,
   hint,
   action,
+  id,
   className = '',
 }: {
   children: ReactNode
   hint?: ReactNode
   action?: ReactNode
+  id?: string
   className?: string
 }) {
   return (
     <div className={`mb-4 flex flex-wrap items-start justify-between gap-3 ${className}`}>
       <div className="min-w-0">
-        <h2 className="text-headline-sm">{children}</h2>
+        <h2 id={id} className="text-headline-sm">
+          {children}
+        </h2>
         {hint ? <p className="mt-1 text-body-sm text-ink-subtle">{hint}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

@@ -11,11 +11,6 @@ function withNotes(state: PersistedState, tripId: string, notes: TripNote[]): Pe
   return { ...state, notesByTrip: { ...(state.notesByTrip ?? {}), [tripId]: notes } }
 }
 
-/**
- * Notes are the traveller's own record, so every mutation here is deliberately
- * narrow: nothing in this service can reorder, re-cost or regenerate a note.
- * All timestamps are server-free ISO strings so persistence stays sortable.
- */
 export function createNoteService(): NoteService {
   return {
     add(state, input): NoteMutationResult {
