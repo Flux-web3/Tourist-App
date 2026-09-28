@@ -1,4 +1,5 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/AppShell'
 import { TouristProvider } from '@/state/TouristProvider'
 import BudgetPage from '@/pages/BudgetPage'
@@ -13,10 +14,29 @@ import TripOverviewPage from '@/pages/TripOverviewPage'
 import TripsHomePage from '@/pages/TripsHomePage'
 import WelcomePage from '@/pages/WelcomePage'
 
+/**
+ * Puts each new screen at the top.
+ *
+ * Without this the browser keeps the scroll offset across a client-side
+ * navigation, so moving from halfway down a seven-day itinerary to Budget
+ * landed the traveller in the middle of the expense list. Honours
+ * `prefers-reduced-motion` by way of `scroll-behavior` in the base layer, and
+ * deliberately ignores hash links so in-page anchors still work.
+ */
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (window.location.hash) return
+    window.scrollTo({ top: 0, left: 0 })
+  }, [pathname])
+  return null
+}
+
 export function App() {
   return (
     <TouristProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route
