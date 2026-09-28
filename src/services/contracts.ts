@@ -20,7 +20,19 @@ import type {
  * without any caller changing.
  */
 
-export const STORAGE_VERSION = 1
+/**
+ * The schema version of the payload, not of the storage location.
+ *
+ * It lives inside the JSON so that a bump can be *migrated* rather than
+ * orphaned: the key under which snapshots are written never moves, so every
+ * build reads the same slot and brings whatever it finds forward. Bump this
+ * whenever the persisted shape changes and add the matching step to the ladder
+ * in `migrations.ts`.
+ *
+ * - v1: the original shape.
+ * - v2: `ItineraryItem` carries its own `currency`, mirroring `Expense`.
+ */
+export const STORAGE_VERSION = 2
 
 /** The complete persisted application state. */
 export interface PersistedState {
@@ -42,9 +54,91 @@ export interface PersistedState {
   hasDemoData: boolean
 }
 
+/**
+ * What a read or a write had to throw away, or rebuild, to keep the rest.
+ *
+ * Salvage is per record: one expense in a category this build does not know is
+ * dropped and the other nineteen are kept, rather than the whole snapshot being
+ * discarded. These counts are how a caller can tell that happened.
+ *
+ * Counts are of individual records. A container that was not even a list or a
+ * map (`daysByTrip: 7`) cannot be counted record by record, so it contributes 1.
+ */
+export interface PersistenceSalvage {
+  trips: number
+  days: number
+  items: number
+  expenses: number
+  notes: number
+  generation: number
+  /**
+   * Day buckets dropped because no trip could say which currency their items
+   * were priced in. Guessing a currency would misstate money, so the bucket goes.
+   */
+  orphanedDayBuckets: number
+  /**
+   * Catalogue stops whose experience is no longer in the catalogue (or that
+   * never named one), so their currency could not be confirmed and was taken
+   * from the trip. These are *kept*, not dropped - counted so a caller can flag
+   * them for the traveller to check.
+   */
+  unmatchedCatalogItems: number
+  /** True when the stored user record was unusable and was rebuilt so the trips could be kept. */
+  rebuiltUser: boolean
+}
+
+export type PersistenceLoadStatus =
+  /** No `localStorage` in this environment. */
+  | 'unavailable'
+  /** Nothing has ever been written. */
+  | 'empty'
+  /** Read at the current version with nothing changed. */
+  | 'loaded'
+  /** Read at the current version, but some records had to be dropped or rebuilt. */
+  | 'salvaged'
+  /** Read at an older version and brought forward through the migration ladder. */
+  | 'migrated'
+  /** The payload could not be read at all. A copy was kept at `backupKey`. */
+  | 'unreadable'
+  /** Written by a newer build than this one. Left in `backupKey`; start fresh. */
+  | 'future'
+
+export interface PersistenceLoadResult {
+  /** `null` means "start fresh" - never "the traveller had nothing". */
+  state: PersistedState | null
+  status: PersistenceLoadStatus
+  /** The version recorded in the payload, or `null` when it carried none. */
+  foundVersion: number | null
+  /** Where the raw payload was copied before this build stopped using it, when that happened. */
+  backupKey: string | null
+  salvage: PersistenceSalvage
+}
+
+export type PersistenceSaveStatus =
+  | 'saved'
+  /** The state held nothing persistable, so the previous payload was left in place. */
+  | 'refused'
+  | 'unavailable'
+  /** `localStorage` rejected the write, quota being the usual reason. */
+  | 'unwritable'
+
+export interface PersistenceSaveResult {
+  status: PersistenceSaveStatus
+  /** Why the write was refused or failed, else `null`. */
+  reason: string | null
+  /** Records the guard dropped before writing, so one bad field cannot stop the rest. */
+  salvage: PersistenceSalvage
+}
+
 export interface PersistenceService {
+  /**
+   * The state to hydrate from, or `null` to start fresh. Callers that only need
+   * `load() ?? createEmptyState()` are unaffected by anything below.
+   */
   load(): PersistedState | null
-  save(state: PersistedState): void
+  /** The same read, with the detail needed to tell the traveller what happened. */
+  loadDetailed(): PersistenceLoadResult
+  save(state: PersistedState): PersistenceSaveResult
   clear(): void
 }
 

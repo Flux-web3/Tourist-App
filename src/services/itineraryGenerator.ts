@@ -1,8 +1,8 @@
 import { createId } from '@/domain/ids'
-import { addDays, eachDay, formatTime, timeToMinutes } from '@/domain/format'
-import { sumAmounts } from '@/domain/money'
-import { sortItems } from '@/domain/itinerary'
+import { addDays, eachDay, formatTime, isValidTime, timeToMinutes } from '@/domain/format'
+import { estimateTotal, sortItems } from '@/domain/itinerary'
 import type {
+  CurrencyCode,
   ItineraryCategory,
   ItineraryDay,
   ItineraryItem,
@@ -22,7 +22,36 @@ import type {
  * Landmark names are only used when the trip is actually in Paris; any other
  * destination receives generic, clearly-draft phrasing rather than invented
  * specifics.
+ *
+ * A day is laid out by three rules: the arrival opens day one, the departure
+ * closes the final day, and every other stop starts at its template's natural
+ * time or just after the previous stop ends, whichever is later. A stop that
+ * cannot fit that way is left out rather than stacked on top of another.
  */
+
+/**
+ * The currency every generated price is quoted in.
+ *
+ * The template costs are not unitless: they are Paris prices in euros (the
+ * Eiffel Tower summit is €29, the Louvre €22), and the generic bank is pitched
+ * at the same level. So a generated stop is labelled EUR whatever the trip's
+ * currency — labelling it with the trip's currency turned a €29 ticket into
+ * ₦29 and understated a naira trip by three orders of magnitude.
+ *
+ * Nothing is converted. A stop priced in a currency other than the trip's is
+ * left out of that trip's totals and reported as such (`summariseBudget`,
+ * `estimateTotal(days, currency)`), which is the honest answer until the draft
+ * carries local prices. For a EUR trip nothing changes.
+ */
+export const DRAFT_PRICE_CURRENCY: CurrencyCode = 'EUR'
+
+/**
+ * Stops placed by rule rather than drawn from the bank: the arrival opens day
+ * one, the departure closes the final day. The transfer is kept in the Paris
+ * bank as copy but is never scheduled or offered. None of them is ever picked
+ * as an ordinary stop, placed on a middle day, or suggested as an alternative.
+ */
+type AnchorRole = 'arrival' | 'departure' | 'transfer'
 
 interface DraftTemplate {
   id: string
@@ -30,11 +59,14 @@ interface DraftTemplate {
   category: ItineraryCategory
   location: string
   description: string
+  /** The time this stop naturally happens; the scheduler never moves it earlier. */
   startTime: string
   endTime: string | null
   estimatedCost: number
   durationMinutes: number
   interest: TravelInterest | null
+  /** Absent for every ordinary, bookable stop. */
+  role?: AnchorRole
 }
 
 const PARIS_TEMPLATES: DraftTemplate[] = [
@@ -257,6 +289,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 24,
     durationMinutes: 120,
     interest: null,
+    role: 'transfer',
   },
   {
     id: 'par_arrive',
@@ -270,6 +303,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 12,
     durationMinutes: 90,
     interest: 'relaxed',
+    role: 'arrival',
   },
   {
     id: 'par_picnic',
@@ -296,6 +330,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 24,
     durationMinutes: 120,
     interest: null,
+    role: 'departure',
   },
   {
     id: 'par_jazz',
@@ -444,6 +479,7 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 15,
     durationMinutes: 120,
     interest: 'relaxed',
+    role: 'arrival',
   },
   {
     id: 'gen_depart',
@@ -456,6 +492,7 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 20,
     durationMinutes: 120,
     interest: null,
+    role: 'departure',
   },
 ]
 
@@ -464,6 +501,16 @@ const PACE_TARGET: Record<TravelPace, number> = {
   balanced: 3,
   packed: 4,
 }
+
+/** The gap left between one stop's end and the next stop's start. */
+const BUFFER_MINUTES = 15
+/** The latest minute a stop may end on: nothing runs past midnight. */
+const LAST_MINUTE = 23 * 60 + 59
+/**
+ * How far an ordinary stop may be pushed past its natural start before it is
+ * left out of the day instead. It is what keeps breakfast in the morning.
+ */
+const MAX_DRIFT_MINUTES = 180
 
 function hashString(value: string): number {
   let hash = 2166136261
@@ -485,64 +532,150 @@ function mulberry32(seed: number): () => number {
   }
 }
 
+function choose<T>(items: readonly T[], random: () => number): T {
+  return items[Math.floor(random() * items.length)]
+}
+
+/** Minutes since midnight as `HH:mm`, clamped to the day. */
+function minutesToTime(total: number): string {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(total)))
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`
+}
+
 function isParisTrip(trip: Trip): boolean {
   return trip.destination.toLowerCase().includes('paris')
 }
 
-/**
- * Chooses one stop.
- *
- * `used` spans the whole trip and is only a preference: there are fewer
- * templates than a month-long trip has slots, so it is exhausted and the
- * fallback below starts reusing the pool. `daySeen` is the hard constraint —
- * a template already placed on the current day is removed from the candidates
- * entirely, so a single day can never show the same stop twice. Selection stays
- * driven by the seeded `random()` index over a deterministically ordered array.
- */
-function pickTemplate(
-  pool: DraftTemplate[],
-  random: () => number,
-  used: Set<string>,
-  interests: readonly TravelInterest[],
-  daySeen: ReadonlySet<string>,
-): DraftTemplate {
-  const bookable = pool.filter((template) => !isArrivalOrDeparture(template))
-  const unseenToday = bookable.filter((template) => !daySeen.has(template.id))
-  // Only if a day somehow asks for more stops than the bank holds do we allow a
-  // repeat, rather than returning nothing.
-  const pickable = unseenToday.length > 0 ? unseenToday : bookable
-
-  const preferred = pickable.filter(
-    (template) => template.interest !== null && interests.includes(template.interest),
-  )
-  const preferredFresh = preferred.filter((template) => !used.has(template.id))
-  if (preferredFresh.length > 0) {
-    return preferredFresh[Math.floor(random() * preferredFresh.length)]
-  }
-
-  const fresh = pickable.filter((template) => !used.has(template.id))
-  const candidates = fresh.length > 0 ? fresh : pickable
-  return candidates[Math.floor(random() * candidates.length)]
+function poolFor(trip: Trip): DraftTemplate[] {
+  return isParisTrip(trip) ? PARIS_TEMPLATES : GENERIC_TEMPLATES
 }
 
-function spreadTimes(templates: DraftTemplate[]): DraftTemplate[] {
-  const sorted = [...templates].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime))
-  const span = 8 * 60
-  const step = Math.max(90, Math.floor(span / Math.max(sorted.length, 1)))
-  return sorted.map((template, index) => {
-    const startMinutes = Math.min(8 * 60 + step * index, 20 * 60)
-    const hours = Math.floor(startMinutes / 60)
-    const minutes = startMinutes % 60
-    const start = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
-    const endMinutes = startMinutes + template.durationMinutes
-    const endHours = Math.floor(endMinutes / 60)
-    const endRest = endMinutes % 60
-    return {
-      ...template,
-      startTime: start,
-      endTime: endHours >= 24 ? '23:59' : `${String(endHours).padStart(2, '0')}:${String(endRest).padStart(2, '0')}`,
-    }
-  })
+function isAnchor(template: DraftTemplate): boolean {
+  return template.role !== undefined
+}
+
+/**
+ * Chooses one stop from `candidates`, which the caller has already cleared of
+ * anything that may not appear today.
+ *
+ * Preference: a stop that matches the traveller's interests and has not been
+ * used on this trip yet, then any unused stop, then — once a long trip has
+ * worked through the bank — the least recently used one. Ties go to the seeded
+ * `random()` over a deterministically ordered array, so the same trip and
+ * variant always pick the same stops.
+ */
+function pickTemplate(
+  candidates: readonly DraftTemplate[],
+  random: () => number,
+  lastUsed: ReadonlyMap<string, number>,
+  interests: readonly TravelInterest[],
+): DraftTemplate | null {
+  if (candidates.length === 0) return null
+  const fresh = candidates.filter((template) => !lastUsed.has(template.id))
+  const preferredFresh = fresh.filter(
+    (template) => template.interest !== null && interests.includes(template.interest),
+  )
+  if (preferredFresh.length > 0) return choose(preferredFresh, random)
+  if (fresh.length > 0) return choose(fresh, random)
+
+  const usedOn = (template: DraftTemplate): number => lastUsed.get(template.id) ?? -1
+  const oldest = Math.min(...candidates.map(usedOn))
+  return choose(
+    candidates.filter((template) => usedOn(template) === oldest),
+    random,
+  )
+}
+
+interface Slot {
+  template: DraftTemplate
+  /** Minutes since midnight. */
+  start: number
+  end: number
+}
+
+/** Arrival first, departure last, every ordinary stop in between. */
+function placementRank(template: DraftTemplate): number {
+  if (template.role === 'arrival') return 0
+  return template.role === undefined ? 1 : 2
+}
+
+/**
+ * Times one day's stops, or returns null when they cannot all fit.
+ *
+ * The arrival goes first and the departure last; every other stop is ordered by
+ * its natural start. Walking that order, each stop starts at its natural time or
+ * `BUFFER_MINUTES` after the previous one ends, whichever is later. So nothing
+ * overlaps, and nothing starts earlier than it naturally would — which is what
+ * keeps an evening stop in the evening. The day does not fit if a stop would end
+ * after 23:59, or an ordinary stop would be pushed more than `MAX_DRIFT_MINUTES`
+ * past its natural time. The departure is exempt from the drift limit: it goes
+ * whenever the day's last stop is done.
+ */
+function layOutDay(stops: readonly DraftTemplate[]): Slot[] | null {
+  const ordered = [...stops].sort(
+    (a, b) =>
+      placementRank(a) - placementRank(b) ||
+      timeToMinutes(a.startTime) - timeToMinutes(b.startTime),
+  )
+  const slots: Slot[] = []
+  let earliest = 0
+  for (const template of ordered) {
+    const natural = timeToMinutes(template.startTime)
+    const start = Math.max(natural, earliest)
+    const end = start + template.durationMinutes
+    if (end > LAST_MINUTE) return null
+    if (!isAnchor(template) && start - natural > MAX_DRIFT_MINUTES) return null
+    slots.push({ template, start, end })
+    earliest = end + BUFFER_MINUTES
+  }
+  return slots
+}
+
+/**
+ * Fills one day with its anchors plus up to `count` ordinary stops.
+ *
+ * `daySeen` is the hard per-day rule: a stop already drawn today — placed, or
+ * set aside because it did not fit — is never a candidate again, so a day can
+ * never show the same stop twice. Yesterday's stops are excluded too whenever
+ * the bank holds at least twice the day's count, which always leaves as many
+ * candidates as the day asks for; with a smaller bank they are only avoided
+ * while anything else remains. A draw that would not fit (see `layOutDay`) is dropped and another
+ * is drawn, so a crowded day ends up shorter rather than stacked.
+ */
+function planDay(
+  anchors: readonly DraftTemplate[],
+  count: number,
+  bookable: readonly DraftTemplate[],
+  yesterday: ReadonlySet<string>,
+  lastUsed: ReadonlyMap<string, number>,
+  interests: readonly TravelInterest[],
+  random: () => number,
+): Slot[] {
+  let slots = layOutDay(anchors) ?? []
+  const chosen = [...anchors]
+  const daySeen = new Set(anchors.map((template) => template.id))
+  const strictlyAvoidYesterday = bookable.length >= 2 * count
+
+  let placed = 0
+  while (placed < count) {
+    const open = bookable.filter((template) => !daySeen.has(template.id))
+    const notYesterday = open.filter((template) => !yesterday.has(template.id))
+    const pick = pickTemplate(
+      notYesterday.length > 0 || strictlyAvoidYesterday ? notYesterday : open,
+      random,
+      lastUsed,
+      interests,
+    )
+    if (pick === null) break
+    daySeen.add(pick.id)
+
+    const next = layOutDay([...chosen, pick])
+    if (next === null) continue
+    chosen.push(pick)
+    slots = next
+    placed += 1
+  }
+  return slots
 }
 
 function toItem(
@@ -561,6 +694,9 @@ function toItem(
     location: template.location,
     description: template.description,
     estimatedCost: template.estimatedCost,
+    // The template costs are euro prices whatever the trip's currency; see
+    // `DRAFT_PRICE_CURRENCY`. Labelled honestly, not converted.
+    currency: DRAFT_PRICE_CURRENCY,
     source: 'ai',
     editedByUser: false,
     experienceId: null,
@@ -571,60 +707,51 @@ function toItem(
   }
 }
 
-function isArrivalOrDeparture(template: DraftTemplate): boolean {
-  return template.id.endsWith('arrive') || template.id.endsWith('depart')
-}
-
 /**
  * Builds a full draft itinerary for a trip. Deterministic for a given
- * (trip.id, variant) pair so regeneration is reproducible.
+ * (trip.id, variant, trip.startDate) so regeneration is reproducible.
  */
 export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().toISOString()): ItineraryDay[] {
-  const pool = isParisTrip(trip) ? PARIS_TEMPLATES : GENERIC_TEMPLATES
+  const pool = poolFor(trip)
+  const bookable = pool.filter((template) => !isAnchor(template))
+  const arrival = pool.find((template) => template.role === 'arrival')
+  const departure = pool.find((template) => template.role === 'departure')
   const random = mulberry32(hashString(`${trip.id}:${variant}:${trip.startDate}`))
   const dates = eachDay(trip.startDate, trip.endDate)
-  const total = dates.length
+  const lastIndex = dates.length - 1
   const target = PACE_TARGET[trip.pace]
-  const used = new Set<string>(pool.filter(isArrivalOrDeparture).map((template) => template.id))
-  const dayIds = dates.map((_, index) => `${trip.id}_d${index + 1}`)
+  // The day each template was last placed on, for least-recently-used reuse.
+  const lastUsed = new Map<string, number>()
+  let yesterday: ReadonlySet<string> = new Set()
 
   return dates.map((date, dayIndex) => {
-    const dayId = dayIds[dayIndex]
     const isFirst = dayIndex === 0
-    const isLast = dayIndex === total - 1
+    const isLast = dayIndex === lastIndex
+    // A one-day trip is a travel day at both ends: arrival first, departure last.
+    const anchors = [isFirst ? arrival : undefined, isLast ? departure : undefined].filter(
+      (template): template is DraftTemplate => template !== undefined,
+    )
+    // Travel days are lighter than full days.
+    let count: number
+    if (isFirst) count = target >= 4 ? 2 : 1
+    else if (isLast) count = 1
+    else count = target + (random() > 0.6 ? 1 : 0)
 
-    const chosen: DraftTemplate[] = []
-    // Reset per day: repeats across days are unavoidable on a long trip, repeats
-    // inside one day are not acceptable.
-    const daySeen = new Set<string>()
-    const take = (template: DraftTemplate): void => {
-      used.add(template.id)
-      daySeen.add(template.id)
-      chosen.push(template)
-    }
+    const slots = planDay(anchors, count, bookable, yesterday, lastUsed, trip.interests, random)
+    for (const { template } of slots) lastUsed.set(template.id, dayIndex)
+    yesterday = new Set(slots.map(({ template }) => template.id))
 
-    if (isFirst) {
-      take(pool.find((template) => template.id.endsWith('arrive')) ?? pool[0])
-      take(pickTemplate(pool, random, used, trip.interests, daySeen))
-      if (target >= 4) {
-        take(pickTemplate(pool, random, used, trip.interests, daySeen))
-      }
-    } else if (isLast) {
-      const departure = pool.find((template) => template.id.endsWith('depart')) ?? pool[pool.length - 1]
-      take(departure)
-      take(pickTemplate(pool, random, used, trip.interests, daySeen))
-    } else {
-      const count = target + (random() > 0.6 ? 1 : 0)
-      for (let slot = 0; slot < count; slot += 1) {
-        take(pickTemplate(pool, random, used, trip.interests, daySeen))
-      }
-    }
-
-    const timed = spreadTimes(chosen)
-    const items = sortItems(timed.map((template) => toItem(trip, template, timestamp)))
+    const items = sortItems(
+      slots.map(({ template, start, end }) =>
+        toItem(trip, template, timestamp, {
+          startTime: minutesToTime(start),
+          endTime: minutesToTime(end),
+        }),
+      ),
+    )
 
     return {
-      id: dayId,
+      id: `${trip.id}_d${dayIndex + 1}`,
       tripId: trip.id,
       date,
       index: dayIndex + 1,
@@ -634,7 +761,19 @@ export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().t
   })
 }
 
-/** One targeted alternative for a single item, same slot, different suggestion. */
+/**
+ * One targeted alternative for a single item: the same start, a different stop.
+ *
+ * Never an arrival, departure or transfer — an airport run is not an
+ * alternative to anything — and never a stop already on that day. Among the
+ * rest it prefers, in order: the same category and finished before the next
+ * stop; the same category and finished by midnight; any category finished
+ * before the next stop; any finished by midnight. The end time is recomputed
+ * from the new stop's own duration.
+ *
+ * Seeded on the slot's content rather than the item's generated id, so the same
+ * day, item and variant give the same suggestion in any process.
+ */
 export function buildAlternativeItem(
   trip: Trip,
   day: ItineraryDay,
@@ -642,24 +781,57 @@ export function buildAlternativeItem(
   variant = 0,
   timestamp = new Date().toISOString(),
 ): ItineraryItem {
-  const pool = isParisTrip(trip) ? PARIS_TEMPLATES : GENERIC_TEMPLATES
-  const random = mulberry32(hashString(`${trip.id}:alt:${day.id}:${item.id}:${variant}`))
-  const sameCategory = pool.filter(
-    (template) => template.category === item.category && template.title !== item.title,
+  const pool = poolFor(trip)
+  const random = mulberry32(
+    hashString(`${trip.id}:alt:${day.id}:${item.title}:${item.startTime}:${variant}`),
   )
-  const candidates = sameCategory.length > 0 ? sameCategory : pool.filter((template) => template.title !== item.title)
-  const chosen = candidates.length > 0
-    ? candidates[Math.floor(random() * candidates.length)]
-    : pool[0]
+  const start = timeToMinutes(item.startTime)
+  const nextStart = day.items
+    .map((other) => timeToMinutes(other.startTime))
+    .filter((minutes) => minutes > start)
+    .reduce((earliest, minutes) => Math.min(earliest, minutes), LAST_MINUTE + BUFFER_MINUTES)
+
+  const onDay = new Set([item.title, ...day.items.map((other) => other.title)])
+  const offered = pool.filter((template) => !isAnchor(template))
+  const fresh = offered.filter((template) => !onDay.has(template.title))
+
+  const sameCategory = (template: DraftTemplate): boolean => template.category === item.category
+  const beforeNext = (template: DraftTemplate): boolean =>
+    start + template.durationMinutes <= nextStart - BUFFER_MINUTES
+  const beforeMidnight = (template: DraftTemplate): boolean =>
+    start + template.durationMinutes <= LAST_MINUTE
+  const tiers: Array<(template: DraftTemplate) => boolean> = [
+    (template) => sameCategory(template) && beforeNext(template),
+    (template) => sameCategory(template) && beforeMidnight(template),
+    beforeNext,
+    beforeMidnight,
+    () => true,
+  ]
+  const candidates =
+    tiers.map((tier) => fresh.filter(tier)).find((tier) => tier.length > 0) ??
+    // Only reachable if the day already holds every stop in the bank.
+    offered.filter((template) => template.title !== item.title)
+  const chosen = choose(candidates, random)
 
   return toItem(trip, chosen, timestamp, {
     startTime: item.startTime,
-    endTime: item.endTime,
+    endTime: isValidTime(item.startTime)
+      ? minutesToTime(start + chosen.durationMinutes)
+      : item.endTime,
     source: 'ai',
   })
 }
 
-export function summariseDraft(days: readonly ItineraryDay[]): {
+/**
+ * Counts and totals a draft. `currency` is optional and behaves exactly as it
+ * does on `estimateTotal`: supplied, `estimate` counts only the stops priced in
+ * that currency, on that currency's own scale; omitted, every stop is counted on
+ * the two-digit default, which is what this function always did.
+ */
+export function summariseDraft(
+  days: readonly ItineraryDay[],
+  currency?: CurrencyCode,
+): {
   dayCount: number
   itemCount: number
   estimate: number
@@ -667,14 +839,8 @@ export function summariseDraft(days: readonly ItineraryDay[]): {
   return {
     dayCount: days.length,
     itemCount: days.reduce((total, day) => total + day.items.length, 0),
-    estimate: sumAmounts(days.flatMap((day) => day.items.map((item) => item.estimatedCost))),
+    estimate: estimateTotal(days, currency),
   }
-}
-
-/** Human summary line used by the itinerary screen header. */
-function minutesToTime(total: number): string {
-  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(total)))
-  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`
 }
 
 /**

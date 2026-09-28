@@ -24,7 +24,7 @@ import type { ItineraryDay, Trip } from '@/domain/types'
 export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay[] }) {
   const { actions } = useTourist()
   const generation = useGeneration(trip.id)
-  const draft = useMemo(() => summariseDraft(days), [days])
+  const draft = useMemo(() => summariseDraft(days, trip.currency), [days, trip.currency])
   const loading = generation.status === 'loading'
   const failed = generation.status === 'error'
 

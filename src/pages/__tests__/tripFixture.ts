@@ -61,6 +61,7 @@ function makeItem(index: number, tripId: string, startTime: string): ItineraryIt
     location: index === 0 ? 'Champ de Mars, Paris' : '',
     description: '',
     estimatedCost: FIXTURE_ITEM_COSTS[index],
+    currency: 'EUR',
     source: index % 2 === 0 ? 'ai' : 'catalog',
     editedByUser: false,
     experienceId: null,

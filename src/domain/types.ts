@@ -81,6 +81,19 @@ export interface ItineraryItem {
   location: string
   description: string
   estimatedCost: number
+  /**
+   * The currency `estimatedCost` is quoted in, carried on the item exactly as
+   * `Expense.currency` is carried on an expense.
+   *
+   * Without it a stop was a bare number, so switching a trip from EUR to NGN
+   * relabelled EUR-priced stops as naira. A generated stop takes the trip's own
+   * currency; a stop saved from the catalogue takes the catalogue's, because a
+   * €22 Louvre ticket dropped into a naira trip really is still in euro.
+   * Changing a trip's currency never rewrites an item: a mismatch is excluded
+   * from the total and reported, never converted. There are no exchange rates in
+   * this app.
+   */
+  currency: CurrencyCode
   source: ItineraryItemSource
   editedByUser: boolean
   experienceId: string | null

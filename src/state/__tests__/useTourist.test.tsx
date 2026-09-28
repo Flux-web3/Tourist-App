@@ -67,6 +67,7 @@ function makeItem(tripId: string, id: string, overrides: Partial<ItineraryItem> 
     location: 'Somewhere',
     description: 'A description',
     estimatedCost: 25,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,

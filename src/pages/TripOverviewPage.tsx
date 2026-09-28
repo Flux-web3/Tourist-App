@@ -327,7 +327,13 @@ export default function TripOverviewPage() {
           <StatTile
             label={PROTOTYPE_LABEL.aiDraftEstimate}
             value={formatAmount(budget.itineraryEstimate, trip.currency)}
-            caption="A projection, not a booking"
+            caption={
+              budget.mixedEstimateCurrency
+                ? `A projection. ${budget.uncountedEstimateCount} ${
+                    budget.uncountedEstimateCount === 1 ? 'stop' : 'stops'
+                  } in ${budget.otherEstimateCurrencies.join(', ')} not included`
+                : 'A projection, not a booking'
+            }
             tone="accent"
             icon={<Icon name="auto_awesome" size={14} />}
           />

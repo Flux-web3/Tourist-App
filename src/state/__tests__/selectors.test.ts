@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sumAmounts } from '@/domain/money'
+import { sumAmounts, toCents } from '@/domain/money'
 import type {
   Expense,
   ItineraryDay,
@@ -64,6 +64,7 @@ function makeItem(
     location: 'Somewhere',
     description: 'A description',
     estimatedCost: 20,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,
@@ -251,11 +252,11 @@ describe('selectExpenses', () => {
 
 describe('selectExpensesByCategory', () => {
   it('returns an empty array for no expenses', () => {
-    expect(selectExpensesByCategory([])).toEqual([])
+    expect(selectExpensesByCategory([], 'EUR')).toEqual([])
   })
 
   it('groups by category, counts entries and sorts by total descending', () => {
-    expect(selectExpensesByCategory(EXPENSES)).toEqual([
+    expect(selectExpensesByCategory(EXPENSES, 'EUR')).toEqual([
       { category: 'stay', total: 200.45, count: 1 },
       { category: 'food', total: 100.45, count: 2 },
       { category: 'transport', total: 0.1, count: 1 },
@@ -266,14 +267,14 @@ describe('selectExpensesByCategory', () => {
     const drift = [0.1, 0.2, 0.3, 1.1, 2.2].map((amount, index) =>
       makeExpense(TRIP_ONE.id, `exp_drift_${index}`, { amount }),
     )
-    expect(selectExpensesByCategory(drift)).toEqual([
+    expect(selectExpensesByCategory(drift, 'EUR')).toEqual([
       { category: 'food', total: 3.9, count: 5 },
     ])
   })
 
   it('returns a single bucket for a single expense', () => {
     const only = makeExpense(TRIP_ONE.id, 'exp_only', { amount: 7.25, category: 'other' })
-    expect(selectExpensesByCategory([only])).toEqual([
+    expect(selectExpensesByCategory([only], 'EUR')).toEqual([
       { category: 'other', total: 7.25, count: 1 },
     ])
   })
@@ -283,7 +284,7 @@ describe('selectExpensesByCategory', () => {
       makeExpense(TRIP_ONE.id, 'exp_t1', { amount: 5, category: 'shopping' }),
       makeExpense(TRIP_ONE.id, 'exp_t2', { amount: 5, category: 'activities' }),
     ]
-    expect(selectExpensesByCategory(tied).map((bucket) => bucket.category)).toEqual([
+    expect(selectExpensesByCategory(tied, 'EUR').map((bucket) => bucket.category)).toEqual([
       'shopping',
       'activities',
     ])
@@ -294,20 +295,20 @@ describe('selectExpensesByCategory', () => {
       makeExpense(TRIP_ONE.id, `exp_half_${index}`, { amount, category: 'food' }),
     )
     expect(0.145 * 100).toBe(14.499999999999998)
-    expect(selectExpensesByCategory(halves)).toEqual([{ category: 'food', total: 0.3, count: 2 }])
+    expect(selectExpensesByCategory(halves, 'EUR')).toEqual([{ category: 'food', total: 0.3, count: 2 }])
   })
 
   it('keeps a single half-cent amount whole instead of losing the cent', () => {
     const one = makeExpense(TRIP_ONE.id, 'exp_one', { amount: 1.005, category: 'stay' })
     expect(1.005 * 100).toBe(100.49999999999999)
-    expect(selectExpensesByCategory([one])).toEqual([{ category: 'stay', total: 1.01, count: 1 }])
+    expect(selectExpensesByCategory([one], 'EUR')).toEqual([{ category: 'stay', total: 1.01, count: 1 }])
   })
 
   it('agrees with sumAmounts on every bucket', () => {
     const mixed = [0.145, 1.005, 2.675, 19.99, 0.01].map((amount, index) =>
       makeExpense(TRIP_ONE.id, `exp_mixed_${index}`, { amount, category: 'transport' }),
     )
-    const [bucket] = selectExpensesByCategory(mixed)
+    const [bucket] = selectExpensesByCategory(mixed, 'EUR')
     expect(bucket?.total).toBe(sumAmounts(mixed.map((expense) => expense.amount)))
     expect(bucket?.total).toBe(23.84)
   })
@@ -316,7 +317,139 @@ describe('selectExpensesByCategory', () => {
     const many = Array.from({ length: 20 }, (_, index) =>
       makeExpense(TRIP_ONE.id, `exp_many_${index}`, { amount: 0.145, category: 'other' }),
     )
-    expect(selectExpensesByCategory(many)).toEqual([{ category: 'other', total: 3, count: 20 }])
+    expect(selectExpensesByCategory(many, 'EUR')).toEqual([{ category: 'other', total: 3, count: 20 }])
+  })
+})
+
+/**
+ * The breakdown is a breakdown of `actualSpent`, so it must follow the same
+ * currency rule. Before, it grouped every expense regardless of currency, so a
+ * trip switched from EUR to NGN showed its euro spend as naira rows while
+ * Actual Spent read zero.
+ */
+describe('selectExpensesByCategory and currency', () => {
+  /** Two NGN expenses and two EUR ones, on a trip now in NGN. */
+  function stateAfterSwitchToNgn(): { state: PersistedState; trip: Trip } {
+    const trip = { ...TRIP_ONE, currency: 'NGN' as const, budget: 500_000 }
+    const expenses = [
+      makeExpense(trip.id, 'exp_eur_stay', { amount: 1200, currency: 'EUR', category: 'stay' }),
+      makeExpense(trip.id, 'exp_eur_act', { amount: 450.25, currency: 'EUR', category: 'activities' }),
+      makeExpense(trip.id, 'exp_ngn_stay', { amount: 60_000, currency: 'NGN', category: 'stay' }),
+      makeExpense(trip.id, 'exp_ngn_food', { amount: 8_500.5, currency: 'NGN', category: 'food' }),
+    ]
+    return {
+      trip,
+      state: {
+        ...makeState(),
+        trips: [trip, TRIP_TWO],
+        daysByTrip: { [trip.id]: DAYS, [TRIP_TWO.id]: [] },
+        expensesByTrip: { [trip.id]: expenses, [TRIP_TWO.id]: [] },
+      },
+    }
+  }
+
+  it('groups only the expenses in the currency it is given', () => {
+    const { state, trip } = stateAfterSwitchToNgn()
+    expect(selectExpensesByCategory(selectExpenses(state, trip.id), 'NGN')).toEqual([
+      { category: 'stay', total: 60_000, count: 1 },
+      { category: 'food', total: 8_500.5, count: 1 },
+    ])
+  })
+
+  it('never folds a foreign amount into a row, not even one in the same category', () => {
+    const { state, trip } = stateAfterSwitchToNgn()
+    const rows = selectExpensesByCategory(selectExpenses(state, trip.id), 'NGN')
+    const stay = rows.find((row) => row.category === 'stay')
+    // 61,200 would be naira and euros added together.
+    expect(stay?.total).toBe(60_000)
+    expect(stay?.total).not.toBe(61_200)
+    expect(rows.map((row) => row.category)).not.toContain('activities')
+  })
+
+  it('returns no rows at all when every expense is in another currency', () => {
+    const { state, trip } = stateAfterSwitchToNgn()
+    const rows = selectExpensesByCategory(selectExpenses(state, trip.id), 'GBP')
+    expect(rows).toEqual([])
+    expect(selectBudget(state, { ...trip, currency: 'GBP' })?.actualSpent).toBe(0)
+  })
+
+  it('adds up to exactly actualSpent in a mixed-currency trip', () => {
+    const { state, trip } = stateAfterSwitchToNgn()
+    const budget = selectBudget(state, trip)!
+    const rows = selectExpensesByCategory(selectExpenses(state, trip.id), trip.currency)
+    expect(budget.actualSpent).toBe(68_500.5)
+    expect(sumAmounts(rows.map((row) => row.total), trip.currency)).toBe(budget.actualSpent)
+    expect(rows.reduce((total, row) => total + row.count, 0)).toBe(
+      selectExpenses(state, trip.id).length - budget.uncountedExpenseCount,
+    )
+  })
+
+  it('reconciles with actualSpent to the minor unit for every trip currency', () => {
+    const currencies = ['EUR', 'USD', 'GBP', 'NGN', 'JPY'] as const
+    const categories = ['stay', 'food', 'transport', 'activities', 'shopping', 'other'] as const
+    // Awkward amounts: half-cents, float-hostile values, and fractions of a yen.
+    const amounts = [0.145, 1.005, 2.675, 19.99, 0.01, 1200.6, 5000, 100.25, 3400.5, 7.7, 0.3]
+    const expenses = amounts.map((amount, index) =>
+      makeExpense(TRIP_ONE.id, `exp_matrix_${index}`, {
+        amount,
+        currency: currencies[index % currencies.length],
+        category: categories[index % categories.length],
+      }),
+    )
+    const state: PersistedState = {
+      ...makeState(),
+      expensesByTrip: { [TRIP_ONE.id]: expenses, [TRIP_TWO.id]: [] },
+    }
+
+    for (const currency of currencies) {
+      const trip = { ...TRIP_ONE, currency }
+      const budget = selectBudget(state, trip)!
+      const rows = selectExpensesByCategory(selectExpenses(state, trip.id), currency)
+      const rowCents = rows.reduce((total, row) => total + toCents(row.total, currency), 0)
+      expect(rowCents, currency).toBe(toCents(budget.actualSpent, currency))
+      expect(sumAmounts(rows.map((row) => row.total), currency), currency).toBe(budget.actualSpent)
+    }
+  })
+
+  it('totals JPY in whole yen, with no minor unit', () => {
+    const yen = [
+      makeExpense(TRIP_ONE.id, 'exp_jpy_1', { amount: 1200.6, currency: 'JPY', category: 'food' }),
+      makeExpense(TRIP_ONE.id, 'exp_jpy_2', { amount: 3400.6, currency: 'JPY', category: 'food' }),
+      makeExpense(TRIP_ONE.id, 'exp_eur', { amount: 22.5, currency: 'EUR', category: 'food' }),
+    ]
+    const rows = selectExpensesByCategory(yen, 'JPY')
+    // Whole yen per expense: 1,201 + 3,401. Hundredths would give 4,601.2.
+    expect(rows).toEqual([{ category: 'food', total: 4602, count: 2 }])
+    expect(Number.isInteger(rows[0].total)).toBe(true)
+
+    const state: PersistedState = {
+      ...makeState(),
+      expensesByTrip: { [TRIP_ONE.id]: yen, [TRIP_TWO.id]: [] },
+    }
+    const budget = selectBudget(state, { ...TRIP_ONE, currency: 'JPY', budget: 150_000 })
+    expect(rows[0].total).toBe(budget?.actualSpent)
+  })
+
+  it('keeps one trip’s expenses out of another trip’s rows', () => {
+    const tripTwoExpenses = [
+      makeExpense(TRIP_TWO.id, 'exp_t2_stay', { amount: 300, category: 'stay' }),
+      makeExpense(TRIP_TWO.id, 'exp_t2_act', { amount: 80, category: 'activities' }),
+    ]
+    const state: PersistedState = {
+      ...makeState(),
+      expensesByTrip: { [TRIP_ONE.id]: EXPENSES, [TRIP_TWO.id]: tripTwoExpenses },
+    }
+    expect(selectExpensesByCategory(selectExpenses(state, TRIP_TWO.id), 'EUR')).toEqual([
+      { category: 'stay', total: 300, count: 1 },
+      { category: 'activities', total: 80, count: 1 },
+    ])
+    expect(selectExpensesByCategory(selectExpenses(state, TRIP_ONE.id), 'EUR')).toEqual([
+      { category: 'stay', total: 200.45, count: 1 },
+      { category: 'food', total: 100.45, count: 2 },
+      { category: 'transport', total: 0.1, count: 1 },
+    ])
+    expect(selectBudget(state, TRIP_TWO)?.actualSpent).toBe(380)
+    expect(selectBudget(state, TRIP_ONE)?.actualSpent).toBe(301)
   })
 })
 
@@ -379,6 +512,137 @@ describe('selectBudget', () => {
     expect(budget?.mixedCurrency).toBe(false)
     expect(budget?.otherCurrencies).toEqual([])
     expect(budget?.uncountedExpenseCount).toBe(0)
+  })
+
+  it('reports no estimate mixing when every stop is in the trip currency', () => {
+    const budget = selectBudget(makeState(), TRIP_ONE)
+    expect(budget?.mixedEstimateCurrency).toBe(false)
+    expect(budget?.otherEstimateCurrencies).toEqual([])
+    expect(budget?.uncountedEstimateCount).toBe(0)
+  })
+})
+
+/**
+ * The itinerary half of the same problem. A stop saved from the catalogue is
+ * priced in the catalogue's currency, and a regeneration deliberately preserves
+ * it, so a trip switched to another currency keeps stops the new total cannot
+ * honestly include.
+ */
+describe('selectBudget and an itinerary stop in another currency', () => {
+  /** One EUR catalogue stop and one NGN stop, on a trip in NGN. */
+  function stateWithForeignStop(): PersistedState {
+    return {
+      ...makeState(),
+      expensesByTrip: { [TRIP_ONE.id]: [], [TRIP_TWO.id]: [] },
+      daysByTrip: {
+        [TRIP_ONE.id]: [
+          makeDay(TRIP_ONE.id, 1, [
+            makeItem(TRIP_ONE.id, 'itm_ngn', { estimatedCost: 50_000, currency: 'NGN' }),
+            makeItem(TRIP_ONE.id, 'itm_eur', {
+              estimatedCost: 22,
+              currency: 'EUR',
+              source: 'catalog',
+              startTime: '11:00',
+            }),
+          ]),
+        ],
+        [TRIP_TWO.id]: [],
+      },
+    }
+  }
+
+  const NGN_TRIP = { ...TRIP_ONE, currency: 'NGN' as const, budget: 1_000_000 }
+
+  it('surfaces the mismatch through the new fields', () => {
+    const budget = selectBudget(stateWithForeignStop(), NGN_TRIP)
+    expect(budget?.mixedEstimateCurrency).toBe(true)
+    expect(budget?.otherEstimateCurrencies).toEqual(['EUR'])
+    expect(budget?.uncountedEstimateCount).toBe(1)
+  })
+
+  it('leaves the foreign stop out of the estimate rather than relabelling it', () => {
+    const budget = selectBudget(stateWithForeignStop(), NGN_TRIP)
+    expect(budget?.currency).toBe('NGN')
+    expect(budget?.itineraryEstimate).toBe(50_000)
+    // 50,022 would be the silent sum of two currencies.
+    expect(budget?.itineraryEstimate).not.toBe(50_022)
+  })
+
+  it('never lets an itinerary stop touch actualSpent, remaining or isOverBudget', () => {
+    const budget = selectBudget(stateWithForeignStop(), NGN_TRIP)
+    expect(budget?.actualSpent).toBe(0)
+    expect(budget?.remaining).toBe(1_000_000)
+    expect(budget?.isOverBudget).toBe(false)
+    expect(budget?.remaining).toBe(budget!.tripBudget - budget!.actualSpent)
+  })
+
+  it('keeps the settled figures intact even when every stop is foreign', () => {
+    const state = {
+      ...stateWithForeignStop(),
+      expensesByTrip: {
+        [TRIP_ONE.id]: [makeExpense(TRIP_ONE.id, 'exp_ngn', { amount: 12_000, currency: 'NGN' })],
+        [TRIP_TWO.id]: [],
+      },
+    }
+    const eurTrip = { ...TRIP_ONE, currency: 'USD' as const, budget: 5000 }
+    const budget = selectBudget(state, eurTrip)
+    expect(budget?.itineraryEstimate).toBe(0)
+    expect(budget?.uncountedEstimateCount).toBe(2)
+    expect(budget?.otherEstimateCurrencies).toEqual(['EUR', 'NGN'])
+    expect(budget?.actualSpent).toBe(0)
+    expect(budget?.remaining).toBe(5000)
+  })
+
+  it('reports the estimate and the expense mismatches separately', () => {
+    const state = {
+      ...stateWithForeignStop(),
+      expensesByTrip: {
+        [TRIP_ONE.id]: [makeExpense(TRIP_ONE.id, 'exp_jpy', { amount: 5000, currency: 'JPY' })],
+        [TRIP_TWO.id]: [],
+      },
+    }
+    const budget = selectBudget(state, NGN_TRIP)
+    expect(budget?.otherEstimateCurrencies).toEqual(['EUR'])
+    expect(budget?.otherCurrencies).toEqual(['JPY'])
+    expect(budget?.uncountedEstimateCount).toBe(1)
+    expect(budget?.uncountedExpenseCount).toBe(1)
+  })
+
+  it('counts the stop again once the trip currency matches it', () => {
+    const budget = selectBudget(stateWithForeignStop(), { ...TRIP_ONE, currency: 'EUR' })
+    expect(budget?.itineraryEstimate).toBe(22)
+    expect(budget?.otherEstimateCurrencies).toEqual(['NGN'])
+    expect(budget?.uncountedEstimateCount).toBe(1)
+  })
+
+  it('totals a JPY trip in whole yen through the estimate path', () => {
+    const state = {
+      ...makeState(),
+      expensesByTrip: { [TRIP_ONE.id]: [], [TRIP_TWO.id]: [] },
+      daysByTrip: {
+        [TRIP_ONE.id]: [
+          makeDay(TRIP_ONE.id, 1, [
+            makeItem(TRIP_ONE.id, 'itm_jpy_1', { estimatedCost: 1200, currency: 'JPY' }),
+            makeItem(TRIP_ONE.id, 'itm_jpy_2', {
+              estimatedCost: 3400,
+              currency: 'JPY',
+              startTime: '11:00',
+            }),
+            makeItem(TRIP_ONE.id, 'itm_eur', {
+              estimatedCost: 22.5,
+              currency: 'EUR',
+              startTime: '14:00',
+            }),
+          ]),
+        ],
+        [TRIP_TWO.id]: [],
+      },
+    }
+    const budget = selectBudget(state, { ...TRIP_ONE, currency: 'JPY', budget: 150_000 })
+    expect(budget?.itineraryEstimate).toBe(4600)
+    expect(Number.isInteger(budget!.itineraryEstimate)).toBe(true)
+    expect(budget?.uncountedEstimateCount).toBe(1)
+    expect(budget?.remaining).toBe(150_000)
   })
 })
 
@@ -515,6 +779,35 @@ describe('selectTripSummary', () => {
     const summary = selectTripSummary(state, TRIP_TWO)
     expect(summary.remaining).toBe(800)
     expect(summary.nextItem).toBeNull()
+  })
+
+  it('totals the estimate on the trip currency and leaves a foreign stop out', () => {
+    const state = {
+      ...makeState(),
+      daysByTrip: {
+        [TRIP_ONE.id]: [
+          makeDay(TRIP_ONE.id, 1, [
+            makeItem(TRIP_ONE.id, 'itm_ngn', { estimatedCost: 50_000, currency: 'NGN' }),
+            makeItem(TRIP_ONE.id, 'itm_eur', {
+              estimatedCost: 22,
+              currency: 'EUR',
+              startTime: '11:00',
+            }),
+          ]),
+        ],
+      },
+    }
+    const summary = selectTripSummary(state, { ...TRIP_ONE, currency: 'NGN', budget: 1_000_000 })
+    expect(summary.itemCount).toBe(2)
+    expect(summary.itineraryEstimate).toBe(50_000)
+    // The estimate is still no part of what the traveller has left.
+    expect(summary.remaining).toBe(1_000_000 - summary.actualSpent)
+  })
+
+  it('agrees with the budget summary on the estimate it reports', () => {
+    const summary = selectTripSummary(makeState(), TRIP_ONE)
+    const budget = selectBudget(makeState(), TRIP_ONE)
+    expect(summary.itineraryEstimate).toBe(budget?.itineraryEstimate)
   })
 })
 

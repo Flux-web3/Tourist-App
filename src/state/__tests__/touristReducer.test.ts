@@ -61,6 +61,7 @@ function makeItem(
     location: 'Somewhere',
     description: 'A description',
     estimatedCost: 20,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,

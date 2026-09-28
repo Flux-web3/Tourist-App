@@ -4,7 +4,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { parseISODate, todayISO } from '@/domain/format'
-import { CURRENCY_SYMBOLS } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatAmount, fromCents, toCents } from '@/domain/money'
 import { EXPENSE_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist } from '@/state/useTourist'
 import type { CurrencyCode, Expense, ExpenseCategory, Trip } from '@/domain/types'
@@ -45,13 +45,28 @@ function toDraft(expense: Expense): ExpenseDraft {
   }
 }
 
-function validateExpense(draft: ExpenseDraft): ExpenseErrors {
+/**
+ * The amount exactly as the domain will store it: rounded on the currency's own
+ * scale by `toCents`, so hundredths for EUR and whole yen for JPY. Rounding here
+ * with `Math.round(x * 100) / 100` disagreed with the domain twice over — it
+ * turned 1.005 into 1.00 where `toCents` gives 1.01, and it gave yen two
+ * decimals they do not have, which the domain then rounded a second time.
+ */
+function settledAmount(amount: number, currency: CurrencyCode): number {
+  return fromCents(toCents(amount, currency), currency)
+}
+
+function validateExpense(draft: ExpenseDraft, currency: CurrencyCode): ExpenseErrors {
   const errors: ExpenseErrors = {}
   if (draft.description.trim().length < 2) {
     errors.description = 'Describe what this was for, in at least 2 characters.'
   }
   if (!Number.isFinite(draft.amount) || draft.amount <= 0) {
     errors.amount = 'Enter an amount greater than 0.'
+  } else if (toCents(draft.amount, currency) <= 0) {
+    // Positive, but below the currency's smallest unit, so it would be stored
+    // as nothing. Said here rather than left for the domain to reject.
+    errors.amount = `Enter at least ${formatAmount(fromCents(1, currency), currency)}.`
   }
   if (!parseISODate(draft.date)) {
     errors.date = 'Choose the date you paid.'
@@ -65,6 +80,7 @@ function ExpenseForm({
   errors,
   submitted,
   currency,
+  tripCurrency,
   onPatch,
   onSubmit,
 }: {
@@ -72,7 +88,10 @@ function ExpenseForm({
   draft: ExpenseDraft
   errors: ExpenseErrors
   submitted: boolean
+  /** The currency this expense is (or will be) stored in. */
   currency: CurrencyCode
+  /** The trip's currency, which is what its totals are counted in. */
+  tripCurrency: CurrencyCode
   onPatch: (update: Partial<ExpenseDraft>) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
@@ -123,7 +142,7 @@ function ExpenseForm({
           label="Amount"
           required
           min={0}
-          step={0.01}
+          step={fromCents(1, currency)}
           value={draft.amount}
           prefix={CURRENCY_SYMBOLS[currency]}
           error={errors.amount}
@@ -143,6 +162,17 @@ function ExpenseForm({
         <Icon name="currency_exchange" size={14} className="shrink-0" />
         {`Amounts are in ${currency} (${CURRENCY_SYMBOLS[currency]}) and never converted. Anything paid before departure counts too.`}
       </p>
+
+      {/*
+        Editing an expense logged before the trip's currency changed. It stays in
+        the currency it was paid in — this form cannot change that — so it says
+        plainly that the amount is not part of the trip's totals.
+      */}
+      {currency === tripCurrency ? null : (
+        <p className="text-body-sm text-ink-subtle">
+          {`This expense was logged in ${currency} and this trip is in ${tripCurrency}, so it is not in the ${tripCurrency} total. Saving keeps it in ${currency}.`}
+        </p>
+      )}
 
       <SelectField
         label="Category"
@@ -179,6 +209,8 @@ export function ExpenseFormDialog({
   const [errors, setErrors] = useState<ExpenseErrors>({})
   const [submitted, setSubmitted] = useState(false)
   const formId = useId()
+  // A new expense is always stored in the trip's current currency.
+  const currency = trip.currency
 
   useEffect(() => {
     if (!open) return
@@ -191,21 +223,21 @@ export function ExpenseFormDialog({
     (update: Partial<ExpenseDraft>) => {
       const merged = { ...draft, ...update }
       setDraft(merged)
-      if (submitted) setErrors(validateExpense(merged))
+      if (submitted) setErrors(validateExpense(merged, currency))
     },
-    [draft, submitted],
+    [draft, submitted, currency],
   )
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
-    const result = validateExpense(draft)
+    const result = validateExpense(draft, currency)
     setErrors(result)
     if (Object.keys(result).length > 0) return
     actions.addExpense({
       tripId: trip.id,
       description: draft.description.trim(),
-      amount: Math.round(draft.amount * 100) / 100,
+      amount: settledAmount(draft.amount, currency),
       category: draft.category,
       date: draft.date,
       notes: draft.notes.trim(),
@@ -241,7 +273,8 @@ export function ExpenseFormDialog({
         draft={draft}
         errors={errors}
         submitted={submitted}
-        currency={trip.currency}
+        currency={currency}
+        tripCurrency={trip.currency}
         onPatch={patch}
         onSubmit={handleSubmit}
       />
@@ -265,6 +298,10 @@ export function EditExpenseDialog({
   const [errors, setErrors] = useState<ExpenseErrors>({})
   const [submitted, setSubmitted] = useState(false)
   const formId = useId()
+  // An edit never changes an expense's currency (the patch below does not send
+  // one), so the amount is read, validated and rounded in the currency it was
+  // logged in — not the trip's, which may have changed since.
+  const currency = expense?.currency ?? trip.currency
 
   useEffect(() => {
     if (!open || !expense) return
@@ -277,9 +314,9 @@ export function EditExpenseDialog({
     (update: Partial<ExpenseDraft>) => {
       const merged = { ...draft, ...update }
       setDraft(merged)
-      if (submitted) setErrors(validateExpense(merged))
+      if (submitted) setErrors(validateExpense(merged, currency))
     },
-    [draft, submitted],
+    [draft, submitted, currency],
   )
 
   if (!expense) return null
@@ -287,12 +324,12 @@ export function EditExpenseDialog({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
-    const result = validateExpense(draft)
+    const result = validateExpense(draft, currency)
     setErrors(result)
     if (Object.keys(result).length > 0) return
     actions.updateExpense(expense.id, {
       description: draft.description.trim(),
-      amount: Math.round(draft.amount * 100) / 100,
+      amount: settledAmount(draft.amount, currency),
       category: draft.category,
       date: draft.date,
       notes: draft.notes.trim(),
@@ -328,7 +365,8 @@ export function EditExpenseDialog({
         draft={draft}
         errors={errors}
         submitted={submitted}
-        currency={trip.currency}
+        currency={currency}
+        tripCurrency={trip.currency}
         onPatch={patch}
         onSubmit={handleSubmit}
       />

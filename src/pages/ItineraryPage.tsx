@@ -19,7 +19,7 @@ import {
   findItemInDays,
   nextEmptySlotStartTime,
 } from '@/domain/itinerary'
-import { CURRENCY_SYMBOLS, formatAmount, formatPrice, sumAmounts, toCents } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatAmount, formatPrice, toCents } from '@/domain/money'
 import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { describePlan } from '@/services'
 import { useGeneration, useTourist, useTrip, useTripDays } from '@/state/useTourist'
@@ -307,7 +307,9 @@ export default function ItineraryPage() {
   const trip = useTrip(tripId)
   const days = useTripDays(tripId)
   const generation = useGeneration(tripId)
-  const { actions, pendingItemId, swapError } = useTourist()
+  const { actions, pendingItemId, swapError: latestSwapError, swapTripId } = useTourist()
+  // A failed swap on one trip must not surface on another trip's itinerary.
+  const swapError = swapTripId === tripId ? latestSwapError : null
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [removing, setRemoving] = useState<ItineraryItem | null>(null)
@@ -364,7 +366,14 @@ export default function ItineraryPage() {
     )
   }
 
-  const planEstimate = estimateTotal(days)
+  const planEstimate = estimateTotal(days, trip.currency)
+  /*
+   * Stops priced in a different currency are left out of the estimate above,
+   * never converted. Say how many, or the total would be quietly partial.
+   */
+  const uncountedStops = days
+    .flatMap((day) => day.items)
+    .filter((item) => item.currency !== trip.currency && toCents(item.estimatedCost) !== 0).length
   const noDaysYet = days.length === 0
   const showSkeletons = loading && !hasItems
 
@@ -407,6 +416,11 @@ export default function ItineraryPage() {
                   {`${formatAmount(planEstimate, trip.currency)} ${trip.currency}`}
                 </span>
               </Badge>
+              {uncountedStops > 0 ? (
+                <span className="text-ink-subtle">
+                  {`${uncountedStops} ${uncountedStops === 1 ? 'stop' : 'stops'} in another currency not included`}
+                </span>
+              ) : null}
             </p>
             <DraftProvenanceNote />
           </div>
@@ -499,7 +513,7 @@ export default function ItineraryPage() {
         ) : (
           <ol className="flex list-none flex-col gap-8">
             {days.map((day, position) => {
-              const dayTotal = sumAmounts(day.items.map((item) => item.estimatedCost))
+              const dayTotal = estimateTotal([day], trip.currency)
               return (
                 <li key={day.id} className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-line pb-2">
@@ -595,7 +609,7 @@ export default function ItineraryPage() {
           description="Editing marks this stop as yours, so regeneration will leave it alone from now on."
           submitLabel="Save changes"
           item={editing.item}
-          currency={trip.currency}
+          currency={editing.item.currency}
           dayOptions={dayOptions}
           dayId={editing.day.id}
           showDayField={false}
@@ -628,7 +642,7 @@ export default function ItineraryPage() {
           {removing
             ? `${removing.endTime ? `${removing.startTime}–${removing.endTime}` : removing.startTime} · ${
                 removing.location || 'No location set'
-              } · ${formatPrice(removing.estimatedCost, trip.currency)}${
+              } · ${formatPrice(removing.estimatedCost, removing.currency)}${
                 toCents(removing.estimatedCost) === 0 ? '.' : ' estimated.'
               }`
             : ''}

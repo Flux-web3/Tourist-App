@@ -5,7 +5,7 @@ import { ItineraryItemCard } from '@/components/ItineraryItemCard'
 import { formatShortDate } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { renderWithProviders } from '@/test/renderWithProviders'
-import type { ItineraryDay, ItineraryItem } from '@/domain/types'
+import type { CurrencyCode, ItineraryDay, ItineraryItem } from '@/domain/types'
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -23,6 +23,7 @@ function makeItem(overrides: Partial<ItineraryItem> = {}): ItineraryItem {
     location: 'Rue de Rivoli, Paris',
     description: 'The quiet wing before the crowds arrive.',
     estimatedCost: 24,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,
@@ -50,6 +51,7 @@ function renderCard({
   day?: ItineraryDay
   days?: ItineraryDay[]
 } & Partial<{
+  currency: CurrencyCode
   pendingItemId: string | null
   moving: boolean
   onToggleMove: () => void
@@ -176,6 +178,25 @@ describe('ItineraryItemCard', () => {
     const article = screen.getByRole('article', { name: 'Louvre highlights' })
     expect(within(article).getByText('Free')).toBeInTheDocument()
     expect(within(article).queryByText(/€0/)).not.toBeInTheDocument()
+  })
+
+  it('prices a stop in its own currency, not the trip currency', () => {
+    // A catalogue stop keeps the catalogue's euro price inside a naira trip.
+    // Formatting it with the trip currency is the bug that turned EUR 22 into
+    // NGN 22, so the card must use the item's currency and say it is excluded.
+    renderCard({ item: makeItem({ estimatedCost: 22, currency: 'EUR' }), currency: 'NGN' })
+
+    const article = screen.getByRole('article', { name: 'Louvre highlights' })
+    expect(within(article).getByText(/€22/)).toBeInTheDocument()
+    expect(within(article).queryByText(/₦/)).not.toBeInTheDocument()
+    expect(within(article).getByText(/not in the NGN total/)).toBeInTheDocument()
+  })
+
+  it('adds no currency note when the stop matches the trip', () => {
+    renderCard({ item: makeItem({ estimatedCost: 22, currency: 'EUR' }), currency: 'EUR' })
+
+    const article = screen.getByRole('article', { name: 'Louvre highlights' })
+    expect(within(article).queryByText(/not in the/)).not.toBeInTheDocument()
   })
 
   it('lets a long title and location wrap instead of overflowing a narrow phone', () => {

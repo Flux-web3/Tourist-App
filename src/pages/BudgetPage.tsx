@@ -95,7 +95,13 @@ export default function BudgetPage() {
   const closeEdit = useCallback(() => setEditing(null), [])
   const closeDelete = useCallback(() => setDeleting(null), [])
 
-  const breakdown = useMemo(() => selectExpensesByCategory(expenses), [expenses])
+  // Counted in the trip's currency only, by the same rule as Actual Spent, so
+  // the category rows always add up to that figure exactly.
+  const tripCurrency = trip?.currency
+  const breakdown = useMemo(
+    () => (tripCurrency ? selectExpensesByCategory(expenses, tripCurrency) : []),
+    [expenses, tripCurrency],
+  )
 
   if (!hydrated) {
     return (
@@ -137,6 +143,22 @@ export default function BudgetPage() {
   const currency = trip.currency
   const over = budget.isOverBudget
   const overBy = formatAmount(Math.abs(budget.remaining), currency)
+  const remainingText = formatAmount(budget.remaining, currency)
+  const uncountedLabel = countLabel(budget.uncountedExpenseCount, 'expense', 'expenses')
+  const otherCurrencyList = budget.otherCurrencies.join(', ')
+  const deletingIsForeign = deleting !== null && deleting.currency !== currency
+
+  // What the traveller can actually do about expenses in another currency. The
+  // expense form has no currency control, so "edit them" would be advice the
+  // product cannot follow; setting the trip's currency back is the one way.
+  const oneUncounted = budget.uncountedExpenseCount === 1
+  const mixedExpenseAdvice = [
+    `${oneUncounted ? 'It was' : 'They were'} logged in ${otherCurrencyList} and this trip is in ${currency}.`,
+    `Tourist does not convert between currencies, so ${oneUncounted ? 'it is' : 'they are'} kept exactly as logged and left out of ${PROTOTYPE_LABEL.actualSpent}.`,
+    budget.otherCurrencies.length === 1
+      ? `Set the trip's currency back to ${otherCurrencyList} from Edit trip on the overview and ${oneUncounted ? 'it counts' : 'they count'} again.`
+      : `Set the trip's currency to one of those from Edit trip on the overview and the expenses logged in it count again.`,
+  ].join(' ')
 
   const confirmDelete = () => {
     if (!deleting) return
@@ -193,12 +215,21 @@ export default function BudgetPage() {
             <Icon name="account_balance_wallet" size={14} className="shrink-0" />
             <span>{PROTOTYPE_LABEL.remaining}</span>
           </p>
+          {/*
+            Sized by length so the figure fits on one line at 320px. A deep
+            naira overspend (`-₦10,860,678.90`) otherwise wrapped after the
+            minus, leaving the sign alone above the number.
+          */}
           <p
-            className={`tnum mt-0.5 text-headline-lg sm:text-display ${
-              over ? 'text-danger' : 'text-ink'
-            }`}
+            className={`tnum mt-0.5 [overflow-wrap:anywhere] ${
+              remainingText.length <= 11
+                ? 'text-headline-lg sm:text-display'
+                : remainingText.length <= 15
+                  ? 'text-headline-md sm:text-headline-lg'
+                  : 'text-headline-sm sm:text-headline-lg'
+            } ${over ? 'text-danger' : 'text-ink'}`}
           >
-            {formatAmount(budget.remaining, currency)}
+            {remainingText}
           </p>
           <p className="mt-0.5 text-body-sm text-ink-muted">
             {over
@@ -267,6 +298,10 @@ export default function BudgetPage() {
         they were paid in. Those are left out of Actual Spent rather than summed
         across currencies, so the total stays true — but a total that quietly
         omits expenses would be the worst kind of wrong, so it says so.
+
+        The advice is only what the product can actually do. An expense's
+        currency cannot be edited, so the one way to count them again is to set
+        the trip's currency back.
       */}
       {budget.mixedCurrency ? (
         <Alert
@@ -276,7 +311,25 @@ export default function BudgetPage() {
           } not counted in this total`}
           className="mb-4"
         >
-          {`They were logged in ${budget.otherCurrencies.join(', ')} and this trip is in ${currency}. Tourist does not convert between currencies, so adding them together would give you a number that means nothing. Edit them to ${currency}, or change the trip back, and they will count again.`}
+          {mixedExpenseAdvice}
+        </Alert>
+      ) : null}
+
+      {/*
+        The same rule for the itinerary. A stop saved from the catalogue keeps
+        the catalogue's currency, and a stop you priced yourself keeps the one
+        it was priced in, so after a currency change some estimates no longer
+        belong in this total. They are left out rather than converted.
+      */}
+      {budget.mixedEstimateCurrency ? (
+        <Alert
+          tone="warning"
+          title={`${budget.uncountedEstimateCount} planned ${
+            budget.uncountedEstimateCount === 1 ? 'stop is' : 'stops are'
+          } not counted in the ${PROTOTYPE_LABEL.aiDraftEstimate}`}
+          className="mb-4"
+        >
+          {`They are priced in ${budget.otherEstimateCurrencies.join(', ')} and this trip is in ${currency}. Tourist does not convert between currencies. Your ${PROTOTYPE_LABEL.tripBudget}, ${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} are unaffected, because the estimate never counts toward them.`}
         </Alert>
       ) : null}
 
@@ -347,15 +400,30 @@ export default function BudgetPage() {
                       <span className="tnum text-body-sm text-ink-subtle">
                         {formatShortDate(expense.date)}
                       </span>
+                      {/*
+                        Logged before the trip's currency changed. The amount
+                        stays in its own currency; this says why it is missing
+                        from the total, in the wrapping line rather than the
+                        amount column so a long note never widens the row.
+                      */}
+                      {expense.currency === currency ? null : (
+                        <span className="tnum text-body-sm text-ink-subtle">
+                          {`${expense.currency} · not in the ${currency} total`}
+                        </span>
+                      )}
                     </p>
                     {expense.notes ? (
                       <p className="mt-1 text-body-sm text-ink-muted">{expense.notes}</p>
                     ) : null}
                   </div>
-                  {/* Amounts keep their own right-hand column so the list stays scannable. */}
+                  {/*
+                    Amounts keep their own right-hand column so the list stays
+                    scannable. Each is shown in the currency it was logged in,
+                    never relabelled with the trip's symbol.
+                  */}
                   <div className="flex shrink-0 items-center gap-1">
                     <p className="tnum text-label-lg text-ink">
-                      {formatAmount(expense.amount, currency)}
+                      {formatAmount(expense.amount, expense.currency)}
                     </p>
                     <ActionMenu
                       label={`Actions for ${expense.description}`}
@@ -385,7 +453,15 @@ export default function BudgetPage() {
         <CardTitle hint="Share of what you have already spent, largest share first.">
           Where the money went
         </CardTitle>
-        {breakdown.length === 0 ? (
+        {breakdown.length === 0 && budget.uncountedExpenseCount > 0 ? (
+          // Expenses exist, but none is in the trip's currency, so there is
+          // nothing this breakdown can honestly total.
+          <EmptyState
+            icon="donut_large"
+            title={`Nothing in ${currency} to break down yet`}
+            description={`Your ${uncountedLabel} ${oneUncounted ? 'is' : 'are'} in ${otherCurrencyList}, kept exactly as logged. Each category appears here once you log spending in ${currency}.`}
+          />
+        ) : breakdown.length === 0 ? (
           <EmptyState
             icon="donut_large"
             title="No spending to break down yet"
@@ -423,6 +499,11 @@ export default function BudgetPage() {
               <span>Total logged</span>
               <span className="tnum">{formatAmount(budget.actualSpent, currency)}</span>
             </p>
+            {budget.mixedCurrency ? (
+              <p className="tnum mt-1 text-body-sm text-ink-subtle">
+                {`Not counted here: ${uncountedLabel} in ${otherCurrencyList}.`}
+              </p>
+            ) : null}
           </>
         )}
       </Card>
@@ -468,7 +549,7 @@ export default function BudgetPage() {
                     </span>
                   </span>
                   <span className="tnum text-body-md text-ink">
-                    {formatAmount(estimateTotal([day]), currency)}
+                    {formatAmount(estimateTotal([day], currency), currency)}
                   </span>
                 </li>
               ))}
@@ -512,16 +593,23 @@ export default function BudgetPage() {
           <>
             <p className="flex flex-wrap items-center gap-2 text-label-lg text-ink">
               <Icon name="receipt_long" size={16} className="shrink-0 text-ink-subtle" />
-              {deleting.description}
+              <span className="min-w-0 break-words">{deleting.description}</span>
               <span className="tnum text-body-md text-ink-muted">
-                {formatAmount(deleting.amount, currency)}
+                {formatAmount(deleting.amount, deleting.currency)}
               </span>
+              {deletingIsForeign ? (
+                <span className="tnum text-body-sm text-ink-subtle">
+                  {`${deleting.currency} · not in the ${currency} total`}
+                </span>
+              ) : null}
             </p>
             <p className="tnum mt-1 text-body-sm text-ink-subtle">
               {`${formatDate(deleting.date)} · ${EXPENSE_CATEGORY_LABEL[deleting.category]}`}
             </p>
             <p className="mt-3 text-body-sm text-ink-muted">
-              {`${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} are recalculated without it. The ${PROTOTYPE_LABEL.aiDraftEstimate} is never touched.`}
+              {deletingIsForeign
+                ? `It is not counted in ${PROTOTYPE_LABEL.actualSpent}, so ${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} stay as they are. The ${PROTOTYPE_LABEL.aiDraftEstimate} is never touched.`
+                : `${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} are recalculated without it. The ${PROTOTYPE_LABEL.aiDraftEstimate} is never touched.`}
             </p>
           </>
         ) : null}

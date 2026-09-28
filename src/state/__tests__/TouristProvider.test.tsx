@@ -11,7 +11,12 @@ import type {
 } from '@/domain/types'
 import { createEmptyDraft } from '@/domain/validation'
 import { STORAGE_VERSION, type PersistedState } from '@/services/contracts'
-import { services } from '@/services'
+import {
+  GENERATION_ERROR_MESSAGE,
+  buildAlternativeItem,
+  buildItinerary,
+  services,
+} from '@/services'
 import { selectBudget, selectTrip } from '@/state/selectors'
 import type { TouristContextValue } from '@/state/touristContext'
 import { TouristProvider } from '@/state/TouristProvider'
@@ -63,6 +68,7 @@ function makeItem(tripId: string, id: string, overrides: Partial<ItineraryItem> 
     location: 'Somewhere',
     description: 'A description',
     estimatedCost: 25,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,
@@ -773,10 +779,17 @@ describe('TouristProvider itinerary items', () => {
       ctx().actions.moveItem(TRIP_ID, 'itm_b', `${TRIP_ID}_d2`, 0)
     })
     const after = ctx().state.daysByTrip[TRIP_ID]
+    const original = before[0].items[1]
+    const moved = after[1].items[1]
     expect(after[0].items.map((item) => item.id)).toEqual(['itm_a'])
     expect(after[1].items.map((item) => item.id)).toEqual(['itm_c', 'itm_b'])
-    expect(after[1].items[1]).toBe(before[0].items[1])
+    // Moving a stop to another day is the traveller's decision, so it is marked
+    // as theirs: otherwise the next regeneration would silently discard it.
+    expect(moved).toEqual({ ...original, editedByUser: true, updatedAt: moved.updatedAt })
+    expect(moved.updatedAt).not.toBe(original.updatedAt)
+    // Everything that did not move keeps its identity.
     expect(after[0].items[0]).toBe(before[0].items[0])
+    expect(after[1].items[0]).toBe(before[1].items[0])
   })
 
   /**
@@ -1709,6 +1722,394 @@ describe('TouristProvider catalog reads', () => {
     act(() => {
       ctx().actions.trackSearch({ text: '  museum  ', category: 'culture', maxPrice: 20 })
     })
+    expect(ctx().state).toBe(before)
+  })
+})
+
+/**
+ * A service call held open until the test settles it, so the order in which
+ * overlapping async work lands is chosen by the test rather than by a timer.
+ */
+interface HeldCall {
+  succeed(): void
+  fail(): void
+}
+
+function holdGenerations(): HeldCall[] {
+  const calls: HeldCall[] = []
+  vi.spyOn(services.itinerary, 'generate').mockImplementation(
+    (trip, options) =>
+      new Promise((resolve, reject) => {
+        calls.push({
+          succeed: () => resolve(buildItinerary(trip, options?.variant ?? 0)),
+          fail: () => reject(new Error(GENERATION_ERROR_MESSAGE)),
+        })
+      }),
+  )
+  return calls
+}
+
+function holdSuggestions(): HeldCall[] {
+  const calls: HeldCall[] = []
+  vi.spyOn(services.itinerary, 'suggestAlternative').mockImplementation(
+    ({ trip, day, item, variant }) =>
+      new Promise((resolve, reject) => {
+        calls.push({
+          succeed: () => resolve(buildAlternativeItem(trip, day, item, variant ?? 0)),
+          fail: () => reject(new Error(GENERATION_ERROR_MESSAGE)),
+        })
+      }),
+  )
+  return calls
+}
+
+async function land(settle: () => void, pending: Promise<void>): Promise<void> {
+  await act(async () => {
+    settle()
+    await pending
+  })
+}
+
+function start(run: () => Promise<void>): Promise<void> {
+  const box: { pending: Promise<void> | null } = { pending: null }
+  act(() => {
+    box.pending = run()
+  })
+  if (!box.pending) throw new Error('the action did not start')
+  return box.pending
+}
+
+function itemById(tripId: string, itemId: string): ItineraryItem | undefined {
+  return (ctx().state.daysByTrip[tripId] ?? [])
+    .flatMap((day) => day.items)
+    .find((item) => item.id === itemId)
+}
+
+function replacedEvents() {
+  return services.analytics.events().filter((entry) => entry.event === 'itinerary_item_replaced')
+}
+
+const OTHER_TRIP_ID = 'trip_2'
+
+function twoTripState(): PersistedState {
+  const base = seededState()
+  return {
+    ...base,
+    trips: [...base.trips, makeTrip({ id: OTHER_TRIP_ID, name: 'Lisbon long weekend' })],
+    daysByTrip: {
+      ...base.daysByTrip,
+      [OTHER_TRIP_ID]: [makeDay(OTHER_TRIP_ID, 1, [makeItem(OTHER_TRIP_ID, 'itm_z')])],
+    },
+    expensesByTrip: { ...base.expensesByTrip, [OTHER_TRIP_ID]: [] },
+    generation: { ...base.generation, [OTHER_TRIP_ID]: idleGeneration() },
+  }
+}
+
+/**
+ * Every async write re-checks the world after its await. The trip-deleted and
+ * trip-reflowed guards are covered above; these cover the rest of the class:
+ * an older result landing after a newer one, and a swap landing on a stop that
+ * has changed underneath it.
+ */
+describe('TouristProvider overlapping generations', () => {
+  it('keeps the newer draft when an older run finishes last', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+
+    const older = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    const newer = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    await land(runs[1].succeed, newer)
+    const newest = ctx().state.daysByTrip[TRIP_ID]
+    const newestRecord = generationFor(TRIP_ID)
+    expect(newestRecord.status).toBe('success')
+
+    await land(runs[0].succeed, older)
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(newest)
+    expect(generationFor(TRIP_ID)).toEqual(newestRecord)
+    expect(readStored().daysByTrip[TRIP_ID]).toEqual(newest)
+  })
+
+  it('stays loading when an older run finishes while a newer one is still out', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+
+    const older = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    const newer = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    await land(runs[0].succeed, older)
+
+    // The spinner belongs to the run the traveller is waiting on.
+    expect(generationFor(TRIP_ID).status).toBe('loading')
+    expect(ctx().state.daysByTrip[TRIP_ID]).toEqual(SEEDED_DAYS)
+
+    await land(runs[1].succeed, newer)
+    expect(generationFor(TRIP_ID).status).toBe('success')
+  })
+
+  it('does not stamp an older failure over a newer success', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+
+    const older = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    const retry = start(() => ctx().actions.retryGeneration(TRIP_ID))
+    await land(runs[1].succeed, retry)
+    await land(runs[0].fail, older)
+
+    expect(generationFor(TRIP_ID).status).toBe('success')
+    expect(generationFor(TRIP_ID).error).toBeNull()
+    expect(readStored().generation[TRIP_ID].status).toBe('success')
+  })
+
+  it('writes nothing to storage when a run lands after the provider unmounted', async () => {
+    seedState(seededState())
+    const view = renderProvider()
+    const runs = holdGenerations()
+
+    const pending = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    const snapshot = window.localStorage.getItem(STATE_KEY)
+    view.unmount()
+    await land(runs[0].succeed, pending)
+
+    expect(window.localStorage.getItem(STATE_KEY)).toBe(snapshot)
+  })
+})
+
+describe('TouristProvider swaps that land on a changed stop', () => {
+  it('writes nothing and reports no swap when the stop was removed meanwhile', async () => {
+    seedState(seededState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const pending = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    act(() => {
+      ctx().actions.removeItem(TRIP_ID, 'itm_a')
+    })
+    const afterRemove = ctx().state.daysByTrip[TRIP_ID]
+    services.analytics.clear()
+    await land(swaps[0].succeed, pending)
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(afterRemove)
+    expect(replacedEvents()).toEqual([])
+    expect(ctx().pendingItemId).toBeNull()
+  })
+
+  it('keeps the traveller’s hand edit made while the swap was in flight', async () => {
+    seedState(seededState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const pending = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    act(() => {
+      ctx().actions.editItem(TRIP_ID, 'itm_a', { title: 'My own pick' })
+    })
+    await land(swaps[0].succeed, pending)
+
+    expect(itemById(TRIP_ID, 'itm_a')?.title).toBe('My own pick')
+    expect(ctx().pendingItemId).toBeNull()
+  })
+
+  it('does not drop the suggestion onto the day the stop was moved to', async () => {
+    seedState(seededState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const pending = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    act(() => {
+      ctx().actions.moveItem(TRIP_ID, 'itm_a', `${TRIP_ID}_d2`)
+    })
+    const afterMove = ctx().state.daysByTrip[TRIP_ID]
+    await land(swaps[0].succeed, pending)
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(afterMove)
+    expect(itemById(TRIP_ID, 'itm_a')?.title).toBe('Item itm_a')
+  })
+
+  it('writes nothing when a regeneration rebuilt the day while the swap was out', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+    const swaps = holdSuggestions()
+
+    const swap = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    const redraft = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    await land(runs[0].succeed, redraft)
+    const redrafted = ctx().state.daysByTrip[TRIP_ID]
+    // The untouched AI stop was regenerable, so the redraft replaced it.
+    expect(itemById(TRIP_ID, 'itm_a')).toBeUndefined()
+    services.analytics.clear()
+
+    await land(swaps[0].succeed, swap)
+
+    expect(ctx().state.daysByTrip[TRIP_ID]).toBe(redrafted)
+    expect(replacedEvents()).toEqual([])
+  })
+
+  it('keeps a swap that lands before an overlapping regeneration', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+    const swaps = holdSuggestions()
+
+    const swap = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    const redraft = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    await land(swaps[0].succeed, swap)
+    const swapped = itemById(TRIP_ID, 'itm_a')
+    expect(swapped?.editedByUser).toBe(true)
+
+    await land(runs[0].succeed, redraft)
+
+    // A swapped stop is the traveller's choice, so the redraft keeps it.
+    expect(itemById(TRIP_ID, 'itm_a')).toEqual(swapped)
+  })
+})
+
+describe('TouristProvider swap state follows its trip', () => {
+  it('clears the swap error when the trip it belongs to is deleted', async () => {
+    seedState(twoTripState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const pending = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    await land(swaps[0].fail, pending)
+    expect(ctx().swapError).not.toBeNull()
+
+    act(() => {
+      ctx().actions.deleteTrip(TRIP_ID)
+    })
+
+    expect(ctx().swapError).toBeNull()
+    expect(ctx().pendingItemId).toBeNull()
+  })
+
+  it('leaves the swap error alone when a different trip is deleted', async () => {
+    seedState(twoTripState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const pending = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    await land(swaps[0].fail, pending)
+
+    act(() => {
+      ctx().actions.deleteTrip(OTHER_TRIP_ID)
+    })
+
+    expect(ctx().swapError).not.toBeNull()
+  })
+
+  it('clears the swap error on a data reset', async () => {
+    seedState(seededState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const failed = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    await land(swaps[0].fail, failed)
+    expect(ctx().swapError).not.toBeNull()
+
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(ctx().swapError).toBeNull()
+  })
+
+  it('does not let an abandoned swap clear or fail a newer swap on another trip', async () => {
+    seedState(twoTripState())
+    renderProvider()
+    const swaps = holdSuggestions()
+
+    const abandoned = start(() => ctx().actions.replaceItem(TRIP_ID, 'itm_a'))
+    act(() => {
+      ctx().actions.deleteTrip(TRIP_ID)
+    })
+    const current = start(() => ctx().actions.replaceItem(OTHER_TRIP_ID, 'itm_z'))
+    expect(ctx().pendingItemId).toBe('itm_z')
+
+    await land(swaps[0].fail, abandoned)
+
+    // Still the newer swap's spinner, and no error about a trip that is gone.
+    expect(ctx().pendingItemId).toBe('itm_z')
+    expect(ctx().swapError).toBeNull()
+
+    await land(swaps[1].succeed, current)
+    expect(ctx().pendingItemId).toBeNull()
+    expect(itemById(OTHER_TRIP_ID, 'itm_z')?.editedByUser).toBe(true)
+  })
+})
+
+describe('TouristProvider item currency', () => {
+  function tripIn(currency: Trip['currency']): PersistedState {
+    return { ...seededState(), trips: [makeTrip({ currency })] }
+  }
+
+  const HAND_TYPED = {
+    title: 'Suya by the water',
+    category: 'food',
+    startTime: '19:00',
+    endTime: null,
+    location: '',
+    description: '',
+    estimatedCost: 4500,
+    notes: '',
+  } as const
+
+  it('stores the catalogue’s currency, not the trip’s, for a place added to a trip in another currency', async () => {
+    seedState(tripIn('NGN'))
+    renderProvider()
+    const day = ctx().state.daysByTrip[TRIP_ID][0]
+    const experience = await ctx().actions.getExperience('exp_eiffel_tower')
+    if (!experience) throw new Error('the catalogue record is missing')
+    expect(experience.currency).not.toBe('NGN')
+
+    const box: { created: ItineraryItem | null } = { created: null }
+    await act(async () => {
+      box.created = await ctx().actions.addExperienceToTrip(TRIP_ID, experience.id, {
+        dayId: day.id,
+      })
+    })
+
+    const createdId = box.created?.id ?? ''
+    expect(box.created?.currency).toBe(experience.currency)
+    expect(itemById(TRIP_ID, createdId)?.currency).toBe(experience.currency)
+    const stored = readStored()
+      .daysByTrip[TRIP_ID].flatMap((storedDay) => storedDay.items)
+      .find((item) => item.id === createdId)
+    expect(stored?.currency).toBe(experience.currency)
+    // Recorded as quoted, never converted.
+    expect(stored?.estimatedCost).toBe(experience.priceFrom)
+  })
+
+  it('stores the trip’s currency for a stop typed in by hand', () => {
+    seedState(tripIn('NGN'))
+    renderProvider()
+    const day = ctx().state.daysByTrip[TRIP_ID][0]
+
+    const box: { created: ItineraryItem | null } = { created: null }
+    act(() => {
+      box.created = ctx().actions.addCustomItem(TRIP_ID, { ...HAND_TYPED }, { dayId: day.id })
+    })
+
+    expect(box.created?.currency).toBe('NGN')
+    expect(itemById(TRIP_ID, box.created?.id ?? '')?.currency).toBe('NGN')
+  })
+
+  it('adds no hand-typed stop to a trip that does not exist', () => {
+    seedState(seededState())
+    renderProvider()
+    const before = ctx().state
+
+    const box: { created: ItineraryItem | null } = { created: null }
+    act(() => {
+      box.created = ctx().actions.addCustomItem(
+        'trip_missing',
+        { ...HAND_TYPED },
+        { dayId: `${TRIP_ID}_d1` },
+      )
+    })
+
+    expect(box.created).toBeNull()
     expect(ctx().state).toBe(before)
   })
 })

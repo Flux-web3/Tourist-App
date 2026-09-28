@@ -610,6 +610,9 @@ describe('summariseBudget', () => {
       mixedCurrency: false,
       otherCurrencies: [],
       uncountedExpenseCount: 0,
+      mixedEstimateCurrency: false,
+      otherEstimateCurrencies: [],
+      uncountedEstimateCount: 0,
     })
   })
 
@@ -839,5 +842,253 @@ describe('summariseBudget and a mixed-currency trip', () => {
     expect(summary.actualSpent).toBe(1000)
     expect(summary.remaining).toBe(149_000)
     expect(summary.otherCurrencies).toEqual(['EUR'])
+  })
+})
+
+describe('summariseBudget and a mixed-currency itinerary estimate', () => {
+  it('reports no mixing when the estimate currencies are not supplied at all', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [45.5, 60],
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(105.5)
+    expect(summary.mixedEstimateCurrency).toBe(false)
+    expect(summary.otherEstimateCurrencies).toEqual([])
+    expect(summary.uncountedEstimateCount).toBe(0)
+  })
+
+  it('reports no mixing when every supplied estimate currency matches the trip', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [45.5, 60],
+      itineraryEstimateCurrencies: ['EUR', 'EUR'],
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(105.5)
+    expect(summary.mixedEstimateCurrency).toBe(false)
+    expect(summary.otherEstimateCurrencies).toEqual([])
+    expect(summary.uncountedEstimateCount).toBe(0)
+  })
+
+  it('behaves identically whether matching estimate currencies are supplied or omitted', () => {
+    const withCodes = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      itineraryEstimateCurrencies: ['EUR', 'EUR', 'EUR'],
+      expenseAmounts: [100, 50.5],
+      expenseCurrencies: ['EUR', 'EUR'],
+      currency: 'EUR',
+    })
+    const withoutCodes = summariseBudget({
+      tripBudget: 2500,
+      itineraryEstimates: [45.5, 60, 12.25],
+      expenseAmounts: [100, 50.5],
+      currency: 'EUR',
+    })
+    expect(withCodes).toEqual(withoutCodes)
+  })
+
+  it('keeps a foreign stop out of the estimate and reports it instead', () => {
+    const summary = summariseBudget({
+      tripBudget: 1_000_000,
+      itineraryEstimates: [50_000, 22],
+      itineraryEstimateCurrencies: ['NGN', 'EUR'],
+      expenseAmounts: [],
+      currency: 'NGN',
+    })
+    expect(summary.itineraryEstimate).toBe(50_000)
+    expect(summary.mixedEstimateCurrency).toBe(true)
+    expect(summary.otherEstimateCurrencies).toEqual(['EUR'])
+    expect(summary.uncountedEstimateCount).toBe(1)
+  })
+
+  it('keeps the excluded stop out of estimateVariance too', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [200, 5000],
+      itineraryEstimateCurrencies: ['EUR', 'JPY'],
+      expenseAmounts: [50],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(200)
+    expect(summary.estimateVariance).toBe(150)
+  })
+
+  it('counts every mismatched stop and dedupes the codes it reports', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [10, 20, 30, 40],
+      itineraryEstimateCurrencies: ['USD', 'JPY', 'JPY', 'EUR'],
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(40)
+    expect(summary.uncountedEstimateCount).toBe(3)
+    expect(summary.otherEstimateCurrencies).toEqual(['JPY', 'USD'])
+  })
+
+  it('sorts the reported estimate codes deterministically whatever order they arrive in', () => {
+    const codes: CurrencyCode[] = ['USD', 'NGN', 'JPY', 'GBP']
+    const forwards = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: codes.map(() => 5),
+      itineraryEstimateCurrencies: codes,
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    const backwards = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: codes.map(() => 5),
+      itineraryEstimateCurrencies: [...codes].reverse(),
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(forwards.otherEstimateCurrencies).toEqual(['GBP', 'JPY', 'NGN', 'USD'])
+    expect(backwards.otherEstimateCurrencies).toEqual(forwards.otherEstimateCurrencies)
+  })
+
+  it('reports every stop as uncounted when none is in the trip currency', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [22, 16],
+      itineraryEstimateCurrencies: ['EUR', 'EUR'],
+      expenseAmounts: [120],
+      currency: 'NGN',
+    })
+    expect(summary.itineraryEstimate).toBe(0)
+    expect(summary.uncountedEstimateCount).toBe(2)
+    expect(summary.mixedEstimateCurrency).toBe(true)
+    expect(summary.otherEstimateCurrencies).toEqual(['EUR'])
+    // The estimate collapsing to zero must not disturb the settled figures.
+    expect(summary.actualSpent).toBe(120)
+    expect(summary.remaining).toBe(880)
+  })
+
+  it('treats an estimate with no matching code entry as the trip currency', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [100, 50, 25],
+      itineraryEstimateCurrencies: ['EUR'],
+      expenseAmounts: [],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(175)
+    expect(summary.mixedEstimateCurrency).toBe(false)
+    expect(summary.uncountedEstimateCount).toBe(0)
+  })
+
+  it('totals a JPY plan in whole yen and excludes the foreign stop', () => {
+    const summary = summariseBudget({
+      tripBudget: 150_000,
+      itineraryEstimates: [1200, 3400, 22.5],
+      itineraryEstimateCurrencies: ['JPY', 'JPY', 'EUR'],
+      expenseAmounts: [1000],
+      expenseCurrencies: ['JPY'],
+      currency: 'JPY',
+    })
+    expect(summary.itineraryEstimate).toBe(4600)
+    expect(Number.isInteger(summary.itineraryEstimate)).toBe(true)
+    expect(summary.uncountedEstimateCount).toBe(1)
+    expect(summary.estimateVariance).toBe(3600)
+    expect(summary.remaining).toBe(149_000)
+  })
+
+  it('reports estimate mixing and expense mixing independently', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [200, 5000],
+      itineraryEstimateCurrencies: ['EUR', 'JPY'],
+      expenseAmounts: [50, 60],
+      expenseCurrencies: ['EUR', 'EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.mixedEstimateCurrency).toBe(true)
+    expect(summary.otherEstimateCurrencies).toEqual(['JPY'])
+    expect(summary.uncountedEstimateCount).toBe(1)
+    expect(summary.mixedCurrency).toBe(false)
+    expect(summary.otherCurrencies).toEqual([])
+    expect(summary.uncountedExpenseCount).toBe(0)
+  })
+})
+
+describe('summariseBudget keeps the estimate out of the settled figures', () => {
+  it('never lets the estimate reach actualSpent, remaining or isOverBudget', () => {
+    const summary = summariseBudget({
+      tripBudget: 100,
+      itineraryEstimates: [10_000],
+      itineraryEstimateCurrencies: ['EUR'],
+      expenseAmounts: [40],
+      expenseCurrencies: ['EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.itineraryEstimate).toBe(10_000)
+    expect(summary.actualSpent).toBe(40)
+    expect(summary.remaining).toBe(60)
+    expect(summary.isOverBudget).toBe(false)
+  })
+
+  it('never lets a mismatched estimate reach them either', () => {
+    const summary = summariseBudget({
+      tripBudget: 100,
+      itineraryEstimates: [10_000, 500_000],
+      itineraryEstimateCurrencies: ['EUR', 'NGN'],
+      expenseAmounts: [40],
+      expenseCurrencies: ['EUR'],
+      currency: 'EUR',
+    })
+    expect(summary.actualSpent).toBe(40)
+    expect(summary.remaining).toBe(60)
+    expect(summary.isOverBudget).toBe(false)
+  })
+
+  it('gives remaining as budget minus actualSpent exactly, whatever the estimates are', () => {
+    const cases: ReadonlyArray<{ budget: number; spent: readonly number[]; expected: number }> = [
+      { budget: 100, spent: [100], expected: 0 },
+      { budget: 100, spent: [40, 20], expected: 40 },
+      { budget: 100, spent: [150], expected: -50 },
+      { budget: 100, spent: [99.99], expected: 0.01 },
+      { budget: 100, spent: [100.01], expected: -0.01 },
+    ]
+    for (const { budget, spent, expected } of cases) {
+      const summary = summariseBudget({
+        tripBudget: budget,
+        itineraryEstimates: [777.77, 88_888],
+        itineraryEstimateCurrencies: ['EUR', 'NGN'],
+        expenseAmounts: [...spent],
+        expenseCurrencies: spent.map(() => 'EUR' as CurrencyCode),
+        currency: 'EUR',
+      })
+      expect(summary.remaining, `budget=${budget} spent=${spent.join('+')}`).toBe(expected)
+      expect(summary.remaining).toBe(
+        fromCents(toCents(summary.tripBudget) - toCents(summary.actualSpent)),
+      )
+      expect(summary.isOverBudget).toBe(expected < 0)
+    }
+  })
+
+  it('holds the same identity for a JPY trip at the whole-yen boundary', () => {
+    const cases: ReadonlyArray<{ budget: number; spent: number; expected: number }> = [
+      { budget: 150_000, spent: 150_000, expected: 0 },
+      { budget: 150_000, spent: 149_999, expected: 1 },
+      { budget: 150_000, spent: 150_001, expected: -1 },
+    ]
+    for (const { budget, spent, expected } of cases) {
+      const summary = summariseBudget({
+        tripBudget: budget,
+        itineraryEstimates: [4600],
+        itineraryEstimateCurrencies: ['JPY'],
+        expenseAmounts: [spent],
+        expenseCurrencies: ['JPY'],
+        currency: 'JPY',
+      })
+      expect(summary.remaining, `spent=${spent}`).toBe(expected)
+      expect(summary.remaining).toBe(
+        fromCents(toCents(summary.tripBudget, 'JPY') - toCents(summary.actualSpent, 'JPY'), 'JPY'),
+      )
+      expect(summary.isOverBudget).toBe(expected < 0)
+    }
   })
 })

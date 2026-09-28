@@ -79,7 +79,13 @@ export function ItineraryItemCard({
   const timeRange = timeParts.filter((part) => part !== null).join(' – ')
 
   const free = toCents(item.estimatedCost) === 0
-  const price = formatPrice(item.estimatedCost, currency)
+  /*
+   * Priced in the item's own currency, not the trip's. A stop saved from the
+   * catalogue into a naira trip is still a euro price, and formatting it with
+   * the trip currency is exactly the bug that relabelled €22 as ₦22.
+   */
+  const price = formatPrice(item.estimatedCost, item.currency)
+  const foreign = !free && item.currency !== currency
 
   const actions: ActionMenuItem[] = [
     { label: 'Edit', icon: 'edit', onSelect: onEdit },
@@ -119,6 +125,9 @@ export function ItineraryItemCard({
             <p className="tnum text-label-md text-ink-muted">
               <span className="sr-only">{`${PROTOTYPE_LABEL.estimatedPrice}: `}</span>
               {free ? price : `≈ ${price}`}
+              {foreign ? (
+                <span className="text-ink-subtle">{` ${item.currency} · not in the ${currency} total`}</span>
+              ) : null}
             </p>
 
             {pending ? (

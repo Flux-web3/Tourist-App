@@ -147,7 +147,11 @@ export function formatPrice(
 export interface BudgetSummary {
   /** The traveller's own ceiling for the trip. */
   tripBudget: number
-  /** Sum of every planned itinerary estimate. Always a projection. */
+  /**
+   * Sum of the planned itinerary estimates. Always a projection, and never part
+   * of `remaining`. Counts only the stops already in `currency` — see
+   * `mixedEstimateCurrency`.
+   */
   itineraryEstimate: number
   /**
    * Sum of logged expenses. The only settled figure. Counts only the expenses
@@ -173,21 +177,71 @@ export interface BudgetSummary {
   otherCurrencies: CurrencyCode[]
   /** How many expenses `actualSpent` leaves out for that reason. */
   uncountedExpenseCount: number
+  /**
+   * The itinerary counterpart of `mixedCurrency`: at least one planned stop is
+   * priced in a currency other than `currency`, so `itineraryEstimate` covers
+   * part of the plan rather than all of it. Typically a catalogue stop saved in
+   * EUR sitting in a trip the traveller later switched to another currency.
+   */
+  mixedEstimateCurrency: boolean
+  /** The other currency codes found among the estimates, deduped and sorted. */
+  otherEstimateCurrencies: CurrencyCode[]
+  /** How many planned stops `itineraryEstimate` leaves out for that reason. */
+  uncountedEstimateCount: number
+}
+
+/**
+ * Splits amounts into the ones genuinely in `currency` and the foreign codes
+ * found among the rest.
+ *
+ * An amount with no code at the matching index is taken to be in `currency`
+ * already, which is what lets a caller pass only amounts and get the behaviour
+ * it always got. Shared by the expense and the itinerary-estimate paths so the
+ * two can never drift into treating a mismatch differently.
+ */
+function partitionByCurrency(
+  amounts: readonly number[],
+  codes: readonly CurrencyCode[] | undefined,
+  currency: CurrencyCode,
+): { counted: number[]; otherCodes: CurrencyCode[]; uncountedCount: number } {
+  const counted: number[] = []
+  const otherCodes = new Set<CurrencyCode>()
+
+  amounts.forEach((amount, index) => {
+    const amountCurrency = codes?.[index] ?? currency
+    if (amountCurrency === currency) {
+      counted.push(amount)
+      return
+    }
+    otherCodes.add(amountCurrency)
+  })
+
+  return {
+    counted,
+    otherCodes: [...otherCodes].sort(),
+    uncountedCount: amounts.length - counted.length,
+  }
 }
 
 /**
  * Totals a trip's money on a single scale: the trip's own currency.
  *
  * `expenseCurrencies` is optional and positionally aligned with
- * `expenseAmounts`. Any amount without a code is taken to be in the trip
+ * `expenseAmounts`; `itineraryEstimateCurrencies` is the exact counterpart for
+ * `itineraryEstimates`. Any amount without a code is taken to be in the trip
  * currency already, so a caller that passes only amounts gets exactly the
- * behaviour it always got, `mixedCurrency` included (`false`).
+ * behaviour it always got, `mixedCurrency` and `mixedEstimateCurrency` included
+ * (both `false`).
  *
- * When a code is present and differs, the amount is left out of `actualSpent`
- * rather than added to it. Folding ¥1,000 into a EUR total and labelling the
- * result EUR does not produce a slightly wrong number, it produces a number
- * that means nothing; the mismatch is reported through `mixedCurrency`,
- * `otherCurrencies` and `uncountedExpenseCount` instead.
+ * When a code is present and differs, the amount is left out of the total rather
+ * than added to it. Folding ¥1,000 into a EUR total and labelling the result EUR
+ * does not produce a slightly wrong number, it produces a number that means
+ * nothing; the mismatch is reported through `mixedCurrency` /
+ * `mixedEstimateCurrency` and their companion fields instead.
+ *
+ * `remaining` is `tripBudget - actualSpent` and nothing else. The estimate is a
+ * projection and never touches it, so no itinerary stop — matched or mismatched
+ * — can move what the traveller has left.
  */
 export function summariseBudget(input: {
   tripBudget: number
@@ -196,24 +250,20 @@ export function summariseBudget(input: {
   currency: CurrencyCode
   /** Positionally aligned with `expenseAmounts`. Omit to assume the trip currency. */
   expenseCurrencies?: readonly CurrencyCode[]
+  /** Positionally aligned with `itineraryEstimates`. Omit to assume the trip currency. */
+  itineraryEstimateCurrencies?: readonly CurrencyCode[]
 }): BudgetSummary {
   const { currency } = input
-  const countedAmounts: number[] = []
-  const otherCodes = new Set<CurrencyCode>()
+  const expenses = partitionByCurrency(input.expenseAmounts, input.expenseCurrencies, currency)
+  const estimates = partitionByCurrency(
+    input.itineraryEstimates,
+    input.itineraryEstimateCurrencies,
+    currency,
+  )
 
-  input.expenseAmounts.forEach((amount, index) => {
-    const amountCurrency = input.expenseCurrencies?.[index] ?? currency
-    if (amountCurrency === currency) {
-      countedAmounts.push(amount)
-      return
-    }
-    otherCodes.add(amountCurrency)
-  })
-
-  const uncountedExpenseCount = input.expenseAmounts.length - countedAmounts.length
   const tripBudget = fromCents(toCents(input.tripBudget, currency), currency)
-  const itineraryEstimate = sumAmounts(input.itineraryEstimates, currency)
-  const actualSpent = sumAmounts(countedAmounts, currency)
+  const itineraryEstimate = sumAmounts(estimates.counted, currency)
+  const actualSpent = sumAmounts(expenses.counted, currency)
   const remaining = fromCents(
     toCents(tripBudget, currency) - toCents(actualSpent, currency),
     currency,
@@ -229,8 +279,11 @@ export function summariseBudget(input: {
     ),
     isOverBudget: toCents(remaining, currency) < 0,
     currency,
-    mixedCurrency: otherCodes.size > 0,
-    otherCurrencies: [...otherCodes].sort(),
-    uncountedExpenseCount,
+    mixedCurrency: expenses.otherCodes.length > 0,
+    otherCurrencies: expenses.otherCodes,
+    uncountedExpenseCount: expenses.uncountedCount,
+    mixedEstimateCurrency: estimates.otherCodes.length > 0,
+    otherEstimateCurrencies: estimates.otherCodes,
+    uncountedEstimateCount: estimates.uncountedCount,
   }
 }

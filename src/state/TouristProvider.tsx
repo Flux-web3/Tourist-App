@@ -70,6 +70,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(touristReducer, undefined, createInitialTouristState)
   const [pendingItemId, setPendingItemId] = useState<string | null>(null)
   const [swapError, setSwapError] = useState<string | null>(null)
+  const [swapTripId, setSwapTripId] = useState<string | null>(null)
 
   const stateRef = useRef(state)
   stateRef.current = state
@@ -80,6 +81,27 @@ export function TouristProvider({ children }: { children: ReactNode }) {
    * not survive a reload and strand a trip in permanent failure.
    */
   const simulateFailureRef = useRef<Record<string, boolean>>({})
+  /**
+   * The newest generation started for each trip. A run compares its own number
+   * against this after the await and writes nothing if a later run has started
+   * since: a double-tapped Regenerate, or a Retry pressed while the first run was
+   * still out, must never let the older result land last and overwrite the newer
+   * one (or stamp an error over a run that is still loading).
+   */
+  const generationRunRef = useRef<Record<string, number>>({})
+  /**
+   * The trip the in-flight swap, or the swap error on screen, belongs to. Both
+   * are single provider-wide values, so without this a trip deletion or a data
+   * reset would leave a spinner or an error banner about a trip that is gone.
+   */
+  const swapTripRef = useRef<string | null>(null)
+  /**
+   * The newest swap started. `pendingItemId` and `swapError` are shared by every
+   * trip, so a swap that has been abandoned (its trip deleted, the data reset)
+   * must not reach them when it finally settles: it would clear the spinner of,
+   * or raise an error over, a newer swap on another trip.
+   */
+  const swapRunRef = useRef(0)
 
   const commit = useCallback((next: PersistedState) => {
     stateRef.current = { ...next, hydrated: stateRef.current.hydrated }
@@ -145,12 +167,16 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const variant = regenerate
         ? ((variantRef.current[tripId] = (variantRef.current[tripId] ?? 0) + 1))
         : 0
+      const run = (generationRunRef.current[tripId] = (generationRunRef.current[tripId] ?? 0) + 1)
+      const superseded = () => generationRunRef.current[tripId] !== run
 
       setGeneration(tripId, { ...IDLE_GENERATION, status: 'loading', startedAt })
       services.analytics.track('itinerary_generation_started', { tripId, regenerate, variant })
 
       try {
         const generated = await services.itinerary.generate(trip, { shouldFail, variant })
+        // A newer run owns this trip's days and its generation record now.
+        if (superseded()) return
         const after = stateRef.current
         const current = after.trips.find((candidate) => candidate.id === tripId)
         /**
@@ -192,6 +218,9 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         })
         trackSaved(tripId)
       } catch (error) {
+        // An older run failing must not stamp an error over a newer run that is
+        // still loading or has already succeeded.
+        if (superseded()) return
         const after = stateRef.current
         const message =
           error instanceof Error ? error.message : 'Something went wrong while drafting your itinerary.'
@@ -216,6 +245,14 @@ export function TouristProvider({ children }: { children: ReactNode }) {
   )
 
   const actions = useMemo<TouristActions>(() => {
+    const clearSwapState = () => {
+      swapRunRef.current += 1
+      swapTripRef.current = null
+      setSwapTripId(null)
+      setPendingItemId(null)
+      setSwapError(null)
+    }
+
     const setThemePreference = (preference: ThemePreference) => {
       applyTheme(preference)
       commit({ ...stateRef.current, themePreference: preference })
@@ -271,6 +308,9 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       services.analytics.clear()
       variantRef.current = {}
       simulateFailureRef.current = {}
+      // Anything still in flight belongs to a trip that no longer exists.
+      generationRunRef.current = {}
+      clearSwapState()
       services.persistence.save(fresh)
       commit(fresh)
     }
@@ -313,6 +353,8 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const next = services.trips.remove(stateRef.current, tripId)
       delete variantRef.current[tripId]
       delete simulateFailureRef.current[tripId]
+      delete generationRunRef.current[tripId]
+      if (swapTripRef.current === tripId) clearSwapState()
       patch({
         trips: next.trips,
         daysByTrip: next.daysByTrip,
@@ -366,7 +408,11 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const located = findItemInDays(current.daysByTrip[tripId] ?? [], itemId)
       if (!trip || !located) return
       const variant = (variantRef.current[tripId] = (variantRef.current[tripId] ?? 0) + 1)
+      const run = (swapRunRef.current += 1)
+      const superseded = () => swapRunRef.current !== run
 
+      swapTripRef.current = tripId
+      setSwapTripId(tripId)
       setPendingItemId(itemId)
       setSwapError(null)
       try {
@@ -377,6 +423,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           variant,
           shouldFail: simulateFailureRef.current[tripId] ?? false,
         })
+        if (superseded()) return
         const after = stateRef.current
         const stillThere = after.trips.find((candidate) => candidate.id === tripId)
         // The trip was deleted while the suggestion was in flight: writing the
@@ -386,6 +433,17 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         // may no longer exist. Discard it rather than write it somewhere it does
         // not belong; the plan the traveller has is untouched either way.
         if (!sameItineraryShape(trip, stillThere)) return
+        /**
+         * The stop has to still be the exact stop the suggestion was built for.
+         * While it was in flight the traveller may have removed it, moved it to
+         * another day or edited it by hand, or a regeneration may have rebuilt
+         * the day around it. Writing now would overwrite their edit, drop an AI
+         * stop onto a day they moved it away from, or report a swap that never
+         * happened. Every helper in `domain/itinerary` returns the untouched
+         * items by reference, so an unchanged reference means an unchanged stop.
+         */
+        const target = findItemInDays(after.daysByTrip[tripId] ?? [], itemId)
+        if (!target || target.day.id !== located.day.id || target.item !== located.item) return
         const days = replaceItemInDays(
           after.daysByTrip[tripId] ?? [],
           itemId,
@@ -401,13 +459,14 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         })
         trackSaved(tripId)
       } catch (error) {
+        if (superseded()) return
         setSwapError(
           error instanceof Error
             ? error.message
             : 'We could not find a different suggestion. Your plan is unchanged.',
         )
       } finally {
-        setPendingItemId(null)
+        if (!superseded()) setPendingItemId(null)
       }
     }
 
@@ -419,6 +478,10 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       placement: AddToTripInput,
     ): ItineraryItem | null => {
       const current = stateRef.current
+      // The cost was typed into a field labelled with this trip's currency, so
+      // that is the only honest currency for it. No trip, no stop: never guess.
+      const trip = current.trips.find((candidate) => candidate.id === tripId)
+      if (!trip) return null
       const days = current.daysByTrip[tripId] ?? []
       const day = findDayById(days, placement.dayId)
       if (!day) return null
@@ -433,6 +496,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         location: input.location.trim(),
         description: input.description.trim(),
         estimatedCost: Math.max(0, input.estimatedCost),
+        currency: trip.currency,
         source: 'user',
         editedByUser: false,
         experienceId: null,
@@ -468,6 +532,10 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         location: `${experience.neighborhood}, ${experience.city}`,
         description: experience.summary,
         estimatedCost: experience.priceFrom,
+        // The catalogue's own currency, never the trip's: a EUR ticket dropped
+        // into a naira trip is still EUR, and relabelling it would silently count
+        // 22 EUR as 22 NGN. The budget excludes and reports a mismatch instead.
+        currency: experience.currency,
         source: 'catalog',
         editedByUser: false,
         experienceId: experience.id,
@@ -499,7 +567,13 @@ export function TouristProvider({ children }: { children: ReactNode }) {
 
     const moveItem = (tripId: string, itemId: string, dayId: string, position?: number) => {
       const current = stateRef.current
-      const days = moveItemInDays(current.daysByTrip[tripId] ?? [], itemId, dayId, position)
+      const days = moveItemInDays(
+        current.daysByTrip[tripId] ?? [],
+        itemId,
+        dayId,
+        position,
+        timestamp(),
+      )
       patch({ daysByTrip: { ...current.daysByTrip, [tripId]: days } })
       trackSaved(tripId)
     }
@@ -626,8 +700,8 @@ export function TouristProvider({ children }: { children: ReactNode }) {
   }, [commit, patch, runGeneration, setGeneration, trackSaved, markItineraryReady])
 
   const value = useMemo<TouristContextValue>(
-    () => ({ state, hydrated: state.hydrated, actions, pendingItemId, swapError }),
-    [actions, pendingItemId, state, swapError],
+    () => ({ state, hydrated: state.hydrated, actions, pendingItemId, swapError, swapTripId }),
+    [actions, pendingItemId, state, swapError, swapTripId],
   )
 
   return <TouristContext.Provider value={value}>{children}</TouristContext.Provider>

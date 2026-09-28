@@ -28,13 +28,30 @@ function toDraft(trip: Trip): TripDraft {
   }
 }
 
-/** Dates and pace drive the shape of the draft, so a change re-flows it. */
-function shouldReflow(patch: Partial<TripDraft>): boolean {
+/**
+ * Dates, pace and destination set the shape of the draft, so the draft is
+ * re-flowed when one of them changes value. The test compares the stored trip
+ * with the edited one, not what the patch contains. The edit dialog always sends
+ * the whole draft, so testing only whether a field was present rebuilt the plan
+ * from variant 0 on every save. A rename or a budget change threw away the draft
+ * the traveller had regenerated to.
+ *
+ * `currency` is deliberately not in the set. The generator's template prices are
+ * euro prices, and every generated stop is priced in EUR whatever the trip's
+ * currency. So regenerating on a currency change reprices nothing. All it would do
+ * is discard the traveller's chosen draft. Stops priced in a currency other than
+ * the trip's are reported as uncounted by the budget screen, and nothing is ever
+ * converted.
+ *
+ * Keep this set in step with `sameItineraryShape` in `TouristProvider`, which
+ * decides when an in-flight generation describes a trip that no longer exists.
+ */
+function shouldReflow(current: Trip, next: Trip): boolean {
   return (
-    patch.startDate !== undefined ||
-    patch.endDate !== undefined ||
-    patch.pace !== undefined ||
-    patch.destination !== undefined
+    next.startDate !== current.startDate ||
+    next.endDate !== current.endDate ||
+    next.pace !== current.pace ||
+    next.destination !== current.destination
   )
 }
 
@@ -123,7 +140,7 @@ export const tripService: TripService = {
     const trips = state.trips.map((trip) => (trip.id === tripId ? next : trip))
     let daysByTrip = state.daysByTrip
 
-    if (shouldReflow(patch)) {
+    if (shouldReflow(current, next)) {
       const existing = state.daysByTrip[tripId] ?? []
       const regenerated = buildItinerary(next, 0, timestamp)
       daysByTrip = { ...state.daysByTrip, [tripId]: mergeGeneratedDays(existing, regenerated) }

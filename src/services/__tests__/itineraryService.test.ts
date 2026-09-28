@@ -192,14 +192,19 @@ describe('itineraryService.generate', () => {
     expect(titles.join(' ')).not.toMatch(/jazz/i)
   })
 
-  it('opens the last day with the departure so the airport is the morning plan', async () => {
+  it('closes the last day with the departure, after everything else', async () => {
+    // The departure used to open the final day at 08:00 and was followed by a
+    // market picnic at noon, i.e. the traveller left for the airport and then
+    // kept sightseeing. It is now pinned last.
     const days = await generateNow(TRIP)
+    const lastDay = days[days.length - 1]
+    const last = lastDay?.items[lastDay.items.length - 1]
 
-    const first = days[days.length - 1]?.items[0]
-
-    expect(first?.category).toBe('transit')
-    expect(first?.startTime).toBe('08:00')
-    expect(first?.location).toMatch(/Charles de Gaulle/i)
+    expect(last?.category).toBe('transit')
+    expect(last?.location).toMatch(/Charles de Gaulle/i)
+    for (const item of lastDay?.items.slice(0, -1) ?? []) {
+      expect(item.startTime <= (last?.startTime ?? '')).toBe(true)
+    }
   })
 
   it('never reuses the arrival or departure template as a mid-trip filler', async () => {
@@ -219,15 +224,15 @@ describe('itineraryService.generate', () => {
     }
   })
 
-  it('keeps a one-day trip on the arrival anchor without inventing a departure', async () => {
+  it('gives a one-day trip its arrival first and its departure last', async () => {
     const singleDay: Trip = { ...TRIP, startDate: '2026-04-10', endDate: '2026-04-10' }
 
     const days = await generateNow(singleDay)
+    const titles = days[0]?.items.map((item) => item.title) ?? []
 
     expect(days).toHaveLength(1)
-    expect(days[0]?.items.map((item) => item.title)).toContain(
-      'Arrive, drop bags, and walk the neighbourhood',
-    )
+    expect(titles[0]).toBe('Arrive, drop bags, and walk the neighbourhood')
+    expect(titles[titles.length - 1]).toBe('Check out, last coffee, and head for the airport')
   })
 
   it('anchors the last day on departure when the bank has one', async () => {

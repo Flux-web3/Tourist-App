@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addDays, eachDay } from '@/domain/format'
+import { moveItemInDays } from '@/domain/itinerary'
 import type { ItineraryItem, Trip, TripDraft } from '@/domain/types'
 import { createEmptyDraft, suggestTripName, TRIP_LIMITS, validateTripDraft } from '@/domain/validation'
 import { STORAGE_VERSION, type PersistedState } from '@/services/contracts'
+import { buildItinerary } from '@/services/itineraryGenerator'
 import { createDemoState, createEmptyState, createGuestUser, DEMO_TRIP_ID } from '@/services/persistence'
 import { tripService } from '@/services/tripService'
 
@@ -59,6 +61,7 @@ function syntheticItem(overrides: Partial<ItineraryItem> & { id: string }): Itin
     location: 'Le Marais',
     description: 'Synthetic description',
     estimatedCost: 0,
+    currency: 'EUR',
     source: 'ai',
     editedByUser: false,
     experienceId: null,
@@ -522,6 +525,103 @@ describe('tripService.update', () => {
     expect(new Set(afterIds).size).toBe(afterIds.length)
   })
 
+  /**
+   * The generator's template prices are euro prices, so a generated stop is
+   * priced in EUR whatever the trip's currency. Regenerating on a currency change
+   * therefore repriced nothing, and only threw away the draft the traveller had
+   * chosen.
+   */
+  it('does not reflow the days when the currency changes', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const before = daysOf(created.state, tripId)
+    expect(allItems(created.state, tripId).every((item) => item.currency === 'EUR')).toBe(true)
+
+    const result = tripService.update(created.state, tripId, { currency: 'NGN' })
+
+    expect(result.trip?.currency).toBe('NGN')
+    expect(result.state.daysByTrip[tripId]).toBe(before)
+    const items = allItems(result.state, tripId)
+    expect(items.length).toBeGreaterThan(0)
+    expect(items.every((item) => item.currency === 'EUR')).toBe(true)
+  })
+
+  it('keeps every stop, the untouched AI ones included, when the currency changes', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const seeded = seedItemsInto(created.state, tripId)
+    const idsBefore = allItems(seeded, tripId).map((item) => item.id)
+
+    const result = tripService.update(seeded, tripId, { currency: 'NGN' })
+
+    expect(allItems(result.state, tripId).map((item) => item.id)).toEqual(idsBefore)
+    expect(idsBefore).toContain('itm_ai_plain')
+  })
+
+  /**
+   * The traveller's own half of the plan is never silently rewritten. A preserved
+   * stop keeping its old currency is correct, not a bug: it is then reported as
+   * uncounted rather than relabelled.
+   */
+  it('does not rewrite the currency of a preserved stop', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const seeded = seedItemsInto(created.state, tripId)
+    const original = allItems(seeded, tripId).find((item) => item.id === 'itm_catalog_added')
+    expect(original?.currency).toBe('EUR')
+
+    const result = tripService.update(seeded, tripId, { currency: 'NGN' })
+    const after = allItems(result.state, tripId).find((item) => item.id === 'itm_catalog_added')
+
+    expect(after).toEqual(original)
+    expect(after?.currency).toBe('EUR')
+    expect(result.trip?.currency).toBe('NGN')
+  })
+
+  it('leaves the AI draft in EUR and keeps its ids when the currency changes to JPY', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const seeded = seedItemsInto(created.state, tripId)
+    // Generated ids also carry the `itm_` prefix, so the fixture ids are named
+    // explicitly rather than matched on shape.
+    const fixtureIds = new Set(preservedFixtures().map((item) => item.id))
+    const generatedBefore = allItems(seeded, tripId).filter((item) => !fixtureIds.has(item.id))
+
+    const result = tripService.update(seeded, tripId, { currency: 'JPY' })
+    const generatedAfter = allItems(result.state, tripId).filter((item) => !fixtureIds.has(item.id))
+
+    expect(generatedAfter.length).toBeGreaterThan(0)
+    expect(generatedAfter.map((item) => item.id)).toEqual(generatedBefore.map((item) => item.id))
+    expect(generatedAfter.every((item) => item.currency === 'EUR')).toBe(true)
+  })
+
+  it('does not reflow for any supported currency', () => {
+    for (const currency of ['EUR', 'USD', 'GBP', 'NGN', 'JPY'] as const) {
+      const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+      const tripId = created.trip?.id ?? ''
+      const before = daysOf(created.state, tripId)
+
+      const result = tripService.update(created.state, tripId, { currency })
+
+      expect(result.trip?.currency, `currency=${currency}`).toBe(currency)
+      expect(result.state.daysByTrip[tripId], `currency=${currency}`).toBe(before)
+      expect(
+        allItems(result.state, tripId).every((item) => item.currency === 'EUR'),
+        `currency=${currency}`,
+      ).toBe(true)
+    }
+  })
+
+  it('does not reflow when the patch leaves the currency alone', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    const before = daysOf(created.state, tripId)
+
+    const result = tripService.update(created.state, tripId, { name: 'Renamed trip' })
+
+    expect(result.state.daysByTrip[tripId]).toBe(before)
+  })
+
   it('only touches the trip that was patched', () => {
     const first = tripService.create(baseState(), validDraft(), 'usr_fixture')
     const firstId = first.trip?.id ?? ''
@@ -538,6 +638,236 @@ describe('tripService.update', () => {
     expect(daysOf(result.state, firstId)).toHaveLength(8)
     expect(result.state.daysByTrip[secondId]).toBe(secondDaysBefore)
     expect(createdTrip(second.state).id).toBe(firstId)
+  })
+})
+
+/** The patch the edit dialog sends: the whole draft, every field, on every save. */
+function wholeDraft(trip: Trip, overrides: Partial<TripDraft> = {}): TripDraft {
+  return {
+    name: trip.name,
+    origin: trip.origin,
+    destination: trip.destination,
+    startDate: trip.startDate,
+    endDate: trip.endDate,
+    travelers: trip.travelers,
+    budget: trip.budget,
+    currency: trip.currency,
+    interests: [...trip.interests],
+    pace: trip.pace,
+    notes: trip.notes,
+    ...overrides,
+  }
+}
+
+function itemIds(state: PersistedState, tripId: string): string[] {
+  return allItems(state, tripId).map((item) => item.id)
+}
+
+/**
+ * The edit dialog always sends the whole draft, so a reflow keyed on "is the
+ * field in the patch" fired on every save. A rename or a budget change rebuilt
+ * the plan from variant 0 and threw away the draft the traveller had chosen.
+ */
+describe('tripService.update reflows only when the plan’s shape changes value', () => {
+  it('keeps the exact AI item ids when a whole-draft save only renames the trip', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const before = daysOf(created.state, trip.id)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip, { name: 'Paris, renamed' }))
+
+    expect(result.trip?.name).toBe('Paris, renamed')
+    expect(result.state.daysByTrip[trip.id]).toBe(before)
+    expect(itemIds(result.state, trip.id)).toEqual(itemIds(created.state, trip.id))
+  })
+
+  it('keeps the exact AI item ids when a whole-draft save only changes the budget', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const before = daysOf(created.state, trip.id)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip, { budget: 4200 }))
+
+    expect(result.trip?.budget).toBe(4200)
+    expect(result.state.daysByTrip[trip.id]).toBe(before)
+    expect(itemIds(result.state, trip.id)).toEqual(itemIds(created.state, trip.id))
+  })
+
+  it('keeps a regenerated draft (variant 3) when the trip is renamed', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const variantThree = buildItinerary(trip, 3, FIXED_ISO)
+    const state: PersistedState = {
+      ...created.state,
+      daysByTrip: { ...created.state.daysByTrip, [trip.id]: variantThree },
+    }
+
+    const result = tripService.update(state, trip.id, wholeDraft(trip, { name: 'Paris, renamed' }))
+
+    expect(result.state.daysByTrip[trip.id]).toBe(variantThree)
+    expect(itemIds(result.state, trip.id)).toEqual(variantThree.flatMap((day) => day.items.map((item) => item.id)))
+  })
+
+  it('does not reflow a whole-draft save that changes nothing', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const before = daysOf(created.state, trip.id)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip))
+
+    expect(result.trip).not.toBeNull()
+    expect(result.state.daysByTrip[trip.id]).toBe(before)
+  })
+
+  it('does not reflow when only the interests, travellers, notes or origin change', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const before = daysOf(created.state, trip.id)
+
+    const result = tripService.update(
+      created.state,
+      trip.id,
+      wholeDraft(trip, { interests: ['outdoors'], travelers: 4, notes: 'Late check-in', origin: 'Abuja, Nigeria' }),
+    )
+
+    expect(result.trip?.interests).toEqual(['outdoors'])
+    expect(result.state.daysByTrip[trip.id]).toBe(before)
+  })
+
+  it('keeps the chosen draft when a whole-draft save changes the currency', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+    const before = daysOf(created.state, trip.id)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip, { currency: 'GBP' }))
+
+    expect(result.trip?.currency).toBe('GBP')
+    expect(result.state.daysByTrip[trip.id]).toBe(before)
+  })
+
+  it('still reflows a whole-draft save that moves the end date', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip, { endDate: addDays(END, 2) }))
+
+    expect(daysOf(result.state, trip.id).map((day) => day.date)).toEqual(eachDay(START, addDays(END, 2)))
+  })
+
+  it('still reflows a whole-draft save that changes the pace', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+
+    const result = tripService.update(created.state, trip.id, wholeDraft(trip, { pace: 'packed' }))
+
+    expect(itemIds(result.state, trip.id)).not.toEqual(itemIds(created.state, trip.id))
+  })
+
+  it('still reflows a whole-draft save that changes the destination', () => {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const trip = createdTrip(created.state)
+
+    const result = tripService.update(
+      created.state,
+      trip.id,
+      wholeDraft(trip, { destination: 'Lisbon, Portugal' }),
+    )
+
+    expect(allItems(result.state, trip.id).map((item) => item.title)).toContain('Arrive and settle in')
+  })
+})
+
+/**
+ * Day ids are positional, so the merge used to pair "day 1" with "day 1" and
+ * could pair one stored day twice. After an ordinary date edit a booked dinner
+ * showed up twice, or on the wrong date.
+ */
+describe('tripService.update keeps each stop on its calendar date', () => {
+  const FIRST = '2026-04-10'
+
+  function bookedId(date: string): string {
+    return `itm_booked_${date}`
+  }
+
+  /** A three-day trip, 10 to 12 April, with a dinner the traveller booked each night. */
+  function plannedTrip(): { state: PersistedState; tripId: string } {
+    const created = tripService.create(
+      baseState(),
+      validDraft({ startDate: FIRST, endDate: addDays(FIRST, 2) }),
+      'usr_fixture',
+    )
+    const tripId = created.trip?.id ?? ''
+    const days = daysOf(created.state, tripId).map((day) => ({
+      ...day,
+      items: [
+        ...day.items,
+        syntheticItem({ id: bookedId(day.date), tripId, source: 'user', startTime: '19:30' }),
+      ],
+    }))
+    return { tripId, state: { ...created.state, daysByTrip: { ...created.state.daysByTrip, [tripId]: days } } }
+  }
+
+  function placements(state: PersistedState, tripId: string, itemId: string): string[] {
+    return daysOf(state, tripId).flatMap((day) =>
+      day.items.filter((item) => item.id === itemId).map(() => day.date),
+    )
+  }
+
+  it('neither duplicates nor re-dates a stop when the trip starts two days earlier', () => {
+    const { state, tripId } = plannedTrip()
+
+    const result = tripService.update(state, tripId, { startDate: addDays(FIRST, -2) })
+
+    expect(daysOf(result.state, tripId).map((day) => day.date)).toEqual(eachDay(addDays(FIRST, -2), addDays(FIRST, 2)))
+    expect(placements(result.state, tripId, bookedId('2026-04-10'))).toEqual(['2026-04-10'])
+    expect(placements(result.state, tripId, bookedId('2026-04-11'))).toEqual(['2026-04-11'])
+    expect(placements(result.state, tripId, bookedId('2026-04-12'))).toEqual(['2026-04-12'])
+  })
+
+  it('keeps every stop on its date when the trip starts earlier and ends later', () => {
+    const { state, tripId } = plannedTrip()
+
+    const result = tripService.update(state, tripId, {
+      startDate: addDays(FIRST, -2),
+      endDate: addDays(FIRST, 4),
+    })
+
+    for (const date of eachDay(FIRST, addDays(FIRST, 2))) {
+      expect(placements(result.state, tripId, bookedId(date)), date).toEqual([date])
+    }
+  })
+
+  it('keeps a stop on its calendar date when the whole trip shifts a day later', () => {
+    const { state, tripId } = plannedTrip()
+
+    const result = tripService.update(state, tripId, {
+      startDate: addDays(FIRST, 1),
+      endDate: addDays(FIRST, 3),
+    })
+
+    expect(placements(result.state, tripId, bookedId('2026-04-11'))).toEqual(['2026-04-11'])
+    expect(placements(result.state, tripId, bookedId('2026-04-12'))).toEqual(['2026-04-12'])
+    // 10 April left the trip, so its dinner moves to the nearest day that is left.
+    expect(placements(result.state, tripId, bookedId('2026-04-10'))).toEqual(['2026-04-11'])
+  })
+
+  it('keeps an AI stop the traveller moved to another day through a reflow', () => {
+    const { state, tripId } = plannedTrip()
+    const days = daysOf(state, tripId)
+    const moving = days[0]?.items.find((item) => item.source === 'ai')
+    const target = days[1]
+    if (!moving || !target) throw new Error('fixture trip has no AI stop to move')
+    const moved: PersistedState = {
+      ...state,
+      daysByTrip: {
+        ...state.daysByTrip,
+        [tripId]: moveItemInDays(days, moving.id, target.id, undefined, FIXED_ISO),
+      },
+    }
+
+    const result = tripService.update(moved, tripId, { pace: 'packed' })
+
+    expect(placements(result.state, tripId, moving.id)).toEqual([target.date])
   })
 })
 

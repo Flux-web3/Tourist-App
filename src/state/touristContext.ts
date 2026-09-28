@@ -113,6 +113,11 @@ export interface TouristContextValue {
   pendingItemId: string | null
   /** Set when a single-item swap fails; the itinerary itself is untouched. */
   swapError: string | null
+  /**
+   * The trip the latest swap belongs to. `swapError` is one value for the whole
+   * app, so an itinerary page shows it only when this matches its own trip.
+   */
+  swapTripId: string | null
 }
 
 export const TouristContext = createContext<TouristContextValue | null>(null)

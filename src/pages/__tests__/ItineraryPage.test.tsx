@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes } from 'react-router-dom'
+import { Route, Routes, useNavigate } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { addDays, formatLongDate } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
@@ -14,10 +14,15 @@ import {
   makeFixtureTrip,
   readStoredState,
 } from '@/pages/__tests__/tripFixture'
-import { GENERATION_ERROR_MESSAGE, services } from '@/services'
+import {
+  GENERATION_ERROR_MESSAGE,
+  buildAlternativeItem,
+  buildItinerary,
+  services,
+} from '@/services'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type { PersistedState } from '@/services/contracts'
-import type { ItineraryDay } from '@/domain/types'
+import type { ItineraryDay, ItineraryItem } from '@/domain/types'
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -71,6 +76,65 @@ function storedItem(id: string) {
   return storedDays()
     .flatMap((day) => day.items)
     .find((item) => item.id === id)
+}
+
+/**
+ * A service call the test holds open, then settles when it is ready to look.
+ *
+ * The mock services resolve on a real timer, so their result used to land
+ * outside React's `act`. React then committed the new DOM and ran the effect
+ * that writes localStorage in separate turns, and a test that waited for the
+ * DOM and then read localStorage could read the snapshot from before the
+ * change. Under a loaded parallel run it did, roughly one run in twenty: the
+ * swap test found the original catalogue stop in storage with its replacement
+ * already on screen, and the first-draft test found an empty plan in storage
+ * with four new stops on screen. No timeout can fix that; the read is simply
+ * early. Settling inside `act` makes React flush the commit and the persistence
+ * effect before the test goes on, and holding the call open until then means
+ * the in-progress state cannot finish before the test has looked at it.
+ */
+interface HeldCall {
+  settle(): Promise<void>
+}
+
+function settleInAct(release: () => (() => void) | null, what: string): Promise<void> {
+  return act(async () => {
+    const resolve = release()
+    if (!resolve) throw new Error(`the ${what} was never requested`)
+    resolve()
+  })
+}
+
+function holdSuggestion(): HeldCall & { suggested(): ItineraryItem } {
+  let resolve: (() => void) | null = null
+  let suggested: ItineraryItem | null = null
+  vi.spyOn(services.itinerary, 'suggestAlternative').mockImplementation(
+    ({ trip, day, item, variant }) =>
+      new Promise((done) => {
+        resolve = () => {
+          suggested = buildAlternativeItem(trip, day, item, variant ?? 0)
+          done(suggested)
+        }
+      }),
+  )
+  return {
+    settle: () => settleInAct(() => resolve, 'suggestion'),
+    suggested: () => {
+      if (!suggested) throw new Error('the suggestion has not been settled')
+      return suggested
+    },
+  }
+}
+
+function holdGeneration(): HeldCall {
+  let resolve: (() => void) | null = null
+  vi.spyOn(services.itinerary, 'generate').mockImplementation(
+    (trip, options) =>
+      new Promise((done) => {
+        resolve = () => done(buildItinerary(trip, options?.variant ?? 0))
+      }),
+  )
+  return { settle: () => settleInAct(() => resolve, 'generation') }
 }
 
 async function openDialog(name: string): Promise<HTMLElement> {
@@ -415,34 +479,79 @@ describe('ItineraryPage', () => {
   describe('replacing a stop with an alternative', () => {
     it('swaps one stop for an AI alternative and leaves the rest of the day alone', async () => {
       const user = userEvent.setup()
+      const suggestion = holdSuggestion()
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
       await chooseStopAction(user, FIXTURE_ITEM_TITLES[1], 'Replace')
 
-      await waitFor(() => {
-        expect(within(stopCard(FIXTURE_ITEM_TITLES[1])).getByRole('status')).toHaveTextContent(
-          'Swapping',
-        )
-      })
+      // The suggestion is still out, so the in-progress state is on screen by construction.
+      expect(within(stopCard(FIXTURE_ITEM_TITLES[1])).getByRole('status')).toHaveTextContent(
+        'Swapping',
+      )
       expect(stopCard(FIXTURE_ITEM_TITLES[1])).toHaveAttribute('aria-busy', 'true')
 
-      await waitFor(() => {
-        expect(screen.queryByText(FIXTURE_ITEM_TITLES[1])).not.toBeInTheDocument()
-      })
+      await suggestion.settle()
 
+      expect(screen.queryByText(FIXTURE_ITEM_TITLES[1])).not.toBeInTheDocument()
       const firstDay = storedDays()[0]
       expect(firstDay.items).toHaveLength(4)
       const replacement = firstDay.items.find((item) => item.id === 'item-2')
+      const suggested = suggestion.suggested()
+      // Same slot, but the new stop's own end time: the old stop had none, and
+      // the alternative is timed from its own duration, not the stop it replaced.
+      expect(suggested.endTime).not.toBeNull()
       expect(replacement).toMatchObject({
         source: 'ai',
         editedByUser: true,
         startTime: '13:00',
-        endTime: null,
+        endTime: suggested.endTime,
+        title: suggested.title,
       })
       expect(replacement?.title).not.toBe(FIXTURE_ITEM_TITLES[1])
+      // What was saved is what the traveller is looking at.
+      expect(stopCard(replacement?.title ?? '')).not.toHaveAttribute('aria-busy')
       expect(firstDay.items.map((item) => item.title)).toContain(FIXTURE_ITEM_TITLES[0])
       expect(storedDays()[1].items.map((item) => item.title)).toEqual([FIXTURE_ITEM_TITLES[4]])
+    })
+
+    it("keeps a failed swap's error on its own trip, not the next itinerary opened", async () => {
+      const user = userEvent.setup()
+      vi.spyOn(services.itinerary, 'suggestAlternative').mockRejectedValue(
+        new Error('No alternative right now.'),
+      )
+      const base = fixtureState()
+      const second = { ...base.trips[0], id: 'trip-second', name: 'Second trip' }
+      const state: PersistedState = {
+        ...base,
+        trips: [...base.trips, second],
+        daysByTrip: { ...base.daysByTrip, [second.id]: base.daysByTrip[FIXTURE_TRIP_ID] ?? [] },
+      }
+      function OpenSecond() {
+        const navigate = useNavigate()
+        return (
+          <button type="button" onClick={() => navigate(`/trips/${second.id}/itinerary`)}>
+            Open second trip
+          </button>
+        )
+      }
+      renderWithProviders(
+        <>
+          <OpenSecond />
+          <Routes>
+            <Route path="/trips/:tripId/itinerary" element={<ItineraryPage />} />
+          </Routes>
+        </>,
+        { route: `/trips/${FIXTURE_TRIP_ID}/itinerary`, state },
+      )
+
+      expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
+      await chooseStopAction(user, FIXTURE_ITEM_TITLES[1], 'Replace')
+      expect(await screen.findByText('We could not swap that activity')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Open second trip' }))
+      expect(await screen.findByRole('heading', { level: 1, name: 'Second trip' })).toBeInTheDocument()
+      expect(screen.queryByText('We could not swap that activity')).not.toBeInTheDocument()
     })
   })
 
@@ -470,6 +579,7 @@ describe('ItineraryPage', () => {
 
     it('drafts an itinerary and reports the result', async () => {
       const user = userEvent.setup()
+      const generation = holdGeneration()
       renderItinerary(fixtureState({ days: EMPTY_DAYS }))
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
@@ -481,6 +591,8 @@ describe('ItineraryPage', () => {
           'Drafting your itinerary. Nothing already on your plan will be moved or removed.',
         ),
       ).toBeInTheDocument()
+
+      await generation.settle()
 
       expect(await screen.findByText('Your draft is ready')).toBeInTheDocument()
       expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
@@ -495,6 +607,7 @@ describe('ItineraryPage', () => {
 
     it('keeps the traveller’s own stops and the current plan on screen while redrafting', async () => {
       const user = userEvent.setup()
+      const generation = holdGeneration()
       renderItinerary()
 
       expect(await screen.findByRole('heading', { level: 1, name: TRIP.name })).toBeInTheDocument()
@@ -504,13 +617,26 @@ describe('ItineraryPage', () => {
       expect(screen.getByText(FIXTURE_ITEM_TITLES[0])).toBeInTheDocument()
       expect(storedDays()[0].items).toHaveLength(4)
 
-      await waitFor(() => {
-        expect(screen.getByText('Your itinerary draft is ready.')).toBeInTheDocument()
-      })
+      await generation.settle()
+
+      expect(await screen.findByText('Your itinerary draft is ready.')).toBeInTheDocument()
       const days = storedDays()
-      const kept = days.flatMap((day) => day.items).filter((item) => item.source === 'user')
+      const items = days.flatMap((day) => day.items)
+      const kept = items.filter((item) => item.source === 'user')
       expect(kept).toHaveLength(0)
-      expect(days.flatMap((day) => day.items).length).toBeGreaterThanOrEqual(5)
+      expect(items.length).toBeGreaterThanOrEqual(5)
+      /**
+       * A stale read used to pass these two checks as well, because the old plan
+       * also has five stops and none of them the traveller's. So also pin down
+       * that the redraft itself was saved: the catalogue stops survive, the AI
+       * drafts they sat beside are gone, and storage matches the screen.
+       */
+      const ids = items.map((item) => item.id)
+      expect(ids).toEqual(expect.arrayContaining(['item-2', 'item-4']))
+      expect(ids).not.toContain('item-1')
+      expect(ids).not.toContain('item-3')
+      expect(ids).not.toContain('item-5')
+      expect(screen.getAllByRole('article')).toHaveLength(items.length)
     })
 
     it('leaves the day list in place once a single stop exists', async () => {
