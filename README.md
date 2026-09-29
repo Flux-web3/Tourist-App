@@ -25,11 +25,23 @@ Pushing `main` deploys to production on Vercel.
 - **No currency conversion, anywhere.** Every expense and every itinerary stop
   carries its own currency. Totals count only what is in the trip's currency;
   anything else is shown in its own currency and listed as not counted.
-- **Generated stops are priced in EUR** (`DRAFT_PRICE_CURRENCY`), whatever the
-  trip's currency, because the templates are Paris prices. Catalogue stops keep
-  the catalogue's currency; stops you add yourself take the trip's.
+- **A trip's destination is an id, not text.** Destinations come from a small
+  curated catalogue (`src/data/destinations.ts`: Paris, London, Lagos, New York,
+  Tokyo, Dubai, Rome, Barcelona), picked with a searchable selector. The trip
+  stores `destinationId`, and Explore, place details and itinerary drafting read
+  only that. Nothing ever falls back to Paris.
+- **Explore is trip-contextual.** A trip's Explore shows only its destination's
+  places. Paris, London and Lagos have curated places; the other destinations
+  show an honest "still growing" state rather than another city's places.
+- **Drafts are priced in the destination's currency.** Paris, London and Lagos
+  draft from their own landmark banks; other destinations use generic stops
+  named for the city, at an illustrative local price level. Places from Explore
+  keep their own currency; stops you add yourself take the trip's. A trip saved
+  before destinations were listed, whose city is not in the catalogue, drafts
+  generic stops priced in EUR (`DRAFT_PRICE_CURRENCY`).
 - **Saved data is versioned.** State lives under `tourist.state.v1` with a
-  `version` field (currently 2). `src/services/migrations.ts` migrates older
+  `version` field (currently 3; v3 added `destinationId`, resolved from the
+  typed destination, which is kept as typed). `src/services/migrations.ts` migrates older
   versions forward, salvages valid records from damaged data rather than
   wiping it, and keeps the previous copy in `tourist.state.backup`. Data from a
   newer version, which this build cannot read, is copied to that backup before
@@ -57,5 +69,7 @@ Pushing `main` deploys to production on Vercel.
   a place from Explore goes straight after the day's last stop, even past
   closing time. The hours are free text, copied into the stop's notes, and the
   add dialog accepts a start time.
+- **Eight destinations, three with places.** Only catalogue cities can be
+  chosen for a new trip. London and Lagos places have drawn covers, not photos.
 - **Estimates are illustrative.** Prices and places are sample data, not live
   quotes.
