@@ -33,9 +33,21 @@ Pushing `main` deploys to production on Vercel.
 - **Explore is trip-contextual.** A trip's Explore shows only its destination's
   places. Paris, London and Lagos have curated places; the other destinations
   show an honest "still growing" state rather than another city's places.
-- **Drafts are priced in the destination's currency.** Paris, London and Lagos
-  draft from their own landmark banks; other destinations use generic stops
-  named for the city, at an illustrative local price level. Places from Explore
+- **Curated vs general destinations, said out loud.** Paris, London and Lagos
+  (`guide: 'curated'`) draft only from their own city banks. The other five
+  (`guide: 'general'`) draft general activity types named for the city, and the
+  picker, itinerary and overview say so; they are never presented as local picks.
+- **The last day ends at a fixed departure.** Leaving is modelled at 12:00
+  (`DEPARTURE_START_TIME`), labelled as a placeholder to move to the real
+  ticket; an ordinary last-day stop must end 90 minutes before it
+  (`FINAL_DAY_BUFFER_MINUTES`), and nothing is planned after it. Arrival and
+  departure stops carry a `role` and are never swapped for an activity.
+- **Changing a trip's city re-drafts it for that city.** Edit trip says what
+  will go first; the old city's drafted stops and guide places are removed,
+  your own stops, expenses, notes and currency are kept, and a name Tourist
+  suggested follows the new city.
+- **Drafts are priced in the destination's currency.** General destinations use
+  an illustrative local price level. Places from Explore
   keep their own currency; stops you add yourself take the trip's. A trip saved
   before destinations were listed, whose city is not in the catalogue, drafts
   generic stops priced in EUR (`DRAFT_PRICE_CURRENCY`).
@@ -69,6 +81,10 @@ Pushing `main` deploys to production on Vercel.
   a place from Explore goes straight after the day's last stop, even past
   closing time. The hours are free text, copied into the stop's notes, and the
   add dialog accepts a start time.
+- **Departure time is not asked for.** There is no flight or train time on a
+  trip, so every draft leaves at 12:00; an evening flight means moving the
+  departure stop by hand. On general destinations the last morning is
+  sometimes empty when no general stop fits before 10:30.
 - **Eight destinations, three with places.** Only catalogue cities can be
   chosen for a new trip. London and Lagos places have drawn covers, not photos.
 - **Estimates are illustrative.** Prices and places are sample data, not live
