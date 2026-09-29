@@ -34,6 +34,7 @@ function makeTrip(id: string, userId: string, name: string): PersistedState['tri
     name,
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: '2026-04-01',
     endDate: '2026-04-07',
     travelers: 2,
@@ -147,6 +148,29 @@ describe('LandingPage', () => {
     expect(page).toHaveTextContent(/not quotes/)
     expect(page).toHaveTextContent(/no account and no server/)
     expect(page).not.toHaveTextContent(/days left|days to go|countdown|book now|reserve now/i)
+  })
+
+  it('names every guide city instead of implying Paris is the only one', () => {
+    renderLanding()
+    const page = screen.getByRole('main')
+    const exploreCard = screen.getByRole('heading', { name: 'Explore' }).closest('article')
+
+    expect(exploreCard).toHaveTextContent(/Curated guides for Paris, London and Lagos/)
+    expect(page).toHaveTextContent(
+      /The Explore catalog is a small, fixed set of places in Paris, London and Lagos, not a live listing/,
+    )
+    expect(page).not.toHaveTextContent(/curated Paris guide|set of Paris places/i)
+  })
+
+  it('keeps the Paris hero photo that matches the demo route, credited', () => {
+    renderLanding()
+
+    expect(screen.getByRole('img', { name: /Eiffel Tower/ })).toBeInTheDocument()
+    expect(screen.getByText(/Eiffel Tower Summit, 7th arrondissement\./)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Matthias Süßen' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/),
+    )
   })
 
   it('keeps the prototype and no-account labels visible', () => {

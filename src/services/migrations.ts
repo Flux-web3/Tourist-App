@@ -20,6 +20,7 @@
  *    or that has neither a usable user nor a single usable trip, is unreadable.
  */
 
+import { DESTINATIONS_BY_ID, matchDestination } from '@/data/destinations'
 import { EXPERIENCES_BY_ID } from '@/data/experiences'
 import { createId, nowISO } from '@/domain/ids'
 import { CURRENCIES, toCents } from '@/domain/money'
@@ -178,8 +179,8 @@ export function describeSalvage(salvage: PersistenceSalvage): string {
 /**
  * One rung. `migrate` receives the raw payload at version `from` and returns it
  * reshaped for version `to`; the driver stamps the new version, so a step never
- * has to remember to. Adding v3 means adding one entry here and one branch of
- * tests - there is deliberately no framework and no dependency.
+ * has to remember to. Adding a version means adding one entry here and one
+ * branch of tests - there is deliberately no framework and no dependency.
  */
 interface MigrationStep {
   from: number
@@ -188,7 +189,10 @@ interface MigrationStep {
 }
 
 /** Ordered, contiguous, and applied in sequence. */
-const MIGRATIONS: readonly MigrationStep[] = [{ from: 1, to: 2, migrate: migrateV1ToV2 }]
+const MIGRATIONS: readonly MigrationStep[] = [
+  { from: 1, to: 2, migrate: migrateV1ToV2 },
+  { from: 2, to: 3, migrate: migrateV2ToV3 },
+]
 
 /** `{ tripId: currency }` for every trip in a raw payload that names a currency this build knows. */
 function tripCurrencies(value: unknown): Map<string, CurrencyCode> {
@@ -341,6 +345,34 @@ function priceBucket(bucket: unknown, tripCurrency: CurrencyCode, salvage: Persi
   })
 }
 
+/**
+ * The catalogue destination a typed destination names, or `null`. Matching is
+ * `matchDestination`'s, which refuses to guess: "Paris, Texas" and "Lisbon"
+ * stay `null` rather than becoming the nearest catalogue city.
+ */
+function deriveDestinationId(destination: unknown): string | null {
+  return isString(destination) ? (matchDestination(destination)?.id ?? null) : null
+}
+
+/**
+ * v2 -> v3: every trip gains the `destinationId` its typed destination names,
+ * or `null` when it names no catalogue city. Only the id is added: the
+ * `destination` text stays exactly as the traveller typed it ("paris" is not
+ * rewritten to "Paris, France") until they next pick a destination themselves.
+ *
+ * An unmatched trip is kept, never dropped - a `null` id just means Explore
+ * and the itinerary drafts have no city guide for it, which is the truth.
+ * Currencies, days, expenses and notes are untouched.
+ */
+function migrateV2ToV3(payload: Record<string, unknown>): Record<string, unknown> {
+  // Not a list: nothing to walk. The salvage pass reports the loss.
+  if (!Array.isArray(payload.trips)) return payload
+  const trips = payload.trips.map((entry) =>
+    isRecord(entry) ? { ...entry, destinationId: deriveDestinationId(entry.destination) } : entry,
+  )
+  return { ...payload, trips }
+}
+
 /** The version a payload declares, or `null` when it declares none this build can use. */
 function readVersion(value: unknown): number | null {
   if (!isFiniteNumber(value)) return null
@@ -420,7 +452,8 @@ function readBuckets<T>(
  * - a party size gone missing reads as 1;
  * - a budget gone missing reads as 0, i.e. "no budget set". Both budget screens
  *   already guard that case, and the edit form will not save a trip until a
- *   real budget is entered, so the traveller is prompted rather than misled.
+ *   real budget is entered, so the traveller is prompted rather than misled;
+ * - a destination id that is missing or unknown (see `readDestinationId`).
  */
 function readTrip(value: unknown): Trip | null {
   if (!isRecord(value)) return null
@@ -440,6 +473,7 @@ function readTrip(value: unknown): Trip | null {
     name: orEmpty(value.name),
     origin: orEmpty(value.origin),
     destination: orEmpty(value.destination),
+    destinationId: readDestinationId(value.destinationId, value.destination),
     startDate: value.startDate,
     endDate: value.endDate,
     travelers: isFiniteNumber(value.travelers) && value.travelers >= 1 ? value.travelers : 1,
@@ -452,6 +486,24 @@ function readTrip(value: unknown): Trip | null {
     createdAt: orNow(value.createdAt),
     updatedAt: orNow(value.updatedAt),
   }
+}
+
+/**
+ * A trip's catalogue destination. A known id is kept, and so is an explicit
+ * `null` - that is how v3 records an unmatched pre-catalogue trip, and
+ * re-deriving it would make the stored value unstable. Anything else (missing,
+ * not a string, or an id this build's catalogue does not have) is re-derived
+ * from the typed destination, else `null`, so a bogus id can never reach
+ * Explore or the itinerary generator.
+ *
+ * Repaired silently, like an unknown pace, rather than counted: the id is
+ * derived from text the trip still carries, so nothing the traveller entered
+ * is lost.
+ */
+function readDestinationId(value: unknown, destination: unknown): string | null {
+  if (value === null) return null
+  if (isString(value) && DESTINATIONS_BY_ID.has(value)) return value
+  return deriveDestinationId(destination)
 }
 
 /**

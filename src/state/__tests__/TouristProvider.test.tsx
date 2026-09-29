@@ -42,6 +42,7 @@ function makeTrip(overrides: Partial<Trip> = {}): Trip {
     name: 'Spring in Paris',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: '2026-04-01',
     endDate: '2026-04-02',
     travelers: 2,
@@ -155,6 +156,7 @@ function parisDraft(overrides: Partial<TripDraft> = {}): TripDraft {
     name: 'Paris trip',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: '2026-05-01',
     endDate: '2026-05-03',
     interests: ['culture', 'food'],
@@ -372,9 +374,9 @@ describe('TouristProvider trips', () => {
     seedState(emptyState())
     renderProvider()
     act(() => {
-      ctx().actions.createTrip(parisDraft({ name: '   ', destination: 'Lisbon, Portugal' }))
+      ctx().actions.createTrip(parisDraft({ name: '   ', destination: 'Rome, Italy', destinationId: 'rome' }))
     })
-    expect(ctx().state.trips[0].name).toBe('Lisbon, Portugal in May')
+    expect(ctx().state.trips[0].name).toBe('Rome in May')
   })
 
   it('reflows the days on update while keeping user, catalog and edited items', async () => {
@@ -1324,7 +1326,7 @@ describe('TouristProvider persistence', () => {
     renderProvider()
 
     act(() => {
-      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food' })
+      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food', destinationId: 'paris' })
     })
     expect(services.analytics.events().length).toBeGreaterThan(0)
 
@@ -1341,7 +1343,7 @@ describe('TouristProvider persistence', () => {
     renderProvider()
 
     act(() => {
-      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food' })
+      ctx().actions.trackSearch({ text: 'hidden bistro in Le Marais', category: 'food', destinationId: 'paris' })
     })
     act(() => {
       ctx().actions.clearAllData()
@@ -1738,6 +1740,7 @@ describe('TouristProvider catalog reads', () => {
         text: 'Eiffel',
         category: 'all',
         maxPrice: null,
+        destinationId: 'paris',
       })
       expect(results.length).toBeGreaterThan(0)
       expect(results[0].id).toBe('exp_eiffel_tower')
@@ -1745,13 +1748,14 @@ describe('TouristProvider catalog reads', () => {
         text: '',
         category: 'food',
         maxPrice: null,
+        destinationId: 'paris',
       })
       expect(filtered.length).toBeGreaterThan(0)
       expect(filtered.every((experience) => experience.category === 'food')).toBe(true)
     })
 
     act(() => {
-      ctx().actions.trackSearch({ text: '  museum  ', category: 'culture', maxPrice: 20 })
+      ctx().actions.trackSearch({ text: '  museum  ', category: 'culture', maxPrice: 20, destinationId: 'paris' })
     })
     expect(ctx().state).toBe(before)
   })

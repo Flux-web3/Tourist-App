@@ -1,7 +1,7 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 /** `min-h-11` keeps every control on the 44px touch floor; `py-2.5` left them at 43. */
-const CONTROL_CLASS =
+export const CONTROL_CLASS =
   'w-full min-h-11 rounded-control border border-line-strong bg-surface px-3 py-2.5 text-body-md text-ink placeholder:text-ink-subtle transition-colors focus:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus disabled:bg-surface-low disabled:text-ink-subtle'
 
 function describedBy(id: string, hint?: string, error?: string): string | undefined {
@@ -9,7 +9,8 @@ function describedBy(id: string, hint?: string, error?: string): string | undefi
   return ids.length > 0 ? ids.join(' ') : undefined
 }
 
-function FieldShell({
+/** Exported so composite controls (`DestinationCombobox`) share the same label, hint and error markup. */
+export function FieldShell({
   id,
   label,
   hint,

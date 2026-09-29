@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { addDays, formatDateRange, todayISO } from '@/domain/format'
-import { TRIP_LIMITS } from '@/domain/validation'
+import { DESTINATION_REQUIRED_MESSAGE, TRIP_LIMITS } from '@/domain/validation'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import CreateTripPage from '@/pages/CreateTripPage'
 import { STORAGE_KEY, createEmptyState } from '@/services/persistence'
@@ -29,10 +29,22 @@ function storedTrips(): PersistedState['trips'] {
   return (JSON.parse(raw) as PersistedState).trips
 }
 
+function destinationInput(): HTMLElement {
+  return screen.getByRole('combobox', { name: /Destination/ })
+}
+
+/** Searches the destination picker and picks the named city from the list. */
+async function chooseDestination(query: string, option: string | RegExp): Promise<void> {
+  const user = userEvent.setup()
+  await user.clear(destinationInput())
+  await user.type(destinationInput(), query)
+  await user.click(screen.getByRole('option', { name: option }))
+}
+
 async function fillMinimalTrip(): Promise<void> {
   const user = userEvent.setup()
   await user.type(screen.getByLabelText(/Travelling from/), 'Lagos, Nigeria')
-  await user.type(screen.getByLabelText(/Destination/), 'Lisbon, Portugal')
+  await chooseDestination('London', 'London, United Kingdom')
   fireEvent.change(screen.getByLabelText(/Start date/), { target: { value: addDays(TODAY, 30) } })
   fireEvent.change(screen.getByLabelText(/End date/), { target: { value: addDays(TODAY, 32) } })
   await user.click(screen.getByRole('checkbox', { name: 'Culture' }))
@@ -169,7 +181,7 @@ describe('CreateTripPage', () => {
     const summary = screen.getByRole('alert')
     expect(summary).toHaveTextContent('Check 5 details below')
     expect(summary).toHaveTextContent('Enter where you are travelling from.')
-    expect(summary).toHaveTextContent('Enter a destination with at least 2 characters.')
+    expect(summary).toHaveTextContent('Choose a destination from the list.')
     expect(summary).toHaveTextContent('Choose a start date.')
     expect(summary).toHaveTextContent('Choose an end date.')
     expect(summary).toHaveTextContent('Choose at least one interest so the draft matches you.')
@@ -184,12 +196,10 @@ describe('CreateTripPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Check 5 details below')
 
-    await user.type(screen.getByLabelText(/Destination/), 'Lisbon, Portugal')
+    await chooseDestination('Barcelona', 'Barcelona, Spain')
 
     expect(screen.getByRole('alert')).toHaveTextContent('Check 4 details below')
-    expect(screen.getByRole('alert')).not.toHaveTextContent(
-      'Enter a destination with at least 2 characters.',
-    )
+    expect(screen.getByRole('alert')).not.toHaveTextContent(DESTINATION_REQUIRED_MESSAGE)
   })
 
   it('sends the traveller to the draft itinerary once the trip is created', async () => {
@@ -220,7 +230,8 @@ describe('CreateTripPage', () => {
     const [trip] = storedTrips()
     expect(trip).toMatchObject({
       origin: 'Lagos, Nigeria',
-      destination: 'Lisbon, Portugal',
+      destination: 'London, United Kingdom',
+      destinationId: 'london',
       startDate: addDays(TODAY, 30),
       endDate: addDays(TODAY, 32),
       budget: 1800,
@@ -241,7 +252,7 @@ describe('CreateTripPage', () => {
     await screen.findByText('Itinerary screen')
 
     const [trip] = storedTrips()
-    expect(trip.name).toMatch(/^Lisbon, Portugal in [A-Z][a-z]+$/)
+    expect(trip.name).toMatch(/^London in [A-Z][a-z]+$/)
   })
 
   it('accepts a name made only of spaces and falls back to the suggestion', async () => {
@@ -255,7 +266,7 @@ describe('CreateTripPage', () => {
     await screen.findByText('Itinerary screen')
 
     const [trip] = storedTrips()
-    expect(trip.name).toMatch(/^Lisbon, Portugal in [A-Z][a-z]+$/)
+    expect(trip.name).toMatch(/^London in [A-Z][a-z]+$/)
   })
 
   it('keeps the name the traveller typed', async () => {
@@ -263,12 +274,12 @@ describe('CreateTripPage', () => {
     renderCreate()
     await fillMinimalTrip()
     await openOptionalAnswers()
-    await user.type(screen.getByLabelText(/Trip name/), '  Long weekend in Lisbon  ')
+    await user.type(screen.getByLabelText(/Trip name/), '  Long weekend in London  ')
 
     await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
     await screen.findByText('Itinerary screen')
 
-    expect(storedTrips()[0].name).toBe('Long weekend in Lisbon')
+    expect(storedTrips()[0].name).toBe('Long weekend in London')
   })
 
   it('rejects a name longer than the limit', async () => {
@@ -409,7 +420,7 @@ describe('CreateTripPage', () => {
 
     const interests = screen.getByRole('group', { name: 'Interests' })
     await user.type(screen.getByLabelText(/Travelling from/), 'Lagos, Nigeria')
-    await user.type(screen.getByLabelText(/Destination/), 'Lisbon, Portugal')
+    await chooseDestination('rome', 'Rome, Italy')
     setDate(/Start date/, addDays(TODAY, 30))
     setDate(/End date/, addDays(TODAY, 32))
     await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
@@ -449,18 +460,16 @@ describe('CreateTripPage', () => {
     expect(suggest).toBeDisabled()
     expect(screen.getByLabelText(/Trip name/)).toHaveAttribute('placeholder', 'Untitled trip')
 
-    await user.type(screen.getByLabelText(/Destination/), 'Lisbon, Portugal')
+    await chooseDestination('new york', 'New York, United States')
     expect(suggest).toBeEnabled()
-    expect(screen.getByLabelText(/Trip name/)).toHaveAttribute(
-      'placeholder',
-      'Trip to Lisbon, Portugal',
-    )
+    // Named after the city, not the full "New York, United States".
+    expect(screen.getByLabelText(/Trip name/)).toHaveAttribute('placeholder', 'Trip to New York')
 
     setDate(/Start date/, addDays(TODAY, 30))
     await user.click(suggest)
 
     const suggested = (screen.getByLabelText(/Trip name/) as HTMLInputElement).value
-    expect(suggested).toMatch(/^Lisbon, Portugal in [A-Z][a-z]+$/)
+    expect(suggested).toMatch(/^New York in [A-Z][a-z]+$/)
   })
 
   it('relabels the budget field when the currency changes', async () => {
@@ -482,6 +491,90 @@ describe('CreateTripPage', () => {
       expect.stringContaining('One anchor a day'),
     )
     expect(within(pace).getAllByRole('radio')).toHaveLength(3)
+  })
+
+  it('saves the chosen destination as the trip destination, in its currency', async () => {
+    const user = userEvent.setup()
+    renderCreate()
+    await fillMinimalTrip()
+
+    expect(destinationInput()).toHaveValue('London, United Kingdom')
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('GBP')
+    expect(screen.getByLabelText(/Trip budget \(GBP\)/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
+    await screen.findByText('Itinerary screen')
+
+    const [trip] = storedTrips()
+    expect(trip).toMatchObject({
+      destinationId: 'london',
+      destination: 'London, United Kingdom',
+      currency: 'GBP',
+    })
+  })
+
+  it('keeps the chosen destination through a reload', async () => {
+    const user = userEvent.setup()
+    const first = renderCreate()
+    await user.type(screen.getByLabelText(/Travelling from/), 'Accra, Ghana')
+    await chooseDestination('Nigeria', 'Lagos, Nigeria')
+    setDate(/Start date/, addDays(TODAY, 30))
+    setDate(/End date/, addDays(TODAY, 32))
+    await user.click(screen.getByRole('checkbox', { name: 'Food' }))
+    await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
+    await screen.findByText('Itinerary screen')
+    first.unmount()
+
+    // A fresh provider hydrates from exactly what was persisted.
+    const persisted = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as PersistedState
+    renderWithProviders(<p>Reloaded</p>, { state: persisted })
+    await screen.findByText('Reloaded')
+
+    const [trip] = storedTrips()
+    expect(trip).toMatchObject({ destinationId: 'lagos', destination: 'Lagos, Nigeria', currency: 'NGN' })
+  })
+
+  it('proposes each destination currency until the traveller picks one', async () => {
+    renderCreate()
+
+    await chooseDestination('lagos', 'Lagos, Nigeria')
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('NGN')
+
+    await chooseDestination('tok', 'Tokyo, Japan')
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('JPY')
+  })
+
+  it('never overrides a currency the traveller chose', async () => {
+    const user = userEvent.setup()
+    renderCreate()
+
+    await user.selectOptions(screen.getByLabelText(/Currency/), 'USD')
+    await chooseDestination('London', 'London, United Kingdom')
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('USD')
+
+    await user.selectOptions(screen.getByLabelText(/Currency/), 'EUR')
+    await chooseDestination('dubai', 'Dubai, United Arab Emirates')
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('EUR')
+  })
+
+  it('does not take typed text as a destination', async () => {
+    const user = userEvent.setup()
+    renderCreate()
+    await user.type(screen.getByLabelText(/Travelling from/), 'Lagos, Nigeria')
+    await user.type(destinationInput(), 'Lisbon')
+    expect(screen.getByText('No destinations match "Lisbon"')).toBeInTheDocument()
+    setDate(/Start date/, addDays(TODAY, 30))
+    setDate(/End date/, addDays(TODAY, 32))
+    await user.click(screen.getByRole('checkbox', { name: 'Culture' }))
+
+    await user.click(screen.getByRole('button', { name: 'Create trip and draft itinerary' }))
+
+    // Leaving the field put the empty committed value back.
+    expect(destinationInput()).toHaveValue('')
+    expect(screen.getByRole('alert')).toHaveTextContent('Check 1 detail below')
+    expectFieldError(DESTINATION_REQUIRED_MESSAGE, /Destination/)
+    expect(screen.getByRole('alert')).toHaveFocus()
+    expect(storedTrips()).toHaveLength(0)
   })
 
   it('offers a way back without creating anything', () => {

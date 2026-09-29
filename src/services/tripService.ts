@@ -1,6 +1,7 @@
 import { createId, nowISO } from '@/domain/ids'
 import { eachDay } from '@/domain/format'
 import { mergeGeneratedDays } from '@/domain/itinerary'
+import { getDestination, matchDestination } from '@/data/destinations'
 import { suggestTripName, validateTripDraft } from '@/domain/validation'
 import { buildItinerary } from './itineraryGenerator'
 import { DEMO_TRIP_ID } from './persistence'
@@ -17,6 +18,7 @@ function toDraft(trip: Trip): TripDraft {
     name: trip.name,
     origin: trip.origin,
     destination: trip.destination,
+    destinationId: trip.destinationId ?? null,
     startDate: trip.startDate,
     endDate: trip.endDate,
     travelers: trip.travelers,
@@ -29,12 +31,25 @@ function toDraft(trip: Trip): TripDraft {
 }
 
 /**
+ * The catalogue destination a draft or patch means when it carries no id. Only
+ * code that predates the destination picker sends text alone; text naming
+ * exactly one catalogue city is taken as that city (the rule stored trips were
+ * migrated by), and anything else stays unlisted rather than guessed.
+ */
+function destinationIdFromText(text: string): string | null {
+  return matchDestination(text)?.id ?? null
+}
+
+/**
  * Dates, pace and destination set the shape of the draft, so the draft is
  * re-flowed when one of them changes value. The test compares the stored trip
  * with the edited one, not what the patch contains. The edit dialog always sends
  * the whole draft, so testing only whether a field was present rebuilt the plan
  * from variant 0 on every save. A rename or a budget change threw away the draft
  * the traveller had regenerated to.
+ *
+ * The destination is compared as text and as `destinationId`: the id is what the
+ * generator drafts from, and the text alone is all a pre-catalogue trip has.
  *
  * `currency` is deliberately not in the set. The generator's template prices are
  * euro prices, and every generated stop is priced in EUR whatever the trip's
@@ -51,16 +66,23 @@ function shouldReflow(current: Trip, next: Trip): boolean {
     next.startDate !== current.startDate ||
     next.endDate !== current.endDate ||
     next.pace !== current.pace ||
-    next.destination !== current.destination
+    next.destination !== current.destination ||
+    (next.destinationId ?? null) !== (current.destinationId ?? null)
   )
 }
 
 export const tripService: TripService = {
   create(state, draft, userId) {
+    const destinationId = draft.destinationId ?? destinationIdFromText(draft.destination)
+    // A chosen destination is stored under the catalogue's own name, so the
+    // text a trip shows can never disagree with the city it is planned for.
+    const destination = getDestination(destinationId)?.displayName ?? draft.destination.trim()
     const name = typeof draft.name === 'string' ? draft.name.trim() : ''
     const named: TripDraft = {
       ...draft,
-      name: name || suggestTripName(draft.destination, draft.startDate),
+      destination,
+      destinationId,
+      name: name || suggestTripName(destination, draft.startDate, destinationId),
     }
 
     if (!validateTripDraft(named).isValid) {
@@ -74,7 +96,8 @@ export const tripService: TripService = {
       userId,
       name: named.name,
       origin: draft.origin.trim(),
-      destination: draft.destination.trim(),
+      destination: named.destination,
+      destinationId: named.destinationId,
       startDate: draft.startDate,
       endDate: draft.endDate,
       travelers: draft.travelers,
@@ -112,9 +135,30 @@ export const tripService: TripService = {
     if (!current) return { state, trip: null }
 
     const timestamp = nowISO()
+    const currentDestinationId = current.destinationId ?? null
+    const destinationText = (patch.destination ?? current.destination).trim()
+    const textChanged = patch.destination !== undefined && destinationText !== current.destination.trim()
+    const destinationId =
+      patch.destinationId !== undefined
+        ? patch.destinationId
+        : textChanged
+          ? destinationIdFromText(destinationText)
+          : currentDestinationId
+    /*
+      Only a destination being chosen now takes the catalogue's display name. A
+      migrated trip keeps the text it was typed with ("paris") until the
+      traveller picks again; rewriting it on an unrelated save would also read
+      as a destination change and re-flow their draft.
+    */
+    const destination =
+      destinationId !== currentDestinationId
+        ? (getDestination(destinationId)?.displayName ?? destinationText)
+        : destinationText
     const next: Trip = {
       ...current,
       ...patch,
+      destination,
+      destinationId,
       name: patch.name !== undefined ? patch.name.trim() : current.name,
       notes: patch.notes !== undefined ? patch.notes.trim() : current.notes,
       updatedAt: timestamp,
@@ -123,7 +167,7 @@ export const tripService: TripService = {
     // Clearing the name is allowed on edit, so re-derive one rather than
     // leaving the trip nameless in a list that shows nothing to click.
     if (!next.name) {
-      next.name = suggestTripName(next.destination, next.startDate)
+      next.name = suggestTripName(next.destination, next.startDate, next.destinationId)
     }
 
     /**
@@ -131,9 +175,14 @@ export const tripService: TripService = {
      * straight through, so an `endDate` before the `startDate` left `eachDay`
      * with nothing to return and the trip lost every day it had. The start date
      * is checked against the stored one so a trip that has already begun stays
-     * editable.
+     * editable, and so is the destination, so a pre-catalogue trip whose city
+     * Tourist does not list can still be edited without changing city.
      */
-    if (!validateTripDraft(toDraft(next), { previousStartDate: current.startDate }).isValid) {
+    const context = {
+      previousStartDate: current.startDate,
+      previousDestination: { destination: current.destination, destinationId: currentDestinationId },
+    }
+    if (!validateTripDraft(toDraft(next), context).isValid) {
       return { state, trip: null }
     }
 

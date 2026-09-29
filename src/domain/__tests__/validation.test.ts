@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DESTINATIONS } from '@/data/destinations'
 import {
+  DESTINATION_REQUIRED_MESSAGE,
   TRIP_LIMITS,
   TRAVEL_PACES,
   createEmptyDraft,
@@ -17,9 +19,10 @@ function freezeClock(): void {
 
 function validDraft(): TripDraft {
   return {
-    name: 'Spring in Kyoto',
+    name: 'Spring in London',
     origin: 'Lisbon',
-    destination: 'Kyoto',
+    destination: 'London, United Kingdom',
+    destinationId: 'london',
     startDate: '2025-03-10',
     endDate: '2025-03-14',
     travelers: 2,
@@ -98,6 +101,10 @@ describe('createEmptyDraft', () => {
     expect(draft.startDate).toBe('')
     expect(draft.endDate).toBe('')
     expect(draft.notes).toBe('')
+  })
+
+  it('starts with no destination chosen', () => {
+    expect(createEmptyDraft().destinationId).toBeNull()
   })
 
   it('defaults to 2 travellers', () => {
@@ -253,32 +260,112 @@ describe('validateTripDraft leaves a blank name to the caller', () => {
 
   it('still reports the other field errors alongside a blank name', () => {
     freezeClock()
-    const result = validateTripDraft(draftWith({ name: '', destination: '' }))
+    const result = validateTripDraft(draftWith({ name: '', destination: '', destinationId: null }))
     expect(Object.keys(result.errors).sort()).toEqual(['destination'])
   })
 })
 
 describe('validateTripDraft rejects destination', () => {
-  it('rejects a blank destination', () => {
+  it('rejects a draft with no destination chosen', () => {
     freezeClock()
-    expect(validateTripDraft(draftWith({ destination: '' })).errors.destination).toBe(
-      'Enter a destination with at least 2 characters.',
+    expect(
+      validateTripDraft(draftWith({ destination: '', destinationId: null })).errors.destination,
+    ).toBe('Choose a destination from the list.')
+    expect(DESTINATION_REQUIRED_MESSAGE).toBe('Choose a destination from the list.')
+  })
+
+  it('rejects typed text that was never chosen from the list, even a real city', () => {
+    freezeClock()
+    // Free text is how a London trip ended up with the Paris guide.
+    for (const destination of ['Lisbon, Portugal', 'London, United Kingdom', '   ', 'K']) {
+      expect(validateTripDraft(draftWith({ destination, destinationId: null })).errors.destination).toBe(
+        DESTINATION_REQUIRED_MESSAGE,
+      )
+    }
+  })
+
+  it('rejects an id that is not in the catalogue', () => {
+    freezeClock()
+    expect(validateTripDraft(draftWith({ destinationId: 'atlantis' })).errors.destination).toBe(
+      DESTINATION_REQUIRED_MESSAGE,
     )
   })
 
-  it('rejects a whitespace-only destination', () => {
+  it('accepts every catalogue destination', () => {
     freezeClock()
-    expect(validateTripDraft(draftWith({ destination: '   ' })).errors.destination).toBeDefined()
-  })
-
-  it('rejects a single-character destination', () => {
-    freezeClock()
-    expect(validateTripDraft(draftWith({ destination: 'K' })).errors.destination).toBeDefined()
+    for (const destination of DESTINATIONS) {
+      const result = validateTripDraft(
+        draftWith({ destination: destination.displayName, destinationId: destination.id }),
+      )
+      expect(result.errors.destination).toBeUndefined()
+    }
   })
 
   it('marks the draft invalid', () => {
     freezeClock()
-    expect(validateTripDraft(draftWith({ destination: '' })).isValid).toBe(false)
+    expect(validateTripDraft(draftWith({ destinationId: null })).isValid).toBe(false)
+  })
+})
+
+/**
+ * A trip saved before destinations came from a catalogue can hold a city the
+ * catalogue does not cover. It must stay editable without being forced to change
+ * city, but no new trip, and no changed destination, can be unlisted.
+ */
+describe('validateTripDraft and a pre-catalogue destination', () => {
+  const LEGACY = { destination: 'Lisbon', destinationId: null }
+
+  it('accepts an unlisted destination carried over unchanged from an unlisted trip', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: 'Lisbon', destinationId: null }), {
+      previousDestination: LEGACY,
+    })
+    expect(result.errors.destination).toBeUndefined()
+    expect(result.isValid).toBe(true)
+  })
+
+  it('ignores surrounding whitespace when deciding the text is unchanged', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: ' Lisbon ', destinationId: null }), {
+      previousDestination: LEGACY,
+    })
+    expect(result.errors.destination).toBeUndefined()
+  })
+
+  it('refuses changing an unlisted destination to other free text', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: 'Porto', destinationId: null }), {
+      previousDestination: LEGACY,
+    })
+    expect(result.errors.destination).toBe(DESTINATION_REQUIRED_MESSAGE)
+  })
+
+  it('refuses clearing an unlisted destination', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: '', destinationId: null }), {
+      previousDestination: { destination: '', destinationId: null },
+    })
+    expect(result.errors.destination).toBe(DESTINATION_REQUIRED_MESSAGE)
+  })
+
+  it('accepts moving an unlisted trip onto a listed city', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({}), { previousDestination: LEGACY })
+    expect(result.errors.destination).toBeUndefined()
+  })
+
+  it('does not let a listed trip drop back to free text', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: 'Lisbon', destinationId: null }), {
+      previousDestination: { destination: 'Lisbon', destinationId: 'london' },
+    })
+    expect(result.errors.destination).toBe(DESTINATION_REQUIRED_MESSAGE)
+  })
+
+  it('keeps the rule firm for creation, where there is no previous destination', () => {
+    freezeClock()
+    const result = validateTripDraft(draftWith({ destination: 'Lisbon', destinationId: null }))
+    expect(result.errors.destination).toBe(DESTINATION_REQUIRED_MESSAGE)
   })
 })
 
@@ -519,6 +606,7 @@ describe('validateTripDraft error aggregation', () => {
       ...createEmptyDraft(),
       origin: '',
       destination: '',
+      destinationId: null,
       travelers: 0,
       budget: 0,
       currency: 'CHF' as CurrencyCode,
@@ -544,7 +632,7 @@ describe('validateTripDraft error aggregation', () => {
 
   it('leaves valid fields out of the error map', () => {
     freezeClock()
-    const result = validateTripDraft(draftWith({ destination: '' }))
+    const result = validateTripDraft(draftWith({ destination: '', destinationId: null }))
     expect(Object.keys(result.errors)).toEqual(['destination'])
   })
 })
@@ -629,5 +717,15 @@ describe('suggestTripName', () => {
 
   it('uses the start date month, not the end date', () => {
     expect(suggestTripName('Kyoto', '2025-11-30')).toBe('Kyoto in November')
+  })
+
+  it('names a catalogue destination after its city, not its full display name', () => {
+    expect(suggestTripName('London, United Kingdom', '2025-10-04', 'london')).toBe('London in October')
+    expect(suggestTripName('New York, United States', '', 'new-york')).toBe('Trip to New York')
+  })
+
+  it('falls back to the text for an unlisted or unknown destination id', () => {
+    expect(suggestTripName('Lisbon', '2025-10-04', null)).toBe('Lisbon in October')
+    expect(suggestTripName('Lisbon', '2025-10-04', 'atlantis')).toBe('Lisbon in October')
   })
 })

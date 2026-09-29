@@ -9,7 +9,7 @@
  * keeps persistence and sorting locale independent.
  */
 
-export type CurrencyCode = 'EUR' | 'USD' | 'GBP' | 'NGN' | 'JPY'
+export type CurrencyCode = 'EUR' | 'USD' | 'GBP' | 'NGN' | 'JPY' | 'AED'
 
 export type TravelInterest =
   | 'culture'
@@ -40,7 +40,19 @@ export interface Trip {
   userId: string
   name: string
   origin: string
+  /**
+   * Where the trip goes, as shown: the chosen destination's `displayName`
+   * ("London, United Kingdom"). For a trip saved before destinations came
+   * from a catalogue it is whatever was typed, kept as-is.
+   */
   destination: string
+  /**
+   * The destination's identity (`data/destinations.ts`), and the only thing
+   * Explore, place details and itinerary drafting read to know where the trip
+   * is. Null only for a pre-catalogue trip whose typed destination names no
+   * catalogue city; those are never treated as Paris or anywhere else.
+   */
+  destinationId: string | null
   startDate: string
   endDate: string
   travelers: number
@@ -154,6 +166,8 @@ export interface TripNote {
 export interface Experience {
   id: string
   name: string
+  /** The destination this place is in (`data/destinations.ts`). Explore filters on it. */
+  destinationId: string
   city: string
   country: string
   neighborhood: string
@@ -166,7 +180,11 @@ export interface Experience {
   isFree: boolean
   rating: number
   reviewCount: number
-  imageUrl: string
+  /**
+   * A licensed photograph of the place, or null when there is none. Null is
+   * shown as a drawn cover, never as a borrowed photo of somewhere else.
+   */
+  imageUrl: string | null
   imageAlt: string
   imageCredit: ImageCredit | null
   tags: string[]
@@ -183,7 +201,10 @@ export interface ImageCredit {
 export interface TripDraft {
   name: string
   origin: string
+  /** Display name of the chosen destination; mirrors `destinationId`. */
   destination: string
+  /** Chosen from the destination catalogue; required for a new trip. */
+  destinationId: string | null
   startDate: string
   endDate: string
   travelers: number

@@ -92,6 +92,7 @@ function buildDemoTrip(user: User): {
     name: 'Paris in the Spring',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate,
     endDate,
     travelers: 2,
@@ -285,8 +286,8 @@ export function createPersistenceService(): PersistenceService {
     if (read.state === null) {
       /**
        * A payload from a newer build is *not* an error. This build cannot know
-       * what a v3 record means, so it starts fresh and leaves the original in
-       * the backup for the build that can.
+       * what a newer record means, so it starts fresh and leaves the original
+       * in the backup for the build that can.
        */
       const status: PersistenceLoadStatus =
         read.problem === 'future-version' || read.problem === 'no-migration-path'

@@ -58,7 +58,8 @@ function sameItineraryShape(before: Trip, after: Trip | undefined): after is Tri
     after.startDate === before.startDate &&
     after.endDate === before.endDate &&
     after.pace === before.pace &&
-    after.destination === before.destination
+    after.destination === before.destination &&
+    (after.destinationId ?? null) === (before.destinationId ?? null)
   )
 }
 
@@ -544,6 +545,12 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const experience = await services.places.getById(experienceId)
       if (!experience) return null
       const current = stateRef.current
+      // A place only goes into a trip to its own city. The UI never offers a
+      // London trip a Paris place, but this is the last line: a stale link or
+      // a legacy trip with no destination (null never equals a place's id)
+      // must not slip another city's stop into the itinerary.
+      const targetTrip = current.trips.find((candidate) => candidate.id === tripId)
+      if (!targetTrip || experience.destinationId !== targetTrip.destinationId) return null
       const days = current.daysByTrip[tripId] ?? []
       const day = findDayById(days, placement.dayId)
       if (!day) return null

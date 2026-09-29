@@ -19,6 +19,9 @@ import type { CurrencyCode } from '@/domain/types'
 /**
  * JPY has no minor unit, so every JPY expectation below is the whole-yen form.
  * `¥1,234.50` is not a JPY figure at all, and 1234.5 yen rounds to 1235.
+ *
+ * AED has no glyph, so Intl prints its code as the symbol, separated from the
+ * number by a no-break space (U+00A0) rather than a plain one.
  */
 const WITH_CENTS: Record<CurrencyCode, string> = {
   EUR: '€1,234.50 EUR',
@@ -26,6 +29,7 @@ const WITH_CENTS: Record<CurrencyCode, string> = {
   GBP: '£1,234.50 GBP',
   NGN: '₦1,234.50 NGN',
   JPY: '¥1,235 JPY',
+  AED: 'AED 1,234.50 AED',
 }
 
 const WITHOUT_CENTS: Record<CurrencyCode, string> = {
@@ -34,6 +38,7 @@ const WITHOUT_CENTS: Record<CurrencyCode, string> = {
   GBP: '£1,235 GBP',
   NGN: '₦1,235 NGN',
   JPY: '¥1,235 JPY',
+  AED: 'AED 1,235 AED',
 }
 
 const SYMBOL_ONLY: Record<CurrencyCode, string> = {
@@ -42,6 +47,7 @@ const SYMBOL_ONLY: Record<CurrencyCode, string> = {
   GBP: '£1,234.50',
   NGN: '₦1,234.50',
   JPY: '¥1,235',
+  AED: 'AED 1,234.50',
 }
 
 const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
@@ -50,6 +56,7 @@ const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
   GBP: '£0.00 GBP',
   NGN: '₦0.00 NGN',
   JPY: '¥0 JPY',
+  AED: 'AED 0.00 AED',
 }
 
 const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
@@ -58,6 +65,7 @@ const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
   GBP: '-£1,234.50 GBP',
   NGN: '-₦1,234.50 NGN',
   JPY: '-¥1,235 JPY',
+  AED: '-AED 1,234.50 AED',
 }
 
 const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
@@ -66,11 +74,12 @@ const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
   GBP: '£2,500 GBP',
   NGN: '₦2,500 NGN',
   JPY: '¥2,500 JPY',
+  AED: 'AED 2,500 AED',
 }
 
 describe('CURRENCIES', () => {
-  it('exposes exactly the five supported currency codes', () => {
-    expect([...CURRENCIES]).toEqual(['EUR', 'USD', 'GBP', 'NGN', 'JPY'])
+  it('exposes exactly the six supported currency codes', () => {
+    expect([...CURRENCIES]).toEqual(['EUR', 'USD', 'GBP', 'NGN', 'JPY', 'AED'])
   })
 
   it('has a symbol entry for every supported currency', () => {
@@ -87,13 +96,14 @@ describe('CURRENCIES', () => {
       GBP: '£',
       NGN: '₦',
       JPY: '¥',
+      AED: 'AED',
     })
   })
 })
 
 describe('CURRENCY_MINOR_UNITS', () => {
   it('gives JPY no minor unit and every other currency two', () => {
-    expect(CURRENCY_MINOR_UNITS).toEqual({ EUR: 2, USD: 2, GBP: 2, NGN: 2, JPY: 0 })
+    expect(CURRENCY_MINOR_UNITS).toEqual({ EUR: 2, USD: 2, GBP: 2, NGN: 2, JPY: 0, AED: 2 })
   })
 
   it('has an entry for every supported currency', () => {
@@ -205,7 +215,7 @@ describe('toCents', () => {
   })
 
   it('keeps hundredths for a currency that has them', () => {
-    for (const currency of ['EUR', 'USD', 'GBP', 'NGN'] as CurrencyCode[]) {
+    for (const currency of ['EUR', 'USD', 'GBP', 'NGN', 'AED'] as CurrencyCode[]) {
       expect(toCents(24.5, currency)).toBe(2450)
       expect(toCents(24.5, currency)).toBe(toCents(24.5))
     }

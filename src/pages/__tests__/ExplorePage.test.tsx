@@ -1,8 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes } from 'react-router-dom'
+import { Link, Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { addDays, formatShortDate } from '@/domain/format'
+import { EXPERIENCES } from '@/data/experiences'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import ExplorePage from '@/pages/ExplorePage'
 import {
@@ -14,9 +15,45 @@ import {
 } from '@/pages/__tests__/tripFixture'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type { PersistedState } from '@/services/contracts'
+import type { Trip } from '@/domain/types'
 
 const DAY_ONE_DATE = FIXTURE_DAY_ONE_DATE
 const DAY_TWO_DATE = addDays(FIXTURE_DAY_ONE_DATE, 1)
+
+/** The general guide's count: every city's places. */
+const ALL_PLACES = `${EXPERIENCES.length} places`
+
+const PARIS_NAMES = EXPERIENCES.filter((experience) => experience.destinationId === 'paris').map(
+  (experience) => experience.name,
+)
+const LONDON_NAMES = EXPERIENCES.filter((experience) => experience.destinationId === 'london').map(
+  (experience) => experience.name,
+)
+const LAGOS_NAMES = EXPERIENCES.filter((experience) => experience.destinationId === 'lagos').map(
+  (experience) => experience.name,
+)
+
+const LONDON_TRIP: Partial<Trip> = {
+  name: 'London Calling',
+  destination: 'London, United Kingdom',
+  destinationId: 'london',
+  currency: 'GBP',
+}
+
+const LAGOS_TRIP: Partial<Trip> = {
+  name: 'Home to Lagos',
+  destination: 'Lagos, Nigeria',
+  destinationId: 'lagos',
+  currency: 'NGN',
+}
+
+/** No Paris place name anywhere on the page, not just in the cards. */
+function expectNoParisPlaces(): void {
+  const text = document.body.textContent ?? ''
+  for (const name of PARIS_NAMES) {
+    expect(text).not.toContain(name)
+  }
+}
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -74,8 +111,8 @@ describe('ExplorePage', () => {
     renderAt(undefined, fixtureState())
 
     expect(screen.getByRole('heading', { level: 1, name: 'Explore' })).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
-    expect(cards()).toHaveLength(14)
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+    expect(cards()).toHaveLength(EXPERIENCES.length)
 
     // Nothing is gated behind the provenance disclosure or the filter control.
     expect(screen.queryByLabelText('Max price')).not.toBeInTheDocument()
@@ -87,7 +124,7 @@ describe('ExplorePage', () => {
   it('keeps the demo-catalogue provenance as a one-line claim, one tap from the reasoning', async () => {
     const user = userEvent.setup()
     renderAt(undefined, fixtureState())
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
 
     const summary = screen.getByText('Curated demo catalogue, not live data')
     const details = summary.closest('details') as HTMLElement
@@ -102,7 +139,7 @@ describe('ExplorePage', () => {
 
   it('never renders the invented ratings or review counts', async () => {
     renderAt(undefined, fixtureState())
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
 
     expect(screen.queryAllByText('star')).toHaveLength(0)
     expect(screen.queryByText(/out of 5/)).not.toBeInTheDocument()
@@ -112,7 +149,7 @@ describe('ExplorePage', () => {
 
   it('still marks provenance and the estimate on every card', async () => {
     renderAt(undefined, fixtureState())
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
 
     const card = cardNamed('Louvre Museum')
     expect(within(card).getByText(PROTOTYPE_LABEL.curatedGuide)).toBeInTheDocument()
@@ -121,13 +158,13 @@ describe('ExplorePage', () => {
     expect(within(card).getByText('Demo hours: 09:00 - 18:00, closed Tuesdays')).toBeInTheDocument()
   })
 
-  it('asks for a trip once, in the header, rather than on all fourteen cards', async () => {
+  it('asks for a trip once, in the header, rather than on every card', async () => {
     renderAt(undefined, fixtureState())
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
 
     expect(screen.queryAllByRole('button', { name: 'Add to trip' })).toHaveLength(0)
     expect(
-      screen.getByText('Pick a trip to add places to a day.'),
+      screen.getByText('Curated places in Paris, London and Lagos. Pick a trip to add places to a day.'),
     ).toBeInTheDocument()
     const chooseTrip = screen.getAllByRole('link', { name: 'Choose a trip' })
     expect(chooseTrip).toHaveLength(1)
@@ -137,7 +174,7 @@ describe('ExplorePage', () => {
 
   it('drops the trip query from the details link when there is no trip', async () => {
     renderAt(undefined, fixtureState())
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
 
     expect(within(cardNamed('Louvre Museum')).getByRole('link', { name: 'View details' })).toHaveAttribute(
       'href',
@@ -163,20 +200,25 @@ describe('ExplorePage', () => {
   it('lists the whole guide, best rated first, without quoting the rating', async () => {
     renderAt(undefined, fixtureState())
 
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
-    expect(cards()).toHaveLength(14)
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+    expect(cards()).toHaveLength(EXPERIENCES.length)
     // The service still ranks on the demo rating; the figure itself stays private.
     expect(cardNames()[0]).toContain('Orsay')
     expect(cardNames()[1]).toBe('Notre-Dame de Paris')
     expect(within(cardNamed('Louvre Museum')).getByText('€22')).toBeInTheDocument()
     expect(within(cardNamed('Eiffel Tower Summit')).getByText('€29')).toBeInTheDocument()
     expect(within(cardNamed(/Métro/)).getByText('€2.30')).toBeInTheDocument()
+    // Every city's places, each priced in its own currency and naming its city.
+    expect(within(cardNamed('Tower of London')).getByText('£35')).toBeInTheDocument()
+    expect(within(cardNamed('Tower of London')).getByText('Tower Hill · London')).toBeInTheDocument()
+    expect(within(cardNamed('Lekki Conservation Centre')).getByText('₦5,000')).toBeInTheDocument()
+    expect(within(cardNamed('Lekki Conservation Centre')).getByText('Lekki · Lagos')).toBeInTheDocument()
   })
 
   it('marks the free places as free instead of quoting a price', async () => {
     renderAt(undefined, fixtureState())
 
-    await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
     const freeCard = cardNamed('Luxembourg Gardens')
     expect(within(freeCard).getByText('Free')).toBeInTheDocument()
     expect(within(freeCard).queryByText(/€0/)).not.toBeInTheDocument()
@@ -185,7 +227,7 @@ describe('ExplorePage', () => {
 
   it('waits for a pause in typing before it searches, with no search button to press', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument()
@@ -199,7 +241,7 @@ describe('ExplorePage', () => {
 
   it('searches tags and neighbourhoods, not just names', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await user.type(searchBox(), 'montmartre')
@@ -211,7 +253,7 @@ describe('ExplorePage', () => {
 
   it('narrows the guide to one category at a time, through the collapsed control', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await openFilters(user)
@@ -227,7 +269,7 @@ describe('ExplorePage', () => {
 
   it('says on the closed control how many filters are hidden behind it', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     expect(filterToggle()).toHaveAccessibleName('Filters')
@@ -246,7 +288,7 @@ describe('ExplorePage', () => {
 
   it('caps the guide at the highest estimate the traveller will pay', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await openFilters(user)
@@ -263,7 +305,7 @@ describe('ExplorePage', () => {
 
   it('treats no price cap as no cap at all, and says so once', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await openFilters(user)
@@ -287,7 +329,7 @@ describe('ExplorePage', () => {
 
   it('can strip the paid places out entirely', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await openFilters(user)
@@ -304,7 +346,7 @@ describe('ExplorePage', () => {
 
   it('combines a category with a price filter', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await openFilters(user)
@@ -323,7 +365,7 @@ describe('ExplorePage', () => {
 
   it('offers a warm way back when nothing matches', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await user.type(searchBox(), 'zzzz')
@@ -346,7 +388,7 @@ describe('ExplorePage', () => {
 
   it('offers clearing only once there is something to clear', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument()
@@ -359,7 +401,7 @@ describe('ExplorePage', () => {
 
   it('puts every filter back the way it was', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
     await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
     await user.type(searchBox(), 'museum')
@@ -383,7 +425,7 @@ describe('ExplorePage', () => {
 
   it('announces the result count to assistive tech as the filters change', async () => {
     const user = userEvent.setup()
-    renderAt(undefined, fixtureState())
+    renderWithTrip()
 
     const count = await waitFor(() => screen.getByText('14 places'))
     expect(count).toHaveAttribute('aria-live', 'polite')
@@ -551,6 +593,215 @@ describe('ExplorePage', () => {
       const days = readStoredState().daysByTrip[FIXTURE_TRIP_ID]
       expect(days.find((day) => day.id === 'day-1')?.items).toHaveLength(4)
       expect(days.find((day) => day.id === 'day-2')?.items).toHaveLength(1)
+    })
+  })
+
+  describe('follows the trip to its destination', () => {
+    it('shows a London trip only London places, and nothing from Paris', async () => {
+      renderWithTrip(fixtureState({ trip: LONDON_TRIP }))
+
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
+      expect(
+        screen.getByText('Curated London places you can add to any day of London Calling.'),
+      ).toBeInTheDocument()
+      expect([...cardNames()].sort()).toEqual([...LONDON_NAMES].sort())
+      for (const card of cards()) {
+        expect(card).toHaveTextContent('London')
+      }
+      expectNoParisPlaces()
+      expect(document.body.textContent).not.toMatch(/Paris/)
+    })
+
+    it('prices a London trip in pounds, down to the price cap', async () => {
+      const user = userEvent.setup()
+      renderWithTrip(fixtureState({ trip: LONDON_TRIP }))
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
+
+      expect(within(cardNamed('Tower of London')).getByText('£35')).toBeInTheDocument()
+      expect(document.body.textContent).not.toContain('€')
+
+      await openFilters(user)
+      const maxPrice = screen.getByLabelText('Max price')
+      const field = maxPrice.closest('div') as HTMLElement
+      expect(within(field).getByText('GBP')).toBeInTheDocument()
+      expect(within(field).getByText('£')).toBeInTheDocument()
+      expect(screen.queryByText('EUR')).not.toBeInTheDocument()
+
+      await user.type(maxPrice, '20')
+      await waitFor(() => expect(screen.queryByRole('heading', { level: 3, name: 'Tower of London' })).not.toBeInTheDocument())
+      expect(cardNamed('Borough Market')).toBeInTheDocument()
+      expectNoParisPlaces()
+    })
+
+    it('shows a Lagos trip only Lagos places, priced in naira', async () => {
+      const user = userEvent.setup()
+      renderWithTrip(fixtureState({ trip: LAGOS_TRIP }))
+
+      await waitFor(() => expect(screen.getByText(`${LAGOS_NAMES.length} places`)).toBeInTheDocument())
+      expect([...cardNames()].sort()).toEqual([...LAGOS_NAMES].sort())
+      expect(
+        screen.getByText('Curated Lagos places you can add to any day of Home to Lagos.'),
+      ).toBeInTheDocument()
+      expect(within(cardNamed('Lekki Conservation Centre')).getByText('₦5,000')).toBeInTheDocument()
+      expectNoParisPlaces()
+
+      await openFilters(user)
+      const field = screen.getByLabelText('Max price').closest('div') as HTMLElement
+      expect(within(field).getByText('NGN')).toBeInTheDocument()
+      expect(within(field).getByText('₦')).toBeInTheDocument()
+    })
+
+    it('shows a Paris trip only Paris places', async () => {
+      renderWithTrip()
+
+      await waitFor(() => expect(screen.getByText(`${PARIS_NAMES.length} places`)).toBeInTheDocument())
+      expect([...cardNames()].sort()).toEqual([...PARIS_NAMES].sort())
+      const text = document.body.textContent ?? ''
+      for (const name of [...LONDON_NAMES, ...LAGOS_NAMES]) {
+        expect(text).not.toContain(name)
+      }
+    })
+
+    it('follows the route from a London trip to a Paris trip without a stale result', async () => {
+      const user = userEvent.setup()
+      const londonTrip = {
+        ...fixtureState({ trip: LONDON_TRIP }).trips[0],
+        id: 'trip-london',
+      }
+      const state = fixtureState({ extraTrips: [londonTrip] })
+      renderWithProviders(
+        <>
+          <nav>
+            <Link to={`/trips/${FIXTURE_TRIP_ID}/explore`}>Go to the Paris trip</Link>
+            <Link to="/trips/trip-london/explore">Go to the London trip</Link>
+          </nav>
+          <Routes>
+            <Route path="/trips/:tripId/explore" element={<ExplorePage />} />
+          </Routes>
+        </>,
+        { route: '/trips/trip-london/explore', state },
+      )
+
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
+      expectNoParisPlaces()
+
+      // Same route pattern, same page component; only the param changes.
+      await user.click(screen.getByRole('link', { name: 'Go to the Paris trip' }))
+
+      // Never a moment where the London list is shown under the Paris trip.
+      expect(screen.queryByRole('heading', { level: 3, name: 'Tower of London' })).not.toBeInTheDocument()
+      await waitFor(() => expect(screen.getByText(`${PARIS_NAMES.length} places`)).toBeInTheDocument())
+      expect(
+        screen.getByText('Curated Paris places you can add to any day of Paris in the Spring.'),
+      ).toBeInTheDocument()
+      expect([...cardNames()].sort()).toEqual([...PARIS_NAMES].sort())
+      for (const name of LONDON_NAMES) {
+        expect(document.body.textContent).not.toContain(name)
+      }
+
+      await user.click(screen.getByRole('link', { name: 'Go to the London trip' }))
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
+      expectNoParisPlaces()
+    })
+
+    it('says plainly when the destination has no places yet, and shows nothing from Paris', async () => {
+      renderWithTrip(
+        fixtureState({
+          trip: { name: 'Tokyo Lights', destination: 'Tokyo, Japan', destinationId: 'tokyo', currency: 'JPY' },
+        }),
+      )
+
+      expect(
+        await screen.findByRole('heading', { level: 2, name: 'Explore is still growing for Tokyo' }),
+      ).toBeInTheDocument()
+      expect(screen.getByText(/does not have curated places in Tokyo yet/)).toHaveTextContent(
+        'will not show places from other cities instead',
+      )
+      expect(screen.getByRole('link', { name: 'Open itinerary' })).toHaveAttribute(
+        'href',
+        `/trips/${FIXTURE_TRIP_ID}/itinerary`,
+      )
+      expect(screen.queryByRole('article')).not.toBeInTheDocument()
+      expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
+      expectNoParisPlaces()
+      for (const name of [...LONDON_NAMES, ...LAGOS_NAMES]) {
+        expect(document.body.textContent).not.toContain(name)
+      }
+    })
+
+    it('says plainly when a legacy trip has a destination the guide does not know', async () => {
+      renderWithTrip(
+        fixtureState({
+          trip: { name: 'Lisbon Weekend', destination: 'Lisbon, Portugal', destinationId: null },
+        }),
+      )
+
+      expect(
+        await screen.findByRole('heading', {
+          level: 2,
+          name: 'Explore does not cover Lisbon, Portugal yet',
+        }),
+      ).toBeInTheDocument()
+      expect(screen.getByText(/will not show places from another city instead/)).toBeInTheDocument()
+      expect(screen.queryByRole('article')).not.toBeInTheDocument()
+      expectNoParisPlaces()
+    })
+  })
+
+  describe('the general guide', () => {
+    it('filters by city with a labelled, keyboard-operable radio group', async () => {
+      const user = userEvent.setup()
+      renderAt(undefined, fixtureState())
+      await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+
+      const group = screen.getByRole('group', { name: 'City' })
+      const options = within(group).getAllByRole('radio')
+      expect(options.map((option) => option.getAttribute('value'))).toEqual([
+        'all',
+        'paris',
+        'london',
+        'lagos',
+      ])
+      // Only cities that have places are offered.
+      expect(within(group).queryByRole('radio', { name: 'Tokyo' })).not.toBeInTheDocument()
+      expect(within(group).getByRole('radio', { name: 'All cities' })).toBeChecked()
+
+      await user.click(within(group).getByRole('radio', { name: 'London' }))
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
+      expect([...cardNames()].sort()).toEqual([...LONDON_NAMES].sort())
+      expectNoParisPlaces()
+
+      // Arrow keys move between radios in a group, as they should.
+      await user.keyboard('{ArrowRight}')
+      expect(within(group).getByRole('radio', { name: 'Lagos' })).toBeChecked()
+      await waitFor(() => expect(screen.getByText(`${LAGOS_NAMES.length} places`)).toBeInTheDocument())
+      expect([...cardNames()].sort()).toEqual([...LAGOS_NAMES].sort())
+
+      await user.click(within(group).getByRole('radio', { name: 'All cities' }))
+      await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+    })
+
+    it('offers a price cap only once one city, and so one currency, is chosen', async () => {
+      const user = userEvent.setup()
+      renderAt(undefined, fixtureState())
+      await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+
+      await openFilters(user)
+      expect(screen.queryByLabelText('Max price')).not.toBeInTheDocument()
+      expect(screen.getByText(/Each city is priced in its own currency/)).toBeInTheDocument()
+
+      await user.click(screen.getByRole('radio', { name: 'Lagos' }))
+      const field = screen.getByLabelText('Max price').closest('div') as HTMLElement
+      expect(within(field).getByText('NGN')).toBeInTheDocument()
+
+      await user.type(screen.getByLabelText('Max price'), '4000')
+      await waitFor(() => expect(screen.getByText('3 places')).toBeInTheDocument())
+
+      // Switching city drops a cap that was typed in another currency.
+      await user.click(screen.getByRole('radio', { name: 'London' }))
+      expect(screen.getByLabelText('Max price')).toHaveValue(0)
+      await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
     })
   })
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { DestinationCombobox } from '@/components/ui/DestinationCombobox'
 import { Dialog } from '@/components/ui/Dialog'
 import {
   CheckboxChipGroup,
@@ -11,6 +12,7 @@ import {
   TextField,
 } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
+import { getDestination, type Destination } from '@/data/destinations'
 import { formatDate, todayISO } from '@/domain/format'
 import { CURRENCIES, CURRENCY_SYMBOLS } from '@/domain/money'
 import { TRIP_LIMITS, TRAVEL_PACES, suggestTripName, validateTripDraft } from '@/domain/validation'
@@ -37,6 +39,7 @@ function toDraft(trip: Trip): TripDraft {
     name: trip.name,
     origin: trip.origin,
     destination: trip.destination,
+    destinationId: trip.destinationId ?? null,
     startDate: trip.startDate,
     endDate: trip.endDate,
     travelers: trip.travelers,
@@ -97,8 +100,11 @@ export function EditTripDialog({
    * still refused.
    */
   const validationContext = useMemo(
-    () => ({ previousStartDate: trip.startDate }),
-    [trip.startDate],
+    () => ({
+      previousStartDate: trip.startDate,
+      previousDestination: { destination: trip.destination, destinationId: trip.destinationId ?? null },
+    }),
+    [trip.startDate, trip.destination, trip.destinationId],
   )
 
   const update = useCallback(
@@ -118,7 +124,7 @@ export function EditTripDialog({
     if (!result.isValid) return
     actions.updateTrip(trip.id, {
       ...draft,
-      name: draft.name.trim() || suggestTripName(draft.destination, draft.startDate),
+      name: draft.name.trim() || suggestTripName(draft.destination, draft.startDate, draft.destinationId),
     })
     onClose()
   }
@@ -126,6 +132,26 @@ export function EditTripDialog({
   const today = todayISO()
   const startDateInPast = draft.startDate !== '' && draft.startDate < today
   const messages = Object.values(errors).filter((message): message is string => Boolean(message))
+
+  /*
+    Changing the city never changes the currency here: the trip's expenses are
+    already recorded in it and nothing is ever converted. When the new city
+    uses another currency the traveller is told, and the Currency field is
+    theirs to change.
+  */
+  const chosen = getDestination(draft.destinationId)
+  const isLegacyDestination =
+    (trip.destinationId ?? null) === null && draft.destinationId === null && draft.destination.trim() !== ''
+  let destinationNote: string | undefined
+  if (isLegacyDestination) {
+    destinationNote = `${draft.destination.trim()} is not in Tourist's destination list, so Explore and the itinerary draft stay general. Keep it, or pick a listed city.`
+  } else if (chosen && chosen.id !== (trip.destinationId ?? null) && chosen.currency !== draft.currency) {
+    destinationNote = `${chosen.city} uses ${chosen.currency}. This trip stays in ${draft.currency}; change Currency below if you want ${chosen.currency}.`
+  }
+
+  const selectDestination = (destination: Destination | null) => {
+    update({ destinationId: destination?.id ?? null, destination: destination?.displayName ?? '' })
+  }
 
   return (
     <Dialog
@@ -192,14 +218,14 @@ export function EditTripDialog({
             onChange={(event) => update({ origin: event.target.value })}
           />
 
-          <TextField
+          <DestinationCombobox
             label="Destination"
             required
-            value={draft.destination}
-            maxLength={80}
-            placeholder="Paris, France"
+            value={draft.destinationId}
+            unlistedText={draft.destinationId === null ? draft.destination : undefined}
             error={errors.destination}
-            onChange={(event) => update({ destination: event.target.value })}
+            note={destinationNote}
+            onSelect={selectDestination}
           />
 
           <TextField

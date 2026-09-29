@@ -31,6 +31,7 @@ function makeTrip(overrides: Partial<Trip> = {}): Trip {
     name: 'Spring in Paris',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: '2026-04-01',
     endDate: '2026-04-02',
     travelers: 2,

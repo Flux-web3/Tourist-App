@@ -1,3 +1,4 @@
+import { getDestination } from '@/data/destinations'
 import { CURRENCIES } from './money'
 import { parseISODate, todayISO, tripLengthInDays } from './format'
 import type { TripDraft, TripDraftErrors } from './types'
@@ -30,8 +31,18 @@ export const TRAVEL_PACES = [
   { value: 'packed', label: 'Packed', hint: 'Fill every usable hour' },
 ] as const
 
-export function suggestTripName(destination: string, startISO: string): string {
-  const place = destination.trim()
+/**
+ * A default trip name: "London in October". Given a catalogue `destinationId`
+ * it uses the city alone, because "London, United Kingdom in October" reads like
+ * an address. Without one (a pre-catalogue trip, or a caller holding only text)
+ * the destination text is used as given.
+ */
+export function suggestTripName(
+  destination: string,
+  startISO: string,
+  destinationId?: string | null,
+): string {
+  const place = (getDestination(destinationId)?.city ?? destination).trim()
   if (!place) return 'Untitled trip'
   if (!parseISODate(startISO)) return `Trip to ${place}`
   const month = new Intl.DateTimeFormat('en-GB', { month: 'long', timeZone: 'UTC' }).format(
@@ -56,6 +67,29 @@ export interface TripDraftContext {
    * for trip creation, where there is no previous value and the rule is firm.
    */
   previousStartDate?: string
+  /**
+   * The destination already stored on the trip being edited.
+   *
+   * A new destination has to come from the catalogue. A trip saved before the
+   * catalogue existed may hold a city it does not cover ("Lisbon", with a null
+   * `destinationId`); refusing that on edit would force the traveller to change
+   * city just to fix a typo in the notes. So an unlisted destination is accepted
+   * only while it is carried over unchanged from a trip that was already
+   * unlisted. Leave this unset for trip creation, where the rule is firm.
+   */
+  previousDestination?: { destination: string; destinationId: string | null }
+}
+
+export const DESTINATION_REQUIRED_MESSAGE = 'Choose a destination from the list.'
+
+function isCarriedOverUnlistedDestination(draft: TripDraft, context: TripDraftContext): boolean {
+  const previous = context.previousDestination
+  // `?? null` because a snapshot or caller from before the field existed has it undefined.
+  if (!previous || (previous.destinationId ?? null) !== null || (draft.destinationId ?? null) !== null) {
+    return false
+  }
+  const text = draft.destination.trim()
+  return text !== '' && text === previous.destination.trim()
 }
 
 export function validateTripDraft(
@@ -69,8 +103,8 @@ export function validateTripDraft(
     errors.name = `Keep the name to ${TRIP_LIMITS.maxNameLength} characters or fewer.`
   }
 
-  if (draft.destination.trim().length < 2) {
-    errors.destination = 'Enter a destination with at least 2 characters.'
+  if (!getDestination(draft.destinationId) && !isCarriedOverUnlistedDestination(draft, context)) {
+    errors.destination = DESTINATION_REQUIRED_MESSAGE
   }
 
   if (draft.origin.trim().length < 2) {
@@ -128,6 +162,7 @@ export function createEmptyDraft(): TripDraft {
     name: '',
     origin: '',
     destination: '',
+    destinationId: null,
     startDate: '',
     endDate: '',
     travelers: 2,

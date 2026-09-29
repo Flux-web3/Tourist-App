@@ -1,13 +1,18 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
+import { AddToTripDialog } from '@/components/AddToTripDialog'
+import { EXPERIENCES_BY_ID } from '@/data/experiences'
 import { addDays, formatShortDate } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import PlaceDetailsPage from '@/pages/PlaceDetailsPage'
 import { FIXTURE_DAY_ONE_DATE, FIXTURE_TRIP_ID, fixtureState, readStoredState } from '@/pages/__tests__/tripFixture'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type { PersistedState } from '@/services/contracts'
+import { useTourist, useTrip } from '@/state/useTourist'
+import type { ItineraryItem, Trip } from '@/domain/types'
 
 const DAY_ONE_DATE = FIXTURE_DAY_ONE_DATE
 const DAY_TWO_DATE = addDays(FIXTURE_DAY_ONE_DATE, 1)
@@ -20,6 +25,13 @@ function renderPlace(experienceId: string, options: { tripId?: string; state?: P
     </Routes>,
     { route: `/places/${experienceId}${tripId ? `?trip=${tripId}` : ''}`, state },
   )
+}
+
+const LONDON_TRIP: Partial<Trip> = {
+  name: 'London Calling',
+  destination: 'London, United Kingdom',
+  destinationId: 'london',
+  currency: 'GBP',
 }
 
 function daySelect(dialog: HTMLElement): HTMLElement {
@@ -272,5 +284,201 @@ describe('PlaceDetailsPage', () => {
     const days = readStoredState().daysByTrip[FIXTURE_TRIP_ID]
     expect(days.find((day) => day.id === 'day-1')?.items).toHaveLength(4)
     expect(days.find((day) => day.id === 'day-2')?.items).toHaveLength(1)
+  })
+
+  describe('places outside Paris', () => {
+    it('shows a London place with its own city, a drawn cover and no photo credit', async () => {
+      renderPlace('exp_london_tower_of_london')
+
+      expect(await screen.findByRole('heading', { level: 1, name: 'Tower of London' })).toBeInTheDocument()
+      expect(screen.getByText('Tower Hill · London, United Kingdom')).toBeInTheDocument()
+      expect(
+        screen.getByRole('img', { name: 'A drawn cover for the Tower of London, not a photograph' }),
+      ).toBeInTheDocument()
+      expect(document.querySelector('img')).toBeNull()
+      expect(screen.queryByText(/^Photo:/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /Wikimedia Commons/ })).not.toBeInTheDocument()
+      expect(screen.getByText('£35')).toBeInTheDocument()
+      expect(screen.getByText(`GBP · ${PROTOTYPE_LABEL.informationMayChange}`)).toBeInTheDocument()
+      expect(document.body.textContent).not.toMatch(/Paris|€/)
+    })
+
+    it('prices a Lagos place in naira', async () => {
+      renderPlace('exp_lagos_lekki_conservation_centre')
+
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Lekki Conservation Centre' }),
+      ).toBeInTheDocument()
+      expect(screen.getByText('Lekki · Lagos, Nigeria')).toBeInTheDocument()
+      expect(screen.getByText('₦5,000')).toBeInTheDocument()
+      expect(screen.getByText(`NGN · ${PROTOTYPE_LABEL.informationMayChange}`)).toBeInTheDocument()
+    })
+
+    it('adds a London place to a London trip, priced in pounds', async () => {
+      const user = userEvent.setup()
+      renderPlace('exp_london_tower_of_london', {
+        tripId: FIXTURE_TRIP_ID,
+        state: fixtureState({ trip: LONDON_TRIP }),
+      })
+      await screen.findByRole('heading', { level: 1, name: 'Tower of London' })
+
+      await user.click(screen.getByRole('button', { name: 'Add to trip' }))
+      const dialog = screen.getByRole('dialog', { name: 'Add to London Calling' })
+      expect(within(dialog).getByText('Estimated price: £35 and up')).toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
+
+      await waitFor(() => expect(screen.getByText(/Tower of London was added to Day 1/)).toBeInTheDocument())
+      const dayOne = readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
+      expect(dayOne?.items.at(-1)).toMatchObject({
+        experienceId: 'exp_london_tower_of_london',
+        currency: 'GBP',
+        estimatedCost: 35,
+        location: 'Tower Hill, London',
+      })
+    })
+  })
+
+  describe('a place in a different city from the trip', () => {
+    it('does not offer a Paris trip a London place, and says why', async () => {
+      renderPlace('exp_london_tower_of_london', { tripId: FIXTURE_TRIP_ID })
+
+      await screen.findByRole('heading', { level: 1, name: 'Tower of London' })
+      expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
+      expect(
+        screen.getByText(
+          'Tower of London is in London, and Paris in the Spring is going to Paris, so it cannot be added to that trip.',
+        ),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Explore places for Paris in the Spring' })).toHaveAttribute(
+        'href',
+        `/trips/${FIXTURE_TRIP_ID}/explore`,
+      )
+    })
+
+    it('does not offer a London trip a Paris place', async () => {
+      renderPlace('exp_louvre_museum', {
+        tripId: FIXTURE_TRIP_ID,
+        state: fixtureState({ trip: LONDON_TRIP }),
+      })
+
+      await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
+      expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
+      expect(
+        screen.getByText(
+          'Louvre Museum is in Paris, and London Calling is going to London, so it cannot be added to that trip.',
+        ),
+      ).toBeInTheDocument()
+    })
+
+    it('treats a legacy trip with no known destination as a different city', async () => {
+      renderPlace('exp_louvre_museum', {
+        tripId: FIXTURE_TRIP_ID,
+        state: fixtureState({
+          trip: { name: 'Lisbon Weekend', destination: 'Lisbon, Portugal', destinationId: null },
+        }),
+      })
+
+      await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
+      expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
+      expect(
+        screen.getByText(
+          'Louvre Museum is in Paris, and Lisbon Weekend is going to Lisbon, Portugal, so it cannot be added to that trip.',
+        ),
+      ).toBeInTheDocument()
+    })
+
+    it('has the add sheet refuse a place from another city if one is ever passed in', async () => {
+      const user = userEvent.setup()
+      const tower = EXPERIENCES_BY_ID.get('exp_london_tower_of_london')
+      if (!tower) throw new Error('catalogue is missing the Tower of London')
+
+      function Sheet() {
+        const trip = useTrip(FIXTURE_TRIP_ID)
+        return trip ? (
+          <AddToTripDialog trip={trip} experience={tower as NonNullable<typeof tower>} onClose={() => {}} onAdded={() => {}} />
+        ) : null
+      }
+      renderWithProviders(<Sheet />, { state: fixtureState() })
+
+      const dialog = await screen.findByRole('dialog', { name: 'Add to Paris in the Spring' })
+      expect(within(dialog).getByText('Tower of London is not in Paris')).toBeInTheDocument()
+      expect(
+        within(dialog).getByText(
+          'It is in London, and Paris in the Spring is going to Paris, so it cannot be added to this trip.',
+        ),
+      ).toBeInTheDocument()
+      const add = within(dialog).getByRole('button', { name: 'Add to itinerary' })
+      expect(add).toBeDisabled()
+      await user.click(add)
+      expect(readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')?.items).toHaveLength(4)
+      // The existing reassurance stays.
+      expect(within(dialog).getByText('Only this day changes, and you can move or remove the stop later.')).toBeInTheDocument()
+    })
+
+    it('has the provider refuse a cross-destination add without touching the itinerary', async () => {
+      const user = userEvent.setup()
+
+      function Probe() {
+        const { actions, hydrated } = useTourist()
+        const [result, setResult] = useState<string>('none yet')
+        const attempt = async (experienceId: string) => {
+          const item: ItineraryItem | null = await actions.addExperienceToTrip(FIXTURE_TRIP_ID, experienceId, {
+            dayId: 'day-1',
+          })
+          setResult(item ? `added ${item.experienceId}` : 'refused')
+        }
+        return (
+          <>
+            <button type="button" disabled={!hydrated} onClick={() => void attempt('exp_london_tower_of_london')}>
+              Add London place
+            </button>
+            <button type="button" disabled={!hydrated} onClick={() => void attempt('exp_louvre_museum')}>
+              Add Paris place
+            </button>
+            <p>{result}</p>
+          </>
+        )
+      }
+      renderWithProviders(<Probe />, { state: fixtureState() })
+
+      await user.click(screen.getByRole('button', { name: 'Add London place' }))
+      expect(await screen.findByText('refused')).toBeInTheDocument()
+      expect(readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')?.items).toHaveLength(4)
+
+      // Same trip, same day, a Paris place: still allowed.
+      await user.click(screen.getByRole('button', { name: 'Add Paris place' }))
+      expect(await screen.findByText('added exp_louvre_museum')).toBeInTheDocument()
+    })
+
+    it('has the provider refuse any place for a legacy trip with no destination', async () => {
+      const user = userEvent.setup()
+
+      function Probe() {
+        const { actions, hydrated } = useTourist()
+        const [result, setResult] = useState<string>('none yet')
+        return (
+          <>
+            <button
+              type="button"
+              disabled={!hydrated}
+              onClick={() =>
+                void actions
+                  .addExperienceToTrip(FIXTURE_TRIP_ID, 'exp_louvre_museum', { dayId: 'day-1' })
+                  .then((item) => setResult(item ? 'added' : 'refused'))
+              }
+            >
+              Add Paris place
+            </button>
+            <p>{result}</p>
+          </>
+        )
+      }
+      renderWithProviders(<Probe />, {
+        state: fixtureState({ trip: { destination: 'Lisbon, Portugal', destinationId: null } }),
+      })
+
+      await user.click(screen.getByRole('button', { name: 'Add Paris place' }))
+      expect(await screen.findByText('refused')).toBeInTheDocument()
+    })
   })
 })

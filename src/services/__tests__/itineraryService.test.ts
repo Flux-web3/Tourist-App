@@ -17,6 +17,7 @@ const TRIP: Trip = {
   name: 'Paris in the Spring',
   origin: 'Lagos, Nigeria',
   destination: 'Paris, France',
+  destinationId: 'paris',
   startDate: START,
   endDate: END,
   travelers: 2,
@@ -29,6 +30,11 @@ const TRIP: Trip = {
   createdAt: '2026-03-15T09:30:00.000Z',
   updatedAt: '2026-03-15T09:30:00.000Z',
 }
+/**
+ * A trip saved before the destination catalogue whose typed destination names
+ * no catalogue city: generic drafting, never a guessed city.
+ */
+const LISBON: Trip = { ...TRIP, destination: 'Lisbon, Portugal', destinationId: null }
 
 type AlternativeInput = Parameters<ItineraryService['suggestAlternative']>[0]
 
@@ -236,7 +242,7 @@ describe('itineraryService.generate', () => {
   })
 
   it('anchors the last day on departure when the bank has one', async () => {
-    const days = await generateNow({ ...TRIP, destination: 'Lisbon, Portugal' })
+    const days = await generateNow(LISBON)
 
     expect(days[days.length - 1]?.items.map((item) => item.title)).toContain(
       'Last look, then head out',
@@ -244,11 +250,30 @@ describe('itineraryService.generate', () => {
   })
 
   it('falls back to generic wording for a destination with no landmark bank', async () => {
-    const days = await generateNow({ ...TRIP, destination: 'Lisbon, Portugal' })
+    const days = await generateNow(LISBON)
 
     const titles = titlesOf(days)
     expect(titles).toContain('Arrive and settle in')
     expect(titles.some((title) => /Louvre|Orsay|Seine cruise|Versailles/.test(title))).toBe(false)
+  })
+
+  it('drafts a London trip as London, in pounds, and swaps within it', async () => {
+    const london: Trip = {
+      ...TRIP,
+      destination: 'London, United Kingdom',
+      destinationId: 'london',
+      currency: 'GBP',
+    }
+    const days = await generateNow(london)
+    const items = days.flatMap((day) => day.items)
+
+    expect(items.every((item) => item.currency === 'GBP')).toBe(true)
+    expect(titlesOf(days)[0]).toBe('Arrive via Heathrow or St Pancras and check in')
+    expect(titlesOf(days).some((title) => /Louvre|Orsay|Seine|Eiffel|Montmartre/.test(title))).toBe(false)
+
+    const day = days[1]
+    const replacement = await alternativeNow({ trip: london, day, item: day.items[0] })
+    expect(replacement.currency).toBe('GBP')
   })
 
   it('packs a packed pace tighter than a relaxed one', async () => {

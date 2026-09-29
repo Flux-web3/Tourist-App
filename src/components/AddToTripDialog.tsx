@@ -5,6 +5,7 @@ import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Dialog } from '@/components/ui/Dialog'
 import { SelectField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
+import { getDestination } from '@/data/destinations'
 import { formatDuration, formatShortDate, formatTime, isValidTime } from '@/domain/format'
 import { formatAmount } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
@@ -70,6 +71,13 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
     label: `Day ${day.index} · ${formatShortDate(day.date)}`,
   }))
 
+  // Pages only open this sheet for a place in the trip's own destination; this
+  // keeps a stray caller from ever adding another city's place (the provider
+  // refuses it too). A legacy trip with no destination never matches.
+  const wrongCity = experience.destinationId !== trip.destinationId
+  const tripCity =
+    getDestination(trip.destinationId)?.city ?? (trip.destination.trim() || 'another destination')
+
   const selectedDay = days.find((day) => day.id === dayId) ?? null
   // Adding the same place to the same day twice only doubled its share of the
   // estimate; nobody visits the Louvre at 18:15 and again at 19:45.
@@ -86,7 +94,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
       setError({ title: 'Choose a day first', message: 'Pick the day this place should be added to.' })
       return
     }
-    if (alreadyOnDay) return
+    if (alreadyOnDay || wrongCity) return
     if (startTime && !isValidTime(startTime)) {
       setError({
         title: 'That start time was not read',
@@ -132,7 +140,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
             icon={<Icon name="add" size={18} />}
             loading={submitting}
             loadingLabel="Adding"
-            disabled={days.length === 0 || alreadyOnDay}
+            disabled={days.length === 0 || alreadyOnDay || wrongCity}
           >
             Add to itinerary
           </Button>
@@ -155,7 +163,11 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           </span>
         </p>
 
-        {days.length === 0 ? (
+        {wrongCity ? (
+          <Alert tone="warning" title={`${experience.name} is not in ${tripCity}`}>
+            {`It is in ${experience.city}, and ${trip.name} is going to ${tripCity}, so it cannot be added to this trip.`}
+          </Alert>
+        ) : days.length === 0 ? (
           <Alert
             tone="warning"
             title="This trip has no days yet"
@@ -196,7 +208,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           type="time"
           value={startTime}
           onChange={(event) => setStartTime(event.target.value)}
-          disabled={days.length === 0}
+          disabled={days.length === 0 || wrongCity}
           hint="Optional. Left empty, it goes after the day's last stop."
         />
 

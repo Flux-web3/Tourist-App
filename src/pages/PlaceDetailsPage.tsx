@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { AddToTripDialog } from '@/components/AddToTripDialog'
+import { PlaceImage } from '@/components/PlaceImage'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -8,7 +9,8 @@ import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
-import { Icon, MediaFrame } from '@/components/ui/Icon'
+import { Icon } from '@/components/ui/Icon'
+import { getDestination } from '@/data/destinations'
 import { formatDuration, formatShortDate } from '@/domain/format'
 import { formatPrice } from '@/domain/money'
 import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
@@ -111,6 +113,13 @@ export default function PlaceDetailsPage() {
   // figures, so this page never renders them as stars or a review count.
   const price = formatPrice(experience.isFree ? 0 : experience.priceFrom, experience.currency)
   const tripMissing = Boolean(tripParam) && hydrated && !trip
+  // A place only goes into a trip to its own city. A legacy trip with no
+  // catalogue destination (null) never matches, rather than being assumed to
+  // be wherever this place happens to be.
+  const tripMatches = trip ? trip.destinationId === experience.destinationId : false
+  const tripDestinationName = trip
+    ? (getDestination(trip.destinationId)?.city ?? (trip.destination.trim() || 'another destination'))
+    : ''
 
   return (
     <div className="flex flex-col gap-5">
@@ -143,12 +152,7 @@ export default function PlaceDetailsPage() {
       </p>
 
       <figure className="flex flex-col">
-        <MediaFrame
-          src={experience.imageUrl}
-          alt={experience.imageAlt}
-          ratio="16 / 9"
-          loading="eager"
-        />
+        <PlaceImage experience={experience} ratio="16 / 9" loading="eager" />
         {experience.imageCredit ? (
           <figcaption className="mt-2 break-words text-body-sm text-ink-subtle">
             {`Photo: ${experience.imageCredit.author} · `}
@@ -253,7 +257,21 @@ export default function PlaceDetailsPage() {
               </p>
             </div>
 
-            {trip ? (
+            {trip && !tripMatches ? (
+              <>
+                <p className="text-body-sm text-ink-muted">
+                  {`${experience.name} is in ${experience.city}, and ${trip.name} is going to ${tripDestinationName}, so it cannot be added to that trip.`}
+                </p>
+                <ButtonLink
+                  to={`/trips/${trip.id}/explore`}
+                  variant="secondary"
+                  fullWidth
+                  icon={<Icon name="travel_explore" size={18} />}
+                >
+                  {`Explore places for ${trip.name}`}
+                </ButtonLink>
+              </>
+            ) : trip ? (
               <Button
                 variant="primary"
                 fullWidth
@@ -283,7 +301,7 @@ export default function PlaceDetailsPage() {
         </div>
       </div>
 
-      {trip && addOpen ? (
+      {trip && tripMatches && addOpen ? (
         <AddToTripDialog
           trip={trip}
           experience={experience}

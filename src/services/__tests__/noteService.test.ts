@@ -14,6 +14,7 @@ const TRIP: Trip = {
   name: 'Paris in the Spring',
   origin: 'Lagos, Nigeria',
   destination: 'Paris, France',
+  destinationId: 'paris',
   startDate: '2026-04-01',
   endDate: '2026-04-05',
   travelers: 2,

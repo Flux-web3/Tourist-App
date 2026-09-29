@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { AddToTripDialog } from '@/components/AddToTripDialog'
+import { PlaceImage } from '@/components/PlaceImage'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
@@ -8,17 +9,26 @@ import { Card, PageHeader } from '@/components/ui/Card'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { CheckboxChipGroup, NumberField, RadioChipGroup, TextField } from '@/components/ui/Field'
-import { Icon, MediaFrame } from '@/components/ui/Icon'
-import { CATEGORIES } from '@/data/experiences'
+import { Icon } from '@/components/ui/Icon'
+import { getDestination, type Destination } from '@/data/destinations'
+import {
+  CATEGORIES,
+  GUIDE_CITY_LIST,
+  GUIDE_DESTINATIONS,
+  destinationHasPlaces,
+} from '@/data/experiences'
 import { formatShortDate } from '@/domain/format'
-import { formatPrice } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatPrice } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTrip } from '@/state/useTourist'
 import type { CatalogQuery } from '@/services/contracts'
-import type { Experience, ItineraryCategory, ItineraryDay } from '@/domain/types'
+import type { Experience, ItineraryCategory, ItineraryDay, Trip } from '@/domain/types'
 
 const DEBOUNCE_MS = 200
 const SKELETON_COUNT = 6
+
+/** The price cap's ceiling, in euro-level units, scaled by each city's price level. */
+const MAX_PRICE_REFERENCE = 500
 
 const FREE_ONLY_OPTIONS: ReadonlyArray<{ value: 'free'; label: string }> = [
   { value: 'free', label: 'Free only' },
@@ -27,8 +37,25 @@ const FREE_ONLY_OPTIONS: ReadonlyArray<{ value: 'free'; label: string }> = [
 const FREE_ONLY_SELECTED: readonly 'free'[] = ['free']
 const FREE_ONLY_CLEARED: readonly 'free'[] = []
 
-function resolveMaxPrice(freeOnly: boolean, maxPriceValue: number): number | null {
+const ALL_CITIES = 'all'
+
+const CITY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: ALL_CITIES, label: 'All cities' },
+  ...GUIDE_DESTINATIONS.map((destination) => ({ value: destination.id, label: destination.city })),
+]
+
+/**
+ * A price cap only means something inside one currency: 20 is a lunch in
+ * London and a bottle of water in Lagos. With no single city in scope the
+ * number is ignored, and the field is not shown at all.
+ */
+function resolveMaxPrice(
+  freeOnly: boolean,
+  maxPriceValue: number,
+  priced: Destination | null,
+): number | null {
   if (freeOnly) return 0
+  if (!priced) return null
   return maxPriceValue > 0 ? maxPriceValue : null
 }
 
@@ -58,12 +85,7 @@ function ExperienceCard({
   return (
     <li className="list-none">
       <Card as="article" className="flex h-full flex-col gap-3">
-        <MediaFrame
-          src={experience.imageUrl}
-          alt={experience.imageAlt}
-          ratio="4 / 3"
-          rounded="rounded-control"
-        />
+        <PlaceImage experience={experience} ratio="4 / 3" rounded="rounded-control" />
 
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
@@ -142,8 +164,51 @@ function ResultSkeleton() {
   )
 }
 
+/**
+ * A trip whose destination has no curated places. Says so plainly and never
+ * fills the gap with another city's places, which is exactly how a London
+ * trip used to end up browsing Paris.
+ */
+function NoGuideState({ trip, destination }: { trip: Trip; destination: Destination | null }) {
+  const title = destination
+    ? `Explore is still growing for ${destination.city}`
+    : `Explore does not cover ${trip.destination.trim() || 'this destination'} yet`
+  const description = destination
+    ? `Tourist does not have curated places in ${destination.city} yet, and it will not show places from other cities instead. You can still plan every day of ${trip.name} in the itinerary.`
+    : `${trip.name} was saved with a destination the guide does not recognise, so there are no curated places to show, and Tourist will not show places from another city instead. You can still plan every day in the itinerary.`
+
+  return (
+    <EmptyState
+      icon="travel_explore"
+      headingLevel={2}
+      title={title}
+      description={description}
+      action={
+        <ButtonLink
+          to={`/trips/${trip.id}/itinerary`}
+          variant="primary"
+          icon={<Icon name="calendar_month" size={18} />}
+        >
+          Open itinerary
+        </ButtonLink>
+      }
+    />
+  )
+}
+
+/**
+ * Explore is keyed on the trip and its destination, so moving from one trip to
+ * another (the route param changes, the page does not unmount) starts from a
+ * clean slate: no previous trip's results, price cap in the wrong currency,
+ * half-open add dialog or "added to" banner can carry over.
+ */
 export default function ExplorePage() {
   const { tripId } = useParams<{ tripId?: string }>()
+  const trip = useTrip(tripId)
+  return <ExploreView key={`${tripId ?? 'guide'}:${trip?.destinationId ?? ''}`} tripId={tripId} />
+}
+
+function ExploreView({ tripId }: { tripId: string | undefined }) {
   const { hydrated, actions } = useTourist()
   const trip = useTrip(tripId)
 
@@ -153,61 +218,108 @@ export default function ExplorePage() {
   const [maxPriceValue, setMaxPriceValue] = useState(0)
   const [freeOnly, setFreeOnly] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  /** The general guide's city choice. Inside a trip the trip decides. */
+  const [guideCity, setGuideCity] = useState<string>(ALL_CITIES)
   const filterPanelId = useId()
 
-  const [results, setResults] = useState<Experience[]>([])
-  const [loading, setLoading] = useState(true)
+  const [response, setResponse] = useState<{ query: CatalogQuery; results: Experience[] } | null>(null)
 
   const [addTarget, setAddTarget] = useState<Experience | null>(null)
   const [added, setAdded] = useState<{ name: string; day: ItineraryDay } | null>(null)
 
-  const maxPrice = resolveMaxPrice(freeOnly, maxPriceValue)
+  // The trip's destination is the only source of truth for what Explore shows
+  // inside a trip; the general guide lets the traveller pick a city.
+  const tripDestination = trip ? getDestination(trip.destinationId) : null
+  const tripHasGuide = trip ? destinationHasPlaces(trip.destinationId) : false
+  const scopeDestinationId: string | null | undefined = tripId
+    ? trip && tripHasGuide
+      ? trip.destinationId
+      : undefined
+    : guideCity === ALL_CITIES
+      ? null
+      : guideCity
+  // `undefined` means "nothing to search": a trip still loading, gone, or
+  // without a guide. Never null, which would be every city's places.
+  const searchable = scopeDestinationId !== undefined
+  const pricedDestination = getDestination(scopeDestinationId ?? null)
+
+  const maxPrice = resolveMaxPrice(freeOnly, maxPriceValue, pricedDestination)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedText(text), DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [text])
 
-  const query = useMemo<CatalogQuery>(
-    () => ({ text: debouncedText, category, maxPrice }),
-    [category, debouncedText, maxPrice],
+  const query = useMemo<CatalogQuery | null>(
+    () =>
+      scopeDestinationId === undefined
+        ? null
+        : { text: debouncedText, category, maxPrice, destinationId: scopeDestinationId },
+    [category, debouncedText, maxPrice, scopeDestinationId],
   )
 
   useEffect(() => {
+    if (!query) return
     let active = true
-    setLoading(true)
     void actions.searchExperiences(query).then((found) => {
       if (!active) return
-      setResults(found)
-      setLoading(false)
+      setResponse({ query, results: found })
     })
     return () => {
       active = false
     }
   }, [actions, query])
 
+  // Results only count for the query that produced them, so a response for an
+  // earlier query (another city, older text) is never on screen.
+  const current = query !== null && response?.query === query ? response : null
+  // Before hydration a trip page has nothing to search yet; it is loading, not empty.
+  const loading = current === null && (searchable || !hydrated)
+  const results = current?.results ?? []
+
+  const track = (next: Omit<CatalogQuery, 'destinationId'>) => {
+    actions.trackSearch({ ...next, destinationId: scopeDestinationId ?? null })
+  }
+
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    actions.trackSearch({ text, category, maxPrice })
+    track({ text, category, maxPrice })
   }
 
   const handleCategoryChange = (next: ItineraryCategory | 'all') => {
     setCategory(next)
-    actions.trackSearch({ text: debouncedText, category: next, maxPrice })
+    track({ text: debouncedText, category: next, maxPrice })
   }
 
   const handleMaxPriceChange = (next: number) => {
     setMaxPriceValue(next)
-    actions.trackSearch({ text: debouncedText, category, maxPrice: resolveMaxPrice(freeOnly, next) })
+    track({
+      text: debouncedText,
+      category,
+      maxPrice: resolveMaxPrice(freeOnly, next, pricedDestination),
+    })
   }
 
   const handleFreeOnlyChange = (values: 'free'[]) => {
     const nextFreeOnly = values.includes('free')
     setFreeOnly(nextFreeOnly)
+    track({
+      text: debouncedText,
+      category,
+      maxPrice: resolveMaxPrice(nextFreeOnly, maxPriceValue, pricedDestination),
+    })
+  }
+
+  const handleGuideCityChange = (next: string) => {
+    setGuideCity(next)
+    // A cap typed in one city's currency is meaningless in another's.
+    setMaxPriceValue(0)
+    const nextDestination = getDestination(next === ALL_CITIES ? null : next)
     actions.trackSearch({
       text: debouncedText,
       category,
-      maxPrice: resolveMaxPrice(nextFreeOnly, maxPriceValue),
+      maxPrice: resolveMaxPrice(freeOnly, 0, nextDestination),
+      destinationId: next === ALL_CITIES ? null : next,
     })
   }
 
@@ -217,14 +329,16 @@ export default function ExplorePage() {
     setCategory('all')
     setMaxPriceValue(0)
     setFreeOnly(false)
-    actions.trackSearch({ text: '', category: 'all', maxPrice: null })
+    track({ text: '', category: 'all', maxPrice: null })
   }
 
   const hasFilters = text.trim() !== '' || category !== 'all' || maxPrice !== null
 
   /** Filters hidden behind the collapsed control, so closing it never hides state. */
   const hiddenFilterCount =
-    (category === 'all' ? 0 : 1) + (freeOnly ? 1 : 0) + (!freeOnly && maxPriceValue > 0 ? 1 : 0)
+    (category === 'all' ? 0 : 1) +
+    (freeOnly ? 1 : 0) +
+    (!freeOnly && pricedDestination && maxPriceValue > 0 ? 1 : 0)
 
   const announcement = loading
     ? 'Searching places'
@@ -235,7 +349,7 @@ export default function ExplorePage() {
   if (tripId && hydrated && !trip) {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader title="Explore" description="The curated Paris guide." />
+        <PageHeader title="Explore" description={`Curated places in ${GUIDE_CITY_LIST}.`} />
         <EmptyState
           icon="search_off"
           title="We could not find that trip"
@@ -254,18 +368,36 @@ export default function ExplorePage() {
     )
   }
 
+  if (trip && !tripHasGuide) {
+    return (
+      <div className="flex flex-col gap-5">
+        <PageHeader
+          eyebrow={trip.name}
+          title="Explore"
+          description={`Curated guides cover ${GUIDE_CITY_LIST} so far.`}
+        />
+        <NoGuideState trip={trip} destination={tripDestination} />
+      </div>
+    )
+  }
+
+  const currency = pricedDestination?.currency
+  const currencySymbol = currency ? CURRENCY_SYMBOLS[currency] : undefined
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         eyebrow={trip ? trip.name : PROTOTYPE_LABEL.curatedGuide}
         title="Explore"
         description={
-          trip
-            ? `Curated Paris places you can add to any day of ${trip.name}.`
-            : 'Pick a trip to add places to a day.'
+          trip && tripDestination
+            ? `Curated ${tripDestination.city} places you can add to any day of ${trip.name}.`
+            : tripId
+              ? undefined
+              : `Curated places in ${GUIDE_CITY_LIST}. Pick a trip to add places to a day.`
         }
         actions={
-          trip ? undefined : (
+          tripId ? undefined : (
             <ButtonLink to="/trips" variant="secondary" icon={<Icon name="luggage" size={18} />}>
               Choose a trip
             </ButtonLink>
@@ -295,6 +427,16 @@ export default function ExplorePage() {
       ) : null}
 
       <div className="flex flex-col gap-3">
+        {tripId ? null : (
+          <RadioChipGroup<string>
+            legend="City"
+            name="explore-city"
+            value={guideCity}
+            options={CITY_OPTIONS}
+            onChange={handleGuideCityChange}
+          />
+        )}
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <form
             role="search"
@@ -336,17 +478,24 @@ export default function ExplorePage() {
         {filtersOpen ? (
           <div id={filterPanelId} className="surface-card flex flex-col gap-4 p-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <NumberField
-                label="Max price"
-                min={0}
-                max={500}
-                step={1}
-                value={maxPriceValue}
-                onValueChange={handleMaxPriceChange}
-                prefix={'€'}
-                suffix="EUR"
-                hint="Leave 0 for no upper limit."
-              />
+              {pricedDestination && currency ? (
+                <NumberField
+                  label="Max price"
+                  min={0}
+                  max={Math.round(MAX_PRICE_REFERENCE * pricedDestination.priceLevel)}
+                  step={pricedDestination.priceStep}
+                  value={maxPriceValue}
+                  onValueChange={handleMaxPriceChange}
+                  prefix={currencySymbol !== currency ? currencySymbol : undefined}
+                  suffix={currency}
+                  hint="Leave 0 for no upper limit."
+                />
+              ) : (
+                <p className="text-body-sm text-ink-muted">
+                  Pick a city to cap places by price. Each city is priced in its own currency, so
+                  one cap cannot cover them all.
+                </p>
+              )}
 
               <CheckboxChipGroup<'free'>
                 legend="Price filters"
@@ -381,7 +530,7 @@ export default function ExplorePage() {
           icon="auto_stories"
           summary="Curated demo catalogue, not live data"
         >
-          {`Every place here is hand-written prototype data rather than a live listings feed. Prices are estimates, opening hours are typical ranges, and nothing in this prototype can be booked or paid for. ${PROTOTYPE_LABEL.informationMayChange}.`}
+          {`Every place here is hand-written prototype data rather than a live listings feed. Prices are estimates in each city's own currency, opening hours are typical ranges, and nothing in this prototype can be booked or paid for. ${PROTOTYPE_LABEL.informationMayChange}.`}
         </Disclosure>
 
         {loading ? (
@@ -417,7 +566,11 @@ export default function ExplorePage() {
                 key={experience.id}
                 experience={experience}
                 tripId={trip?.id}
-                onAdd={trip ? () => setAddTarget(experience) : undefined}
+                onAdd={
+                  trip && experience.destinationId === trip.destinationId
+                    ? () => setAddTarget(experience)
+                    : undefined
+                }
               />
             ))}
           </ul>

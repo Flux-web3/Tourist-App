@@ -334,11 +334,14 @@ describe('TripOverviewPage', () => {
       const dialog = screen.getByRole('dialog', { name: 'Edit trip' })
       await user.clear(within(dialog).getByLabelText(/Trip name/))
       await user.clear(within(dialog).getByLabelText(/Destination/))
-      await user.type(within(dialog).getByLabelText(/Destination/), 'Lisbon, Portugal')
+      await user.type(within(dialog).getByLabelText(/Destination/), 'rome')
+      await user.click(within(dialog).getByRole('option', { name: /Rome/ }))
       await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
 
       const [trip] = readStoredState().trips
-      expect(trip.name).toMatch(/^Lisbon, Portugal in [A-Z][a-z]+$/)
+      // Named after the city alone, not "Rome, Italy in May".
+      expect(trip.name).toMatch(/^Rome in [A-Z][a-z]+$/)
+      expect(trip.destinationId).toBe('rome')
     })
 
     it('keeps the edit form open and explains what is wrong', async () => {
@@ -354,7 +357,7 @@ describe('TripOverviewPage', () => {
       expect(screen.getByRole('dialog', { name: 'Edit trip' })).toBeInTheDocument()
       const summary = within(screen.getByRole('alert'))
       expect(summary.getByText('1 field needs attention')).toBeInTheDocument()
-      expect(summary.getByText('Enter a destination with at least 2 characters.')).toBeInTheDocument()
+      expect(summary.getByText('Choose a destination from the list.')).toBeInTheDocument()
       expect(destination).toHaveAttribute('aria-invalid', 'true')
       expect(readStoredState().trips[0].destination).toBe('Paris, France')
     })

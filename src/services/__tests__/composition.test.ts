@@ -28,6 +28,7 @@ function draft(overrides: Partial<TripDraft> = {}): TripDraft {
     name: 'Paris in the Spring',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: START,
     endDate: END,
     travelers: 2,
@@ -128,7 +129,7 @@ describe('the composition root shape', () => {
   it('reaches a working place service through the contract', async () => {
     const places: PlaceService = createServices().places
 
-    const found = await places.search({ text: '', category: 'all' })
+    const found = await places.search({ text: '', category: 'all', destinationId: 'paris' })
     expect(found.length).toBeGreaterThan(0)
 
     const first = found[0]
@@ -359,6 +360,7 @@ describe('the composed end to end flow', () => {
       text: 'Eiffel',
       category: 'all',
       maxPrice: null,
+      destinationId: 'paris',
     })
 
     expect(results.map((experience) => experience.id)).toEqual(['exp_eiffel_tower'])

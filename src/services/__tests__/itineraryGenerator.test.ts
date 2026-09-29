@@ -18,6 +18,7 @@ const TRIP: Trip = {
   name: 'Paris in the Spring',
   origin: 'Lagos, Nigeria',
   destination: 'Paris, France',
+  destinationId: 'paris',
   startDate: START,
   endDate: LONG_END,
   travelers: 2,
@@ -30,6 +31,12 @@ const TRIP: Trip = {
   createdAt: '2026-03-15T09:30:00.000Z',
   updatedAt: '2026-03-15T09:30:00.000Z',
 }
+
+/**
+ * A trip saved before the destination catalogue whose typed destination names
+ * no catalogue city. It drafts from the generic bank at reference prices.
+ */
+const UNCATALOGUED: Trip = { ...TRIP, destination: 'Lisbon, Portugal', destinationId: null }
 
 const TIMESTAMP = '2026-03-15T09:30:01.400Z'
 
@@ -88,7 +95,7 @@ describe('buildItinerary', () => {
   })
 
   it('never repeats a template inside a single day for a generic destination', () => {
-    const days = buildItinerary({ ...TRIP, destination: 'Lisbon, Portugal' }, 0, TIMESTAMP)
+    const days = buildItinerary(UNCATALOGUED, 0, TIMESTAMP)
 
     expect(daysWithInternalDuplicate(days)).toEqual([])
   })
@@ -118,13 +125,15 @@ describe('buildItinerary', () => {
 })
 
 /**
- * The template costs are euro prices (the Eiffel Tower summit is 29), so a
- * generated stop is labelled `DRAFT_PRICE_CURRENCY` whatever the trip's own
- * currency. Labelling it with the trip's currency turned a EUR 29 ticket into
- * NGN 29. Nothing is converted: totals in another currency leave these out.
+ * A generated stop is priced in its destination's currency (Paris in euros,
+ * the Eiffel Tower summit at 29), never the trip's own: labelling it with the
+ * trip's currency turned a EUR 29 ticket into NGN 29. A trip with no catalogue
+ * destination keeps the reference prices, labelled `DRAFT_PRICE_CURRENCY`.
+ * Nothing the traveller entered is converted: totals in another currency
+ * leave these stops out.
  */
 describe('buildItinerary and the currency of a generated stop', () => {
-  it('labels drafts in euros, the currency the templates are priced in', () => {
+  it('keeps euros as the reference currency of the template bank', () => {
     expect(DRAFT_PRICE_CURRENCY).toBe('EUR')
   })
 
@@ -149,8 +158,8 @@ describe('buildItinerary and the currency of a generated stop', () => {
     }
   })
 
-  it('labels a generic destination the same way', () => {
-    const days = buildItinerary({ ...TRIP, destination: 'Lisbon, Portugal', currency: 'NGN' }, 0, TIMESTAMP)
+  it('labels a trip with no catalogue destination the same way', () => {
+    const days = buildItinerary({ ...UNCATALOGUED, currency: 'NGN' }, 0, TIMESTAMP)
 
     expect(days.flatMap((day) => day.items).every((item) => item.currency === DRAFT_PRICE_CURRENCY)).toBe(
       true,
@@ -232,22 +241,83 @@ describe('buildAlternativeItem and the currency of a swapped stop', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The schedule, table-driven: every length, pace and destination the product
-// offers, over several variants, with the trip currency rotating so the
-// currency rule is exercised on every plan too.
+// The schedule, table-driven: every length and pace the product offers, over
+// several variants and destinations (a standalone bank, both landmark banks,
+// generic-only catalogue cities and a trip with no catalogue destination),
+// with the trip currency rotating so the currency rule is exercised on every
+// plan too.
 // ---------------------------------------------------------------------------
 
 const LENGTHS = [1, 2, 3, 7, 14, 30] as const
 const PACES: readonly TravelPace[] = ['relaxed', 'balanced', 'packed']
 const VARIANTS = [0, 1, 2, 5] as const
-const CURRENCIES: readonly CurrencyCode[] = ['EUR', 'USD', 'GBP', 'NGN', 'JPY']
+const CURRENCIES: readonly CurrencyCode[] = ['EUR', 'USD', 'GBP', 'NGN', 'JPY', 'AED']
 
-const DESTINATIONS = [
+const GENERIC_EVENING = ['Dinner where the tables are local', 'Evening in the local bar scene']
+const GENERIC_ARRIVAL = 'Arrive and settle in'
+const GENERIC_DEPARTURE = 'Last look, then head out'
+
+const LONDON_LANDMARKS = [
+  'Full English at a neighbourhood café',
+  'Tower of London and the Crown Jewels',
+  'British Museum, Egyptian galleries and the Great Court',
+  'Westminster Abbey',
+  'Kew Gardens and the Palm House',
+  'Lunch at Borough Market',
+  'National Gallery highlights',
+  'Hyde Park and Kensington Gardens',
+  'Camden Market and the Regent’s Canal',
+  'Afternoon tea',
+  'South Bank walk to Tower Bridge',
+  'London Eye at dusk',
+  'A West End show',
+  'Historic pubs off Fleet Street',
+]
+
+const LAGOS_LANDMARKS = [
+  'Akara and pap breakfast',
+  'Lekki Conservation Centre canopy walkway',
+  'Lagos Island heritage walk and the Brazilian Quarter',
+  'Boat to Tarkwa Bay beach',
+  'Balogun Market fabric run',
+  'Nike Art Gallery',
+  'Amala and ewedu at a local buka',
+  'Kalakuta Republic Museum',
+  'Lekki Arts and Crafts Market',
+  'Lekki–Ikoyi Link Bridge at sunset',
+  'Evening at Freedom Park',
+  'A play at Terra Kulture',
+  'Suya supper on Victoria Island',
+  'Live Afrobeat at the New Afrika Shrine',
+]
+
+/** Anything Parisian that must never appear in a draft for anywhere else. */
+const PARIS_ISMS =
+  /Paris|Seine|arrondissement|Montmartre|Louvre|Orsay|Eiffel|Métro|€|Versailles|Marais|Saint-Germain|Luxembourg Gardens|Charles de Gaulle|\bCDG\b|Orly|\bRER\b/
+
+interface TableDestination {
+  destination: string
+  destinationId: string | null
+  /** The currency every stop must be priced in, whatever the trip's. */
+  currency: CurrencyCode
+  /** What local prices are rounded to (`Destination.priceStep`); 1 for reference prices. */
+  priceStep: number
+  arrival: string
+  departure: string
+  /** Templates that naturally start at or after 17:00. */
+  evening: readonly string[]
+  /** Curated stops, at least one of which every plan must contain. */
+  landmarks: readonly string[]
+}
+
+const DESTINATIONS: readonly TableDestination[] = [
   {
     destination: 'Paris, France',
+    destinationId: 'paris',
+    currency: 'EUR',
+    priceStep: 1,
     arrival: 'Arrive, drop bags, and walk the neighbourhood',
     departure: 'Check out, last coffee, and head for the airport',
-    /** Templates that naturally start at or after 17:00. */
     evening: [
       'Eiffel Tower summit slot',
       'Seine cruise from Pont de l’Alma',
@@ -255,16 +325,83 @@ const DESTINATIONS = [
       'Natural wine bar crawl',
       'Late set in a cellar jazz club',
     ],
+    landmarks: [],
+  },
+  {
+    destination: 'London, United Kingdom',
+    destinationId: 'london',
+    currency: 'GBP',
+    priceStep: 1,
+    arrival: 'Arrive via Heathrow or St Pancras and check in',
+    departure: 'Check out and head for Heathrow or St Pancras',
+    evening: [
+      'London Eye at dusk',
+      'A West End show',
+      'Historic pubs off Fleet Street',
+      'Dinner where the tables are local',
+    ],
+    landmarks: LONDON_LANDMARKS,
+  },
+  {
+    destination: 'Lagos, Nigeria',
+    destinationId: 'lagos',
+    currency: 'NGN',
+    priceStep: 500,
+    arrival: 'Arrive at Murtala Muhammed Airport and check in',
+    departure: 'Check out and head for Murtala Muhammed Airport',
+    evening: [
+      'Lekki–Ikoyi Link Bridge at sunset',
+      'Evening at Freedom Park',
+      'A play at Terra Kulture',
+      'Suya supper on Victoria Island',
+      'Live Afrobeat at the New Afrika Shrine',
+      'Dinner where the tables are local',
+    ],
+    landmarks: LAGOS_LANDMARKS,
+  },
+  {
+    destination: 'Tokyo, Japan',
+    destinationId: 'tokyo',
+    currency: 'JPY',
+    priceStep: 100,
+    arrival: GENERIC_ARRIVAL,
+    departure: GENERIC_DEPARTURE,
+    evening: GENERIC_EVENING,
+    landmarks: [],
+  },
+  {
+    destination: 'Dubai, United Arab Emirates',
+    destinationId: 'dubai',
+    currency: 'AED',
+    priceStep: 5,
+    arrival: GENERIC_ARRIVAL,
+    departure: GENERIC_DEPARTURE,
+    evening: GENERIC_EVENING,
+    landmarks: [],
+  },
+  {
+    destination: 'New York, United States',
+    destinationId: 'new-york',
+    currency: 'USD',
+    priceStep: 1,
+    arrival: GENERIC_ARRIVAL,
+    departure: GENERIC_DEPARTURE,
+    evening: GENERIC_EVENING,
+    landmarks: [],
   },
   {
     destination: 'Lisbon, Portugal',
-    arrival: 'Arrive and settle in',
-    departure: 'Last look, then head out',
-    evening: ['Dinner where the tables are local', 'Evening in the local bar scene'],
+    destinationId: null,
+    currency: DRAFT_PRICE_CURRENCY,
+    priceStep: 1,
+    arrival: GENERIC_ARRIVAL,
+    departure: GENERIC_DEPARTURE,
+    evening: GENERIC_EVENING,
+    landmarks: [],
   },
-] as const
+]
 
-/** Every stop that is about getting to or from the airport, in either bank. */
+/** Every stop that is about getting to or from the airport, in any bank. */
 const TRAVEL_STOPS = new Set<string>([
   ...DESTINATIONS.flatMap(({ arrival, departure }) => [arrival, departure]),
   'Airport transfer and check-in',
@@ -277,20 +414,22 @@ interface PlanCase {
   trip: Trip
   variant: number
   length: number
+  place: TableDestination
   arrival: string
   departure: string
   evening: ReadonlySet<string>
 }
 
-const CASES: PlanCase[] = DESTINATIONS.flatMap(({ destination, arrival, departure, evening }) =>
+const CASES: PlanCase[] = DESTINATIONS.flatMap((place) =>
   LENGTHS.flatMap((length) =>
     PACES.flatMap((pace) =>
       VARIANTS.map((variant, index): PlanCase => ({
-        label: `${destination} ${String(length)}d ${pace} v${String(variant)}`,
+        label: `${place.destination} ${String(length)}d ${pace} v${String(variant)}`,
         trip: {
           ...TRIP,
-          id: `trip_table_${destination.slice(0, 5)}_${String(length)}_${pace}`,
-          destination,
+          id: `trip_table_${place.destination.slice(0, 5)}_${String(length)}_${pace}`,
+          destination: place.destination,
+          destinationId: place.destinationId,
           startDate: START,
           endDate: addDays(START, length - 1),
           pace,
@@ -298,9 +437,10 @@ const CASES: PlanCase[] = DESTINATIONS.flatMap(({ destination, arrival, departur
         },
         variant,
         length,
-        arrival,
-        departure,
-        evening: new Set<string>(evening),
+        place,
+        arrival: place.arrival,
+        departure: place.departure,
+        evening: new Set<string>(place.evening),
       })),
     ),
   ),
@@ -347,11 +487,47 @@ describe('the draft schedule', () => {
     }
   })
 
-  it('labels every stop with the draft price currency, whatever the trip currency', () => {
+  it('prices every stop in the destination currency, whatever the trip currency', () => {
     for (const plan of PLANS) {
       const labels = new Set(plan.days.flatMap((day) => day.items.map((item) => item.currency)))
 
-      expect([...labels], `${plan.label} (${plan.trip.currency})`).toEqual([DRAFT_PRICE_CURRENCY])
+      expect([...labels], `${plan.label} (${plan.trip.currency})`).toEqual([plan.place.currency])
+    }
+  })
+
+  it('rounds every price to the destination price step, and JPY to whole yen', () => {
+    for (const plan of PLANS) {
+      const off = plan.days
+        .flatMap((day) => day.items)
+        .filter(
+          (item) =>
+            !Number.isInteger(item.estimatedCost) ||
+            item.estimatedCost < 0 ||
+            item.estimatedCost % plan.place.priceStep !== 0,
+        )
+        .map((item) => `${item.title} ${String(item.estimatedCost)}`)
+
+      expect(off, plan.label).toEqual([])
+    }
+  })
+
+  it('never puts anything Parisian in a plan for anywhere else', () => {
+    for (const plan of PLANS.filter((entry) => entry.place.destinationId !== 'paris')) {
+      const parisian = plan.days
+        .flatMap((day) => day.items)
+        .filter((item) => PARIS_ISMS.test(`${item.title} ${item.location} ${item.description}`))
+        .map((item) => `${item.title} @ ${item.location}`)
+
+      expect(parisian, plan.label).toEqual([])
+    }
+  })
+
+  it('includes at least one curated landmark in every London and Lagos plan', () => {
+    for (const plan of PLANS.filter((entry) => entry.place.landmarks.length > 0)) {
+      const landmarks = new Set(plan.place.landmarks)
+      const titles = plan.days.flatMap((day) => day.items.map((item) => item.title))
+
+      expect(titles.some((title) => landmarks.has(title)), plan.label).toBe(true)
     }
   })
 
@@ -419,9 +595,9 @@ describe('the draft schedule', () => {
   })
 
   /**
-   * Both banks hold at least twice the busiest day's ordinary stops (18 in
-   * Paris, 10 generic, against at most 5 a day), so no pair of adjacent days
-   * ever needs to share a stop.
+   * Every bank holds at least twice the busiest day's ordinary stops (18 in
+   * Paris, 20 in London, 19 in Lagos, 10 generic, against at most 5 a day), so
+   * no pair of adjacent days ever needs to share a stop.
    */
   it('never repeats a stop on two adjacent days', () => {
     for (const plan of PLANS) {
@@ -546,10 +722,29 @@ describe('buildAlternativeItem suggestions', () => {
     expect(wrong.slice(0, 5)).toEqual([])
   })
 
-  it('labels every alternative with the draft price currency', () => {
-    const labels = new Set(swaps.map(({ alternative }) => alternative.currency))
+  it('prices every alternative in the destination currency, on its price step', () => {
+    const wrong = swaps
+      .filter(
+        ({ plan, alternative }) =>
+          alternative.currency !== plan.place.currency ||
+          !Number.isInteger(alternative.estimatedCost) ||
+          alternative.estimatedCost % plan.place.priceStep !== 0,
+      )
+      .map(({ plan, alternative }) => `${plan.label}: ${alternative.title} ${String(alternative.estimatedCost)} ${alternative.currency}`)
 
-    expect([...labels]).toEqual([DRAFT_PRICE_CURRENCY])
+    expect(wrong.slice(0, 5)).toEqual([])
+  })
+
+  it('never suggests a Parisian stop for anywhere else', () => {
+    const parisian = swaps
+      .filter(
+        ({ plan, alternative }) =>
+          plan.place.destinationId !== 'paris' &&
+          PARIS_ISMS.test(`${alternative.title} ${alternative.location} ${alternative.description}`),
+      )
+      .map(({ plan, alternative }) => `${plan.label}: ${alternative.title}`)
+
+    expect(parisian.slice(0, 5)).toEqual([])
   })
 
   it('suggests the same stop for the same day, item and variant', () => {
@@ -577,5 +772,199 @@ describe('buildAlternativeItem suggestions', () => {
         expect(second.title).toBe(first.title)
       })
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Where a trip is comes from `destinationId`, never from the typed text. The
+// text used to be searched for "paris", so a London trip got the Paris guide
+// and every other trip got Paris-level euro prices.
+// ---------------------------------------------------------------------------
+
+describe('drafting by destination id', () => {
+  const titlesOn = (days: readonly ItineraryDay[]): string[][] =>
+    days.map((day) => day.items.map((item) => `${item.startTime} ${item.title}`))
+
+  /**
+   * Captured from the generator before drafting moved to destination ids: a
+   * Paris trip must draft exactly as it did. (A full before/after comparison
+   * over every length, pace and variant, swaps included, was byte-identical
+   * when the change was made; these rows keep it pinned.)
+   */
+  it('drafts Paris exactly as before', () => {
+    const days = buildItinerary(TRIP, 0, TIMESTAMP)
+
+    expect(titlesOn(days.slice(0, 3))).toEqual([
+      [
+        '15:00 Arrive, drop bags, and walk the neighbourhood',
+        '16:45 Atelier visit: a working studio',
+        '19:00 Eiffel Tower summit slot',
+      ],
+      [
+        '08:00 Montmartre before the crowds',
+        '10:15 Flat white and a pastry on a terrace',
+        '12:30 Market picnic in a park',
+        '14:00 Long lunch at a classic bistro',
+      ],
+      [
+        '08:00 Market breakfast and produce run',
+        '09:30 Louvre Museum, Denon wing highlights',
+        '11:45 Musée d’Orsay, impressionist floor',
+        '18:00 Seine cruise from Pont de l’Alma',
+        '20:00 Natural wine bar crawl',
+      ],
+    ])
+    expect(days[0].items.map((item) => item.estimatedCost)).toEqual([12, 35, 29])
+
+    const short = buildItinerary({ ...TRIP, endDate: '2026-04-03', pace: 'balanced' }, 1, TIMESTAMP)
+    expect(titlesOn(short)).toEqual([
+      ['15:00 Arrive, drop bags, and walk the neighbourhood', '16:45 Atelier visit: a working studio'],
+      [
+        '08:00 Montmartre before the crowds',
+        '10:15 Musée d’Orsay, impressionist floor',
+        '12:30 Market picnic in a park',
+        '17:00 Eiffel Tower summit slot',
+      ],
+      [
+        '08:30 Flat white and a pastry on a terrace',
+        '09:45 Check out, last coffee, and head for the airport',
+      ],
+    ])
+    expect(short.flatMap((day) => day.items).every((item) => item.currency === 'EUR')).toBe(true)
+
+    const swap = buildAlternativeItem(TRIP, days[1], days[1].items[0], 0, TIMESTAMP)
+    expect([swap.title, swap.startTime, swap.endTime, swap.currency]).toEqual([
+      'Le Marais courtyards and galleries',
+      '08:00',
+      '10:00',
+      'EUR',
+    ])
+  })
+
+  it('drafts a London trip as London even when its text says Paris', () => {
+    const trip: Trip = {
+      ...TRIP,
+      name: 'Paris in the Spring',
+      destination: 'Paris, France',
+      destinationId: 'london',
+      endDate: '2026-04-07',
+    }
+    const days = buildItinerary(trip, 0, TIMESTAMP)
+    const items = days.flatMap((day) => day.items)
+    const landmarks = new Set(LONDON_LANDMARKS)
+
+    expect(items[0].title).toBe('Arrive via Heathrow or St Pancras and check in')
+    expect(items[items.length - 1].title).toBe('Check out and head for Heathrow or St Pancras')
+    expect(items.filter((item) => landmarks.has(item.title)).length).toBeGreaterThan(5)
+    expect(items.every((item) => item.currency === 'GBP')).toBe(true)
+    expect(
+      items.filter((item) => PARIS_ISMS.test(`${item.title} ${item.location} ${item.description}`)),
+    ).toEqual([])
+
+    for (const day of days) {
+      for (const item of day.items) {
+        const swap = buildAlternativeItem(trip, day, item, 3, TIMESTAMP)
+        expect(swap.currency).toBe('GBP')
+        expect(PARIS_ISMS.test(`${swap.title} ${swap.location} ${swap.description}`), swap.title).toBe(false)
+      }
+    }
+  })
+
+  it('drafts a Paris trip as Paris even when its text says London', () => {
+    const days = buildItinerary({ ...TRIP, destination: 'London, United Kingdom' }, 0, TIMESTAMP)
+
+    expect(project(days)).toEqual(project(buildItinerary(TRIP, 0, TIMESTAMP)))
+  })
+
+  it('drafts a trip with no catalogue destination generically, in reference euros, whatever its text', () => {
+    const asLondon = buildItinerary(
+      { ...UNCATALOGUED, destination: 'London, United Kingdom', currency: 'GBP' },
+      0,
+      TIMESTAMP,
+    )
+    const asLisbon = buildItinerary(UNCATALOGUED, 0, TIMESTAMP)
+    const items = asLondon.flatMap((day) => day.items)
+    const landmarks = new Set(LONDON_LANDMARKS)
+
+    // The text is not read at all: the same trip under another name is the same plan.
+    expect(project(asLondon)).toEqual(project(asLisbon))
+    expect(items.every((item) => item.currency === DRAFT_PRICE_CURRENCY)).toBe(true)
+    expect(items[0].title).toBe(GENERIC_ARRIVAL)
+    // Nothing names a city, London or otherwise.
+    expect(
+      items.filter((item) => /London|Heathrow|Paris/.test(`${item.title} ${item.location} ${item.description}`)),
+    ).toEqual([])
+    expect(items.some((item) => landmarks.has(item.title))).toBe(false)
+  })
+
+  it('names the city in generic locations for a catalogue destination', () => {
+    const days = buildItinerary({ ...TRIP, destinationId: 'tokyo', destination: 'Tokyo, Japan' }, 0, TIMESTAMP)
+    const items = days.flatMap((day) => day.items)
+
+    expect(items.length).toBeGreaterThan(50)
+    expect(items.filter((item) => !item.location.includes('Tokyo')).map((item) => item.location)).toEqual([])
+  })
+
+  /**
+   * Generic reference prices scaled by the destination's price level and
+   * rounded to its step: breakfast (12), market lunch (16), museum (18),
+   * dinner (30), and the old town walk, which stays free.
+   */
+  it('converts generic reference prices into local estimates on the price step', () => {
+    const expected: Record<string, Record<string, number>> = {
+      tokyo: {
+        'Breakfast where the locals eat': 1800,
+        'Covered market lunch': 2400,
+        'City museum, highlights floor': 2700,
+        'Old town walking loop': 0,
+      },
+      dubai: {
+        'Breakfast where the locals eat': 55,
+        'Covered market lunch': 70,
+        'City museum, highlights floor': 80,
+      },
+      'new-york': {
+        'Breakfast where the locals eat': 14,
+        'Covered market lunch': 19,
+        'City museum, highlights floor': 22,
+      },
+      lagos: { 'City museum, highlights floor': 16000, 'Dinner where the tables are local': 27000 },
+      london: { 'Dinner where the tables are local': 27, 'Old town walking loop': 0 },
+    }
+
+    for (const [destinationId, prices] of Object.entries(expected)) {
+      const seen = new Map<string, Set<number>>()
+      for (const variant of [0, 1, 2, 3]) {
+        const trip: Trip = { ...TRIP, destinationId, interests: [] }
+        for (const item of buildItinerary(trip, variant, TIMESTAMP).flatMap((day) => day.items)) {
+          if (!(item.title in prices)) continue
+          seen.set(item.title, (seen.get(item.title) ?? new Set<number>()).add(item.estimatedCost))
+        }
+      }
+
+      for (const [title, price] of Object.entries(prices)) {
+        expect([...(seen.get(title) ?? [])], `${destinationId}: ${title}`).toEqual([price])
+      }
+    }
+  })
+
+  it('opens and closes a one-day London or Lagos trip on its own airports, with a landmark between', () => {
+    for (const place of DESTINATIONS.filter((entry) => entry.landmarks.length > 0)) {
+      for (const variant of [0, 1, 2, 3, 4, 5, 6, 7]) {
+        const label = `${place.destination} v${String(variant)}`
+        const trip: Trip = {
+          ...TRIP,
+          destinationId: place.destinationId,
+          startDate: START,
+          endDate: START,
+          pace: 'relaxed',
+        }
+        const titles = buildItinerary(trip, variant, TIMESTAMP)[0].items.map((item) => item.title)
+
+        expect(titles[0], label).toBe(place.arrival)
+        expect(titles[titles.length - 1], label).toBe(place.departure)
+        expect(titles.some((title) => place.landmarks.includes(title)), label).toBe(true)
+      }
+    }
   })
 })

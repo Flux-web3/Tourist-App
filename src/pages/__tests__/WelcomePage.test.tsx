@@ -89,6 +89,8 @@ describe('WelcomePage', () => {
         name: 'My Own Trip',
         origin: 'Accra, Ghana',
         destination: 'Lisbon, Portugal',
+        // Not a catalogue city: a trip saved before destinations were listed.
+        destinationId: null,
         startDate: '2026-03-01',
         endDate: '2026-03-05',
         travelers: 1,

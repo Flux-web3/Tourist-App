@@ -1,14 +1,23 @@
+import { DESTINATIONS, getDestination, type Destination } from '@/data/destinations'
 import type { Experience, ImageCredit, ItineraryCategory } from '@/domain/types'
 
 /**
  * Curated demo catalogue.
  *
- * Every record is local, hand-written data for a Paris prototype: prices are
- * estimates, ratings are illustrative demo figures, and opening hours are
- * typical ranges rather than live availability. The UI labels this as a demo
- * catalogue so nothing reads as a live booking quote.
+ * Every record is local, hand-written data about a real place: prices are
+ * round "from" estimates in the destination's own currency, and opening hours
+ * are typical ranges rather than live availability. The UI labels this as a
+ * demo catalogue so nothing reads as a live booking quote.
  *
- * Photography comes from Wikimedia Commons and is attributed per record.
+ * Every place belongs to exactly one destination (`destinationId`), and Explore
+ * inside a trip only ever shows the trip's destination. Only Paris, London and
+ * Lagos have places; the other catalogue destinations intentionally have none
+ * yet, and Explore says so rather than borrowing another city's places.
+ *
+ * Paris photography comes from Wikimedia Commons and is attributed per record.
+ * London and Lagos have no licensed photos in `public/images`, so those
+ * records have `imageUrl: null` and render a drawn cover described by
+ * `imageAlt`, never a photo of somewhere else.
  */
 
 interface SeedImage {
@@ -134,15 +143,33 @@ interface SeedSpec {
   durationMinutes: number
   priceFrom: number
   isFree?: boolean
-  rating: number
-  reviewCount: number
-  image: ImageKey
+  /**
+   * `rating` and `reviewCount` are on the record type but invented, so the UI
+   * never displays them. The Paris figures predate that decision and only
+   * break ties in search ordering; newer records leave them at zero rather
+   * than invent more.
+   */
+  rating?: number
+  reviewCount?: number
+  /** A licensed photo from `IMAGES`, or null for a drawn cover described by `coverAlt`. */
+  image: ImageKey | null
+  coverAlt?: string
   tags: string[]
   hoursNote: string
   bestTime: string
 }
 
-const SEED_SPECS: SeedSpec[] = [
+/**
+ * The places of one destination. City, country and currency are not written
+ * per record: they come from the destination, so a place can never carry a
+ * currency or city that disagrees with the destination it is filed under.
+ */
+interface SeedGroup {
+  destinationId: string
+  specs: SeedSpec[]
+}
+
+const PARIS_SPECS: SeedSpec[] = [
   {
     id: 'exp_eiffel_tower',
     name: 'Eiffel Tower Summit',
@@ -389,32 +416,310 @@ const SEED_SPECS: SeedSpec[] = [
   },
 ]
 
-export const EXPERIENCES: Experience[] = SEED_SPECS.map((spec) => ({
-  id: spec.id,
-  name: spec.name,
-  city: 'Paris',
-  country: 'France',
-  neighborhood: spec.neighborhood,
-  category: spec.category,
-  summary: spec.summary,
-  description: spec.description,
-  durationMinutes: spec.durationMinutes,
-  priceFrom: spec.priceFrom,
-  currency: 'EUR',
-  isFree: spec.isFree ?? spec.priceFrom === 0,
-  rating: spec.rating,
-  reviewCount: spec.reviewCount,
-  imageUrl: IMAGES[spec.image].url,
-  imageAlt: IMAGES[spec.image].alt,
-  imageCredit: IMAGES[spec.image].credit,
-  tags: spec.tags,
-  hoursNote: spec.hoursNote,
-  bestTime: spec.bestTime,
-}))
+// London prices are round GBP "from" estimates for one adult. The big free
+// museums are genuinely free to enter, so they are marked free.
+const LONDON_SPECS: SeedSpec[] = [
+  {
+    id: 'exp_london_tower_of_london',
+    name: 'Tower of London',
+    neighborhood: 'Tower Hill',
+    category: 'sightseeing',
+    summary: 'The Crown Jewels, the White Tower and a Yeoman Warder tour.',
+    description:
+      'Nearly a thousand years of fortress by the Thames. See the Crown Jewels first, before the queue builds, then join a Yeoman Warder tour and finish with a walk across Tower Bridge.',
+    durationMinutes: 180,
+    priceFrom: 35,
+    image: null,
+    coverAlt: 'A drawn cover for the Tower of London, not a photograph',
+    tags: ['castle', 'history', 'crown jewels'],
+    hoursNote: 'Demo hours: roughly 09:00 - 17:30, shorter in winter',
+    bestTime: 'Morning, at opening',
+  },
+  {
+    id: 'exp_london_british_museum',
+    name: 'British Museum',
+    neighborhood: 'Bloomsbury',
+    category: 'culture',
+    summary: 'The Rosetta Stone, the Parthenon sculptures and the Great Court.',
+    description:
+      'Free to enter and far too big for one visit. Pick two or three galleries, start under the glass roof of the Great Court, and leave the special exhibitions for another day.',
+    durationMinutes: 150,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for the British Museum, not a photograph',
+    tags: ['museum', 'free', 'history'],
+    hoursNote: 'Demo hours: roughly 10:00 - 17:00 daily, later on Fridays',
+    bestTime: 'Weekday morning',
+  },
+  {
+    id: 'exp_london_borough_market',
+    name: 'Borough Market',
+    neighborhood: 'Southwark',
+    category: 'food',
+    summary: 'London’s best-known food market, a few steps from London Bridge.',
+    description:
+      'Free to wander; the estimate is a street-food lunch. Graze the stalls under the railway arches, then walk it off along the South Bank towards Tate Modern.',
+    durationMinutes: 90,
+    priceFrom: 15,
+    image: null,
+    coverAlt: 'A drawn cover for Borough Market, not a photograph',
+    tags: ['market', 'street food', 'lunch'],
+    hoursNote: 'Demo hours: roughly 10:00 - 17:00, shorter on Sundays',
+    bestTime: 'Late morning, before the lunch rush',
+  },
+  {
+    id: 'exp_london_hyde_park',
+    name: 'Hyde Park & Kensington Gardens',
+    neighborhood: 'Hyde Park',
+    category: 'outdoors',
+    summary: 'The Serpentine, the Italian Gardens and a long green walk west.',
+    description:
+      'Walk from Speakers’ Corner along the Serpentine to Kensington Gardens. Deckchairs and boats cost extra in season; the park itself is free.',
+    durationMinutes: 120,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for Hyde Park and Kensington Gardens, not a photograph',
+    tags: ['free', 'park', 'relaxed'],
+    hoursNote: 'Demo hours: roughly 05:00 - midnight daily',
+    bestTime: 'Afternoon',
+  },
+  {
+    id: 'exp_london_tate_modern',
+    name: 'Tate Modern',
+    neighborhood: 'Bankside',
+    category: 'culture',
+    summary: 'Modern and contemporary art inside a former power station.',
+    description:
+      'The collection displays are free; ticketed exhibitions cost extra. Go up to the viewing level for a view across the Thames to St Paul’s, then cross the Millennium Bridge.',
+    durationMinutes: 120,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for Tate Modern, not a photograph',
+    tags: ['museum', 'free', 'modern art'],
+    hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    bestTime: 'Late afternoon',
+  },
+  {
+    id: 'exp_london_camden_market',
+    name: 'Camden Market',
+    neighborhood: 'Camden Town',
+    category: 'shopping',
+    summary: 'Stalls, vintage clothes and food by the Regent’s Canal locks.',
+    description:
+      'Free to browse. Work through the stalls around Camden Lock, then follow the Regent’s Canal towpath for a quieter walk away from the crowds.',
+    durationMinutes: 120,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for Camden Market, not a photograph',
+    tags: ['free', 'market', 'vintage'],
+    hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    bestTime: 'Weekday, to avoid the weekend crowds',
+  },
+  {
+    id: 'exp_london_west_end_show',
+    name: 'West End Theatre Night',
+    neighborhood: 'Covent Garden & Soho',
+    category: 'nightlife',
+    summary: 'A musical or play in Theatreland, from an upper-circle seat.',
+    description:
+      'Book ahead for the big musicals, or try the TKTS booth in Leicester Square for same-day seats. The estimate is an upper-circle ticket; stalls seats cost far more.',
+    durationMinutes: 180,
+    priceFrom: 30,
+    image: null,
+    coverAlt: 'A drawn cover for a West End theatre night, not a photograph',
+    tags: ['theatre', 'evening', 'musicals'],
+    hoursNote: 'Demo hours: evening shows typically from 19:30, some matinées',
+    bestTime: 'Evening',
+  },
+  {
+    id: 'exp_london_westminster_abbey',
+    name: 'Westminster Abbey',
+    neighborhood: 'Westminster',
+    category: 'sightseeing',
+    summary: 'Coronation church, royal tombs and Poets’ Corner.',
+    description:
+      'Follow the included audio guide through the royal tombs and Poets’ Corner, then walk out past the Houses of Parliament and across Westminster Bridge.',
+    durationMinutes: 90,
+    priceFrom: 30,
+    image: null,
+    coverAlt: 'A drawn cover for Westminster Abbey, not a photograph',
+    tags: ['church', 'history', 'architecture'],
+    hoursNote: 'Demo hours: roughly 09:30 - 15:30 Mon - Sat, services only on Sundays',
+    bestTime: 'Weekday morning',
+  },
+]
+
+// Lagos prices are round NGN "from" estimates for one visitor. Entry fees
+// there change often, so every figure is a rough guide at best.
+const LAGOS_SPECS: SeedSpec[] = [
+  {
+    id: 'exp_lagos_lekki_conservation_centre',
+    name: 'Lekki Conservation Centre',
+    neighborhood: 'Lekki',
+    category: 'outdoors',
+    summary: 'Boardwalks through the wetland and a long canopy walkway.',
+    description:
+      'A protected patch of wetland and forest on the Lekki peninsula. Walk the boardwalks looking for monkeys and birds, then take on the canopy walkway if you have a head for heights.',
+    durationMinutes: 150,
+    priceFrom: 5000,
+    image: null,
+    coverAlt: 'A drawn cover for the Lekki Conservation Centre, not a photograph',
+    tags: ['nature', 'canopy walk', 'wildlife'],
+    hoursNote: 'Demo hours: roughly 08:00 - 17:00 daily',
+    bestTime: 'Early morning, before the heat',
+  },
+  {
+    id: 'exp_lagos_nike_art_gallery',
+    name: 'Nike Art Gallery',
+    neighborhood: 'Lekki',
+    category: 'culture',
+    summary: 'Several floors of Nigerian art, from adire textiles to painting.',
+    description:
+      'One of the largest art galleries in West Africa, and free to walk through. Every wall and stairwell is hung, and the textiles alone are worth the visit.',
+    durationMinutes: 90,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for Nike Art Gallery, not a photograph',
+    tags: ['free', 'art', 'textiles'],
+    hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    bestTime: 'Late morning',
+  },
+  {
+    id: 'exp_lagos_lekki_arts_market',
+    name: 'Lekki Arts & Crafts Market',
+    neighborhood: 'Lekki',
+    category: 'shopping',
+    summary: 'Carvings, beadwork and fabric, with room to bargain.',
+    description:
+      'Free to browse, and bargaining is expected. Stalls sell carvings, beadwork, leather and fabrics; agree a price before anything is wrapped.',
+    durationMinutes: 90,
+    priceFrom: 0,
+    isFree: true,
+    image: null,
+    coverAlt: 'A drawn cover for the Lekki Arts and Crafts Market, not a photograph',
+    tags: ['free', 'market', 'crafts'],
+    hoursNote: 'Demo hours: roughly 09:00 - 18:00 daily',
+    bestTime: 'Morning',
+  },
+  {
+    id: 'exp_lagos_tarkwa_bay',
+    name: 'Tarkwa Bay Beach',
+    neighborhood: 'Lagos Harbour',
+    category: 'outdoors',
+    summary: 'A sheltered beach reached only by boat across the harbour.',
+    description:
+      'Take a boat from a jetty on Lagos Island or Victoria Island to a calmer, sheltered beach. The estimate is the return boat ride; loungers and food cost extra.',
+    durationMinutes: 300,
+    priceFrom: 8000,
+    image: null,
+    coverAlt: 'A drawn cover for Tarkwa Bay Beach, not a photograph',
+    tags: ['beach', 'boat', 'day out'],
+    hoursNote: 'Demo hours: boats roughly 08:00 - 17:00, daylight only',
+    bestTime: 'Weekday, arriving mid-morning',
+  },
+  {
+    id: 'exp_lagos_new_afrika_shrine',
+    name: 'New Afrika Shrine',
+    neighborhood: 'Ikeja',
+    category: 'nightlife',
+    summary: 'Live Afrobeat at the venue the Kuti family runs.',
+    description:
+      'The home of Afrobeat, run by Fela Kuti’s children. Go on a show night for a long, loud set; the estimate is the door charge on those nights.',
+    durationMinutes: 240,
+    priceFrom: 3000,
+    image: null,
+    coverAlt: 'A drawn cover for the New Afrika Shrine, not a photograph',
+    tags: ['live music', 'afrobeat', 'evening'],
+    hoursNote: 'Demo hours: evenings, with live shows typically late on weekends',
+    bestTime: 'Weekend night',
+  },
+  {
+    id: 'exp_lagos_glover_court_suya',
+    name: 'Glover Court Suya',
+    neighborhood: 'Ikoyi',
+    category: 'food',
+    summary: 'Spiced grilled suya from one of Lagos’s best-known spots.',
+    description:
+      'Thin-sliced beef dusted in yaji spice, grilled and wrapped in paper with onions and pepper. Order by the portion and eat it while it is hot.',
+    durationMinutes: 45,
+    priceFrom: 5000,
+    image: null,
+    coverAlt: 'A drawn cover for Glover Court Suya, not a photograph',
+    tags: ['street food', 'suya', 'evening'],
+    hoursNote: 'Demo hours: roughly 17:00 - 23:00, evenings only',
+    bestTime: 'Evening',
+  },
+]
+
+const SEED_GROUPS: readonly SeedGroup[] = [
+  { destinationId: 'paris', specs: PARIS_SPECS },
+  { destinationId: 'london', specs: LONDON_SPECS },
+  { destinationId: 'lagos', specs: LAGOS_SPECS },
+]
+
+function buildExperience(destination: Destination, spec: SeedSpec): Experience {
+  const image = spec.image === null ? null : IMAGES[spec.image]
+  return {
+    id: spec.id,
+    name: spec.name,
+    destinationId: destination.id,
+    city: destination.city,
+    country: destination.country,
+    neighborhood: spec.neighborhood,
+    category: spec.category,
+    summary: spec.summary,
+    description: spec.description,
+    durationMinutes: spec.durationMinutes,
+    priceFrom: spec.priceFrom,
+    currency: destination.currency,
+    isFree: spec.isFree ?? spec.priceFrom === 0,
+    rating: spec.rating ?? 0,
+    reviewCount: spec.reviewCount ?? 0,
+    imageUrl: image?.url ?? null,
+    imageAlt: image?.alt ?? spec.coverAlt ?? `A drawn cover for ${spec.name}, not a photograph`,
+    imageCredit: image?.credit ?? null,
+    tags: spec.tags,
+    hoursNote: spec.hoursNote,
+    bestTime: spec.bestTime,
+  }
+}
+
+export const EXPERIENCES: Experience[] = SEED_GROUPS.flatMap(({ destinationId, specs }) => {
+  const destination = getDestination(destinationId)
+  // Fails at import, so in every test run, rather than filing places under a
+  // destination that does not exist.
+  if (!destination) throw new Error(`Unknown destination for catalogue places: ${destinationId}`)
+  return specs.map((spec) => buildExperience(destination, spec))
+})
 
 export const EXPERIENCES_BY_ID: ReadonlyMap<string, Experience> = new Map(
   EXPERIENCES.map((experience) => [experience.id, experience]),
 )
+
+const DESTINATION_IDS_WITH_PLACES: ReadonlySet<string> = new Set(
+  EXPERIENCES.map((experience) => experience.destinationId),
+)
+
+/** Whether Explore has any curated places for this destination. False for null. */
+export function destinationHasPlaces(destinationId: string | null | undefined): boolean {
+  return typeof destinationId === 'string' && DESTINATION_IDS_WITH_PLACES.has(destinationId)
+}
+
+/** Destinations with at least one place, in catalogue order: the guide's cities. */
+export const GUIDE_DESTINATIONS: readonly Destination[] = DESTINATIONS.filter((destination) =>
+  DESTINATION_IDS_WITH_PLACES.has(destination.id),
+)
+
+/** "Paris, London and Lagos": the guide's cities as one phrase, derived from the data. */
+export const GUIDE_CITY_LIST: string = new Intl.ListFormat('en-GB', {
+  style: 'long',
+  type: 'conjunction',
+}).format(GUIDE_DESTINATIONS.map((destination) => destination.city))
 
 export const CATEGORIES: ReadonlyArray<{ value: ItineraryCategory | 'all'; label: string }> = [
   { value: 'all', label: 'All' },

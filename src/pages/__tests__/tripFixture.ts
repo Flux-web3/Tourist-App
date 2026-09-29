@@ -78,6 +78,7 @@ export function makeFixtureTrip(overrides: Partial<Trip> = {}): Trip {
     name: 'Paris in the Spring',
     origin: 'Lagos, Nigeria',
     destination: 'Paris, France',
+    destinationId: 'paris',
     startDate: FIXTURE_DAY_ONE_DATE,
     endDate: addDays(FIXTURE_DAY_ONE_DATE, 1),
     travelers: 2,

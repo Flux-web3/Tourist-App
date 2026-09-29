@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { PlaceImage } from '@/components/PlaceImage'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card } from '@/components/ui/Card'
-import { Icon, MediaFrame } from '@/components/ui/Icon'
-import { EXPERIENCES } from '@/data/experiences'
+import { Icon } from '@/components/ui/Icon'
+import { EXPERIENCES, EXPERIENCES_BY_ID, GUIDE_CITY_LIST } from '@/data/experiences'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist } from '@/state/useTourist'
 
-const FEATURED = EXPERIENCES[0]
+// The hero pairs with the sample trip below (Lagos to Paris), so it is that
+// trip's destination, by id rather than by catalogue position.
+const FEATURED = EXPERIENCES_BY_ID.get('exp_eiffel_tower') ?? EXPERIENCES[0]
 
 const STEPS = [
   {
@@ -46,7 +49,7 @@ const AREAS = [
   {
     icon: 'explore',
     name: 'Explore',
-    description: 'A curated Paris guide you can drop into any day, with every price marked as an estimate.',
+    description: `Curated guides for ${GUIDE_CITY_LIST} you can drop into any day, with every price marked as an estimate.`,
   },
   {
     icon: 'sticky_note_2',
@@ -73,7 +76,7 @@ const NOT_ABILITIES = [
   'It does not book anything, hold a seat or take a payment.',
   'Prices and itineraries are estimates, not quotes. Nothing here is a live fare.',
   'There is no account and no server. Everything stays in this browser.',
-  'The Explore catalog is a fixed set of Paris places, not a live listing.',
+  `The Explore catalog is a small, fixed set of places in ${GUIDE_CITY_LIST}, not a live listing. Other destinations have no places yet.`,
   'It does not convert between currencies.',
 ] as const
 
@@ -265,9 +268,8 @@ export default function LandingPage() {
             </div>
 
             <figure className="flex flex-col gap-2">
-              <MediaFrame
-                src={FEATURED.imageUrl}
-                alt={FEATURED.imageAlt}
+              <PlaceImage
+                experience={FEATURED}
                 ratio="4 / 3"
                 rounded="rounded-sheet"
                 loading="eager"

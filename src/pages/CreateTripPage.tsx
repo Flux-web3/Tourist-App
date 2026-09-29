@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
+import { DestinationCombobox } from '@/components/ui/DestinationCombobox'
 import { Disclosure } from '@/components/ui/Disclosure'
 import {
   CheckboxChipGroup,
@@ -14,6 +15,7 @@ import {
   TextField,
 } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
+import type { Destination } from '@/data/destinations'
 import { addDays, formatDateRange, todayISO, tripLengthInDays } from '@/domain/format'
 import { CURRENCIES, CURRENCY_SYMBOLS } from '@/domain/money'
 import {
@@ -55,6 +57,12 @@ export default function CreateTripPage() {
   const [errors, setErrors] = useState<TripDraftErrors>({})
   const [submitted, setSubmitted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  /**
+   * Choosing a destination proposes its currency (London, GBP) until the
+   * traveller picks a currency themselves; after that their choice stands,
+   * whatever city they switch to.
+   */
+  const [currencyChosen, setCurrencyChosen] = useState(false)
   const formId = useId()
   const summaryRef = useRef<HTMLDivElement>(null)
 
@@ -86,7 +94,7 @@ export default function CreateTripPage() {
     setIsSubmitting(true)
     const trip = actions.createTrip({
       ...draft,
-      name: draft.name.trim() || suggestTripName(draft.destination, draft.startDate),
+      name: draft.name.trim() || suggestTripName(draft.destination, draft.startDate, draft.destinationId),
     })
     navigate(`/trips/${trip.id}/itinerary`)
   }
@@ -109,9 +117,19 @@ export default function CreateTripPage() {
   const isPresetActive = (days: number) =>
     draft.startDate === today && draft.endDate === addDays(today, days - 1)
 
+  const suggestedName = suggestTripName(draft.destination, draft.startDate, draft.destinationId)
+
   const applySuggestedName = useCallback(() => {
-    update({ name: suggestTripName(draft.destination, draft.startDate) })
-  }, [draft.destination, draft.startDate, update])
+    update({ name: suggestedName })
+  }, [suggestedName, update])
+
+  const selectDestination = (destination: Destination | null) => {
+    update({
+      destinationId: destination?.id ?? null,
+      destination: destination?.displayName ?? '',
+      ...(destination && !currencyChosen ? { currency: destination.currency } : {}),
+    })
+  }
 
   /*
     The only two optional answers on the form, and the only two that the
@@ -129,7 +147,7 @@ export default function CreateTripPage() {
           label="Trip name"
           value={draft.name}
           maxLength={TRIP_LIMITS.maxNameLength}
-          placeholder={suggestTripName(draft.destination, draft.startDate)}
+          placeholder={suggestedName}
           error={errors.name}
           hint="Leave blank and we name it after the destination and month."
           onChange={(event) => update({ name: event.target.value })}
@@ -208,14 +226,12 @@ export default function CreateTripPage() {
               onChange={(event) => update({ origin: event.target.value })}
             />
 
-            <TextField
+            <DestinationCombobox
               label="Destination"
               required
-              value={draft.destination}
-              maxLength={80}
-              placeholder="Paris, France"
+              value={draft.destinationId}
               error={errors.destination}
-              onChange={(event) => update({ destination: event.target.value })}
+              onSelect={selectDestination}
             />
           </div>
 
@@ -324,7 +340,10 @@ export default function CreateTripPage() {
               options={CURRENCY_OPTIONS}
               value={draft.currency}
               error={errors.currency}
-              onChange={(event) => update({ currency: event.target.value as CurrencyCode })}
+              onChange={(event) => {
+                setCurrencyChosen(true)
+                update({ currency: event.target.value as CurrencyCode })
+              }}
             />
           </div>
 

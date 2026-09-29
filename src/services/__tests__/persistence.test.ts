@@ -40,6 +40,7 @@ function makeTrip(id: string, currency: CurrencyCode, overrides: Partial<Trip> =
     name: `Trip ${id}`,
     origin: 'Lagos, Nigeria',
     destination: `Destination of ${id}`,
+    destinationId: null,
     startDate: '2026-04-01',
     endDate: '2026-04-02',
     travelers: 2,
@@ -136,7 +137,15 @@ function twoTripState(): PersistedState {
   return {
     version: STORAGE_VERSION,
     user: createGuestUser({ id: USER_ID, name: 'Adaeze N.' }),
-    trips: [makeTrip(PARIS, 'EUR'), makeTrip(TOKYO, 'JPY', { budget: 250000, travelers: 1 })],
+    trips: [
+      makeTrip(PARIS, 'EUR', { destination: 'Paris, France', destinationId: 'paris' }),
+      makeTrip(TOKYO, 'JPY', {
+        destination: 'Tokyo, Japan',
+        destinationId: 'tokyo',
+        budget: 250000,
+        travelers: 1,
+      }),
+    ],
     daysByTrip: {
       [PARIS]: [
         makeDay(PARIS, 1, [makeItem(PARIS, 'itm_p1', 'EUR'), makeItem(PARIS, 'itm_p2', 'EUR')]),
@@ -174,11 +183,22 @@ function raw(state: unknown): RawRecord {
 }
 
 /**
- * The same snapshot as a v1 build would have written it: `version: 1` and no
- * `currency` on any itinerary item, because the field did not exist yet.
+ * The same snapshot as a v2 build would have written it: `version: 2` and no
+ * `destinationId` on any trip, because destinations were free text.
+ */
+function asV2(state: PersistedState): RawRecord {
+  const copy = raw(state)
+  copy.version = 2
+  for (const trip of copy.trips as RawRecord[]) delete trip.destinationId
+  return copy
+}
+
+/**
+ * The same snapshot as a v1 build would have written it: the v2 shape, at
+ * `version: 1`, and no `currency` on any itinerary item either.
  */
 function asV1(state: PersistedState): RawRecord {
-  const copy = raw(state)
+  const copy = asV2(state)
   copy.version = 1
   const buckets = copy.daysByTrip as Record<string, Array<{ items: RawRecord[] }>>
   for (const days of Object.values(buckets)) {
@@ -290,7 +310,7 @@ describe('storage location', () => {
 /* Current schema                                                             */
 /* -------------------------------------------------------------------------- */
 
-describe('a current (v2) snapshot', () => {
+describe('a current (v3) snapshot', () => {
   it('round-trips unchanged through save and load', () => {
     const state = twoTripState()
 
@@ -669,6 +689,234 @@ describe('migrating v1 catalogue stops', () => {
   })
 })
 
+/* -------------------------------------------------------------------------- */
+/* v2 -> v3 migration                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Before v3 a trip's destination was free text, and a London trip was shown the
+ * Paris guide because nothing tied a trip to a city. v3 gives every trip the
+ * catalogue id its typed destination names - or `null`, never a guess.
+ */
+describe('migrating a v2 snapshot forward', () => {
+  /** One EUR trip per typed destination, `trip_0`, `trip_1`, ... in order. */
+  function tripsTo(destinations: readonly string[]): PersistedState {
+    return {
+      ...createEmptyState(createGuestUser({ id: USER_ID })),
+      trips: destinations.map((destination, index) =>
+        makeTrip(`trip_${String(index)}`, 'EUR', { destination }),
+      ),
+    }
+  }
+
+  function migrateTrips(destinations: readonly string[]) {
+    writeJson(asV2(tripsTo(destinations)))
+    return service.loadDetailed()
+  }
+
+  it.each([
+    ['Paris, France', 'paris'],
+    ['London', 'london'],
+    ['london, uk', 'london'],
+    ['Lagos, Nigeria', 'lagos'],
+    ['Lisbon, Portugal', null],
+    ['Paris, Texas', null],
+  ])('resolves "%s" to %s and keeps the text exactly as typed', (typed, expected) => {
+    const detailed = migrateTrips([typed])
+    const trip = detailed.state?.trips[0]
+
+    expect(detailed.status).toBe('migrated')
+    expect(trip?.destinationId).toBe(expected)
+    expect(trip?.destination).toBe(typed)
+  })
+
+  it('stamps v3, reports the migration and keeps a byte-for-byte copy of the v2 payload', () => {
+    const text = JSON.stringify(asV2(twoTripState()))
+    writeRaw(text)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('migrated')
+    expect(detailed.foundVersion).toBe(2)
+    expect(detailed.state?.version).toBe(3)
+    expect(detailed.backupKey).toBe(BACKUP_KEY)
+    expect(backup()).toBe(text)
+  })
+
+  it('resolves several trips independently, in order, and drops none', () => {
+    const typed = ['Lisbon, Portugal', 'London', 'Paris, France', 'Paris, Texas', 'Lagos, Nigeria']
+
+    const detailed = migrateTrips(typed)
+
+    expect(detailed.state?.trips.map((trip) => [trip.id, trip.destination, trip.destinationId])).toEqual([
+      ['trip_0', 'Lisbon, Portugal', null],
+      ['trip_1', 'London', 'london'],
+      ['trip_2', 'Paris, France', 'paris'],
+      ['trip_3', 'Paris, Texas', null],
+      ['trip_4', 'Lagos, Nigeria', 'lagos'],
+    ])
+    expect(detailed.salvage.trips).toBe(0)
+  })
+
+  it('keeps a trip whose destination is blank or missing, with no destination id', () => {
+    const snapshot = asV2(tripsTo(['', 'Paris, France']))
+    const first = (snapshot.trips as RawRecord[])[0]
+    if (!first) throw new Error('fixture has no trip')
+    delete first.destination
+    writeJson(snapshot)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.state?.trips.map((trip) => [trip.destination, trip.destinationId])).toEqual([
+      ['', null],
+      ['Paris, France', 'paris'],
+    ])
+    expect(detailed.salvage.trips).toBe(0)
+  })
+
+  it('produces exactly the v3 snapshot the v2 one described', () => {
+    writeJson(asV2(twoTripState()))
+
+    expect(service.load()).toEqual(twoTripState())
+  })
+
+  it('leaves currencies, days, items, expenses, notes and generation byte-identical', () => {
+    const v2 = asV2(twoTripState())
+    writeJson(v2)
+
+    const loaded = service.load()
+
+    expect(JSON.stringify(loaded?.daysByTrip)).toBe(JSON.stringify(v2.daysByTrip))
+    expect(JSON.stringify(loaded?.expensesByTrip)).toBe(JSON.stringify(v2.expensesByTrip))
+    expect(JSON.stringify(loaded?.notesByTrip)).toBe(JSON.stringify(v2.notesByTrip))
+    expect(JSON.stringify(loaded?.generation)).toBe(JSON.stringify(v2.generation))
+    expect(loaded?.trips.map((trip) => trip.currency)).toEqual(['EUR', 'JPY'])
+    expect(loaded?.trips.map((trip) => trip.budget)).toEqual([1800, 250000])
+  })
+
+  it('carries a v1 snapshot all the way to v3, resolving destinations on the way', () => {
+    writeJson(asV1(twoTripState()))
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('migrated')
+    expect(detailed.foundVersion).toBe(1)
+    expect(detailed.state?.version).toBe(3)
+    expect(detailed.state?.trips.map((trip) => trip.destinationId)).toEqual(['paris', 'tokyo'])
+    expect(itemCurrencies(detailed.state, TOKYO)).toEqual(['JPY', 'JPY'])
+    expect(detailed.state).toEqual(twoTripState())
+  })
+
+  it('loads clean after the migrated state is saved', () => {
+    writeJson(asV2(tripsTo(['london, uk', 'Lisbon, Portugal'])))
+    const migrated = service.loadDetailed().state
+    if (!migrated) throw new Error('migration returned nothing')
+
+    service.save(migrated)
+    const next = service.loadDetailed()
+
+    expect(next.status).toBe('loaded')
+    expect(next.state).toEqual(migrated)
+    expect(next.state?.trips.map((trip) => trip.destinationId)).toEqual(['london', null])
+  })
+})
+
+/**
+ * A v3 trip's `destinationId` is what Explore and the itinerary drafts read, so
+ * a value this build cannot use is repaired from the trip's own text rather
+ * than trusted - and never costs the traveller the trip.
+ */
+describe('reading a v3 destination id', () => {
+  function withDestination(destination: string, destinationId: unknown): RawRecord {
+    const snapshot = raw({
+      ...createEmptyState(createGuestUser({ id: USER_ID })),
+      trips: [makeTrip(PARIS, 'EUR', { destination })],
+    })
+    const trip = (snapshot.trips as RawRecord[])[0]
+    if (!trip) throw new Error('fixture has no trip')
+    if (destinationId === undefined) delete trip.destinationId
+    else trip.destinationId = destinationId
+    return snapshot
+  }
+
+  function readBack(destination: string, destinationId: unknown) {
+    writeJson(withDestination(destination, destinationId))
+    return service.loadDetailed()
+  }
+
+  it('re-derives an id that is not in the catalogue from the typed destination', () => {
+    const detailed = readBack('Paris, France', 'atlantis')
+
+    expect(detailed.state?.trips[0]?.destinationId).toBe('paris')
+    expect(detailed.state?.trips[0]?.destination).toBe('Paris, France')
+  })
+
+  it('clears an unknown id to null when the text names no catalogue city', () => {
+    expect(readBack('Lisbon, Portugal', 'lisbon').state?.trips[0]?.destinationId).toBeNull()
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['a number', 42],
+    ['an object', { id: 'london' }],
+    ['an empty string', ''],
+  ])('re-derives an id that is %s', (_label, destinationId) => {
+    const detailed = readBack('London, United Kingdom', destinationId)
+
+    expect(detailed.state?.trips).toHaveLength(1)
+    expect(detailed.state?.trips[0]?.destinationId).toBe('london')
+  })
+
+  /**
+   * Like an unknown pace, the repair is silent: the id is derived from text
+   * the trip still carries, so nothing the traveller entered is lost.
+   */
+  it('repairs silently, without counting a salvage', () => {
+    const detailed = readBack('Paris, France', 'atlantis')
+
+    expect(detailed.status).toBe('loaded')
+    expect(detailed.salvage.trips).toBe(0)
+  })
+
+  it('keeps a known id even when the text reads differently, since the id is authoritative', () => {
+    expect(readBack('Somewhere nice', 'tokyo').state?.trips[0]?.destinationId).toBe('tokyo')
+  })
+
+  /** `null` is how v3 records an unmatched trip; re-deriving it would make the value unstable. */
+  it('keeps an explicit null', () => {
+    expect(readBack('Lisbon, Portugal', null).state?.trips[0]?.destinationId).toBeNull()
+    expect(readBack('Paris, France', null).state?.trips[0]?.destinationId).toBeNull()
+  })
+
+  it('round-trips a v3 snapshot, matched and unmatched trips alike, unchanged', () => {
+    const state = twoTripState()
+    state.trips.push(makeTrip('trip_lisbon', 'EUR', { destination: 'Lisbon, Portugal' }))
+    const text = JSON.stringify(state)
+    writeRaw(text)
+
+    const detailed = service.loadDetailed()
+    expect(detailed.status).toBe('loaded')
+    expect(detailed.state).toEqual(state)
+    expect(detailed.backupKey).toBeNull()
+
+    if (!detailed.state) throw new Error('nothing loaded')
+    service.save(detailed.state)
+    expect(stored()).toBe(text)
+  })
+
+  it('never writes a bogus id back out on save', () => {
+    const state = raw(twoTripState())
+    const paris = (state.trips as RawRecord[])[0]
+    if (!paris) throw new Error('fixture has no trip')
+    paris.destinationId = 'atlantis'
+
+    service.save(state as unknown as PersistedState)
+
+    const written = JSON.parse(stored() ?? 'null') as PersistedState
+    expect(written.trips.map((trip) => trip.destinationId)).toEqual(['paris', 'tokyo'])
+  })
+})
+
 /**
  * `shouldFail` was a prototype switch that should never have been persisted. A
  * snapshot that still carries it has to load - refusing it would cost the
@@ -763,7 +1011,7 @@ describe('keys the snapshot does or does not know about', () => {
 
     const loaded = service.load()
 
-    expect(loaded?.trips[0]).toEqual(makeTrip(PARIS, 'EUR'))
+    expect(loaded?.trips[0]).toEqual(twoTripState().trips[0])
     expect(loaded?.trips[0]).not.toHaveProperty('coverPhotoId')
   })
 
@@ -1109,6 +1357,20 @@ describe('a snapshot written by a newer build', () => {
     expect(backup()).toBe(text)
   })
 
+  /** Pinned to 4 rather than `STORAGE_VERSION + 1`, so the v3 bump is proven not to read it. */
+  it('does not read a v4 payload, and neither loading it nor its backup overwrites it', () => {
+    const text = JSON.stringify({ ...raw(twoTripState()), version: 4 })
+    writeRaw(text)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('future')
+    expect(detailed.foundVersion).toBe(4)
+    expect(detailed.state).toBeNull()
+    expect(backup()).toBe(text)
+    expect(stored()).toBe(text)
+  })
+
   it('still has the backup after this build starts fresh and saves over the live key', () => {
     const text = futureSnapshot()
     writeRaw(text)
@@ -1357,6 +1619,7 @@ describe('createDemoState', () => {
 
     expect(trip?.origin).toBe('Lagos, Nigeria')
     expect(trip?.destination).toBe('Paris, France')
+    expect(trip?.destinationId).toBe('paris')
     expect(trip?.travelers).toBe(2)
     expect(trip?.startDate).toBe(FIXED_TODAY)
     expect(trip?.startDate).toBe(todayISO())

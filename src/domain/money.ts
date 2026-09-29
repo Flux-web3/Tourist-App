@@ -1,6 +1,6 @@
 import type { CurrencyCode } from './types'
 
-export const CURRENCIES: readonly CurrencyCode[] = ['EUR', 'USD', 'GBP', 'NGN', 'JPY']
+export const CURRENCIES: readonly CurrencyCode[] = ['EUR', 'USD', 'GBP', 'NGN', 'JPY', 'AED']
 
 export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   EUR: '\u20ac',
@@ -8,6 +8,8 @@ export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   GBP: '\u00a3',
   NGN: '\u20a6',
   JPY: '\u00a5',
+  // No single-glyph symbol in wide use; the ISO code is what Dubai prices show.
+  AED: 'AED',
 }
 
 const CURRENCY_LOCALE: Record<CurrencyCode, string> = {
@@ -16,6 +18,7 @@ const CURRENCY_LOCALE: Record<CurrencyCode, string> = {
   GBP: 'en-GB',
   NGN: 'en-NG',
   JPY: 'en-JP',
+  AED: 'en-AE',
 }
 
 /**
@@ -32,6 +35,7 @@ export const CURRENCY_MINOR_UNITS: Record<CurrencyCode, number> = {
   GBP: 2,
   NGN: 2,
   JPY: 0,
+  AED: 2,
 }
 
 /**

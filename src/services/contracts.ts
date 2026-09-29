@@ -31,8 +31,10 @@ import type {
  *
  * - v1: the original shape.
  * - v2: `ItineraryItem` carries its own `currency`, mirroring `Expense`.
+ * - v3: `Trip` carries a catalogue `destinationId` (or `null`), resolved from
+ *   the typed destination for trips saved before the catalogue existed.
  */
-export const STORAGE_VERSION = 2
+export const STORAGE_VERSION = 3
 
 /** The complete persisted application state. */
 export interface PersistedState {
@@ -175,6 +177,13 @@ export interface CatalogQuery {
   text: string
   category: ItineraryCategory | 'all'
   maxPrice?: number | null
+  /**
+   * Only places in this destination. Required, so no caller can forget it and
+   * get every city's places: that is how a London trip was shown Paris. Null
+   * means the general guide across every destination, and is only right when
+   * no trip is in context.
+   */
+  destinationId: string | null
 }
 
 export interface PlaceService {

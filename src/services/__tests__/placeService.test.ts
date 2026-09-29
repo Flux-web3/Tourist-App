@@ -1,25 +1,48 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { EXPERIENCES } from '@/data/experiences'
+import { DESTINATIONS, getDestination } from '@/data/destinations'
+import {
+  EXPERIENCES,
+  GUIDE_CITY_LIST,
+  GUIDE_DESTINATIONS,
+  destinationHasPlaces,
+} from '@/data/experiences'
 import type { Experience } from '@/domain/types'
 import type { CatalogQuery } from '@/services/contracts'
 import { placeService } from '@/services/placeService'
 
+/**
+ * Most of these tests are about the Paris records by name, so the default
+ * query is scoped to Paris. The whole catalogue is `destinationId: null`.
+ */
 function query(overrides: Partial<CatalogQuery> = {}): CatalogQuery {
-  return { text: '', category: 'all', maxPrice: null, ...overrides }
+  return { text: '', category: 'all', maxPrice: null, destinationId: 'paris', ...overrides }
 }
+
+const PARIS = EXPERIENCES.filter((experience) => experience.destinationId === 'paris')
+const PHOTOGRAPHED = EXPERIENCES.filter((experience) => experience.imageUrl !== null)
 
 function idsOf(experiences: readonly Experience[]): string[] {
   return experiences.map((experience) => experience.id)
 }
 
+/**
+ * A photo always comes with its credit; a record without a photo has no
+ * credit and an alt text that says it is a drawing, not a photograph.
+ */
 function assertImageMetadata(experiences: readonly Experience[]): void {
   expect(experiences.length).toBeGreaterThan(0)
   for (const experience of experiences) {
-    expect(experience.imageUrl.trim().length).toBeGreaterThan(0)
     expect(experience.imageAlt.trim().length).toBeGreaterThan(0)
     const credit = experience.imageCredit
+    if (experience.imageUrl === null) {
+      expect(credit).toBeNull()
+      expect(experience.imageAlt).toMatch(/drawn cover/i)
+      expect(experience.imageAlt).toMatch(/not a photograph/i)
+      continue
+    }
+    expect(experience.imageUrl.trim().length).toBeGreaterThan(0)
     if (credit === null) {
       throw new Error(`experience ${experience.id} has no imageCredit`)
     }
@@ -29,12 +52,122 @@ function assertImageMetadata(experiences: readonly Experience[]): void {
   }
 }
 
-describe('placeService.search with no filters', () => {
-  it('returns the whole catalogue', async () => {
-    const results = await placeService.search(query())
+describe('placeService.search by destination', () => {
+  it('returns the whole catalogue, every city, for the general guide (null)', async () => {
+    const results = await placeService.search(query({ destinationId: null }))
 
     expect(results).toHaveLength(EXPERIENCES.length)
     expect(new Set(idsOf(results))).toEqual(new Set(idsOf(EXPERIENCES)))
+    expect(new Set(results.map((experience) => experience.destinationId))).toEqual(
+      new Set(['paris', 'london', 'lagos']),
+    )
+  })
+
+  it('returns only Paris places for Paris', async () => {
+    const results = await placeService.search(query({ destinationId: 'paris' }))
+
+    expect(results).toHaveLength(14)
+    expect(new Set(idsOf(results))).toEqual(new Set(idsOf(PARIS)))
+  })
+
+  it('returns only London places for London, and no Paris place', async () => {
+    const results = await placeService.search(query({ destinationId: 'london' }))
+
+    expect(results.length).toBeGreaterThanOrEqual(6)
+    for (const experience of results) {
+      expect(experience.destinationId).toBe('london')
+      expect(experience.city).toBe('London')
+      expect(experience.currency).toBe('GBP')
+    }
+    expect(idsOf(results)).not.toContain('exp_eiffel_tower')
+    expect(results.map((experience) => experience.name)).toContain('British Museum')
+  })
+
+  it('returns only Lagos places for Lagos, priced in naira', async () => {
+    const results = await placeService.search(query({ destinationId: 'lagos' }))
+
+    expect(results.length).toBeGreaterThanOrEqual(5)
+    for (const experience of results) {
+      expect(experience.destinationId).toBe('lagos')
+      expect(experience.city).toBe('Lagos')
+      expect(experience.currency).toBe('NGN')
+    }
+  })
+
+  it('returns nothing for a destination with no places, never another city', async () => {
+    expect(await placeService.search(query({ destinationId: 'tokyo' }))).toEqual([])
+    expect(await placeService.search(query({ destinationId: 'no-such-city' }))).toEqual([])
+  })
+
+  it('keeps the destination filter whatever the text says', async () => {
+    const results = await placeService.search(query({ destinationId: 'london', text: 'Eiffel' }))
+
+    expect(results).toEqual([])
+  })
+
+  it('finds places by city name in the general guide', async () => {
+    const results = await placeService.search(query({ destinationId: null, text: 'lagos' }))
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.every((experience) => experience.city === 'Lagos')).toBe(true)
+  })
+
+  it('fails closed when a caller leaves the destination out entirely', async () => {
+    // Not reachable from typed code; guards an untyped caller from getting
+    // every city's places by omission.
+    const loose = { text: '', category: 'all', maxPrice: null } as unknown as CatalogQuery
+
+    expect(await placeService.search(loose)).toEqual([])
+  })
+})
+
+describe('catalogue destinations', () => {
+  it('files every place under a real destination and takes city, country and currency from it', () => {
+    for (const experience of EXPERIENCES) {
+      const destination = getDestination(experience.destinationId)
+      if (!destination) throw new Error(`${experience.id} has an unknown destination`)
+      expect(experience.city).toBe(destination.city)
+      expect(experience.country).toBe(destination.country)
+      expect(experience.currency).toBe(destination.currency)
+    }
+  })
+
+  it('has places for Paris, London and Lagos only, and says which', () => {
+    expect(GUIDE_DESTINATIONS.map((destination) => destination.id)).toEqual(['paris', 'london', 'lagos'])
+    expect(GUIDE_CITY_LIST).toBe('Paris, London and Lagos')
+    for (const destination of DESTINATIONS) {
+      expect(destinationHasPlaces(destination.id)).toBe(
+        ['paris', 'london', 'lagos'].includes(destination.id),
+      )
+    }
+    expect(destinationHasPlaces(null)).toBe(false)
+    expect(destinationHasPlaces(undefined)).toBe(false)
+  })
+
+  it('gives every place a unique id', () => {
+    const ids = idsOf(EXPERIENCES)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('labels every opening-hours line as demo hours', () => {
+    for (const experience of EXPERIENCES) {
+      expect(experience.hoursNote.startsWith('Demo hours:')).toBe(true)
+    }
+  })
+
+  it('marks a place free exactly when its estimate is zero', () => {
+    for (const experience of EXPERIENCES) {
+      expect(experience.isFree).toBe(experience.priceFrom === 0)
+    }
+  })
+})
+
+describe('placeService.search with no filters', () => {
+  it('returns the whole Paris guide', async () => {
+    const results = await placeService.search(query())
+
+    expect(results).toHaveLength(PARIS.length)
+    expect(new Set(idsOf(results))).toEqual(new Set(idsOf(PARIS)))
   })
 
   it('returns every catalogue record exactly once', async () => {
@@ -168,7 +301,7 @@ describe('placeService.search with a price cap', () => {
       expect(experience.priceFrom).toBe(0)
       expect(experience.isFree).toBe(true)
     }
-    const freeIds = EXPERIENCES.filter((experience) => experience.isFree).map(
+    const freeIds = PARIS.filter((experience) => experience.isFree).map(
       (experience) => experience.id,
     )
     expect(idsOf(results).sort()).toEqual([...freeIds].sort())
@@ -177,13 +310,13 @@ describe('placeService.search with a price cap', () => {
   it('treats a null cap as no cap', async () => {
     const results = await placeService.search(query({ maxPrice: null }))
 
-    expect(results).toHaveLength(EXPERIENCES.length)
+    expect(results).toHaveLength(PARIS.length)
   })
 
   it('treats an absent cap as no cap', async () => {
-    const results = await placeService.search({ text: '', category: 'all' })
+    const results = await placeService.search({ text: '', category: 'all', destinationId: 'paris' })
 
-    expect(results).toHaveLength(EXPERIENCES.length)
+    expect(results).toHaveLength(PARIS.length)
   })
 
   it('returns nothing under a negative cap', async () => {
@@ -242,7 +375,7 @@ describe('placeService.getById', () => {
 
 describe('catalogue image metadata', () => {
   it('covers every record returned by an unfiltered search', async () => {
-    assertImageMetadata(await placeService.search(query()))
+    assertImageMetadata(await placeService.search(query({ destinationId: null })))
   })
 
   it('covers every record returned by a text search', async () => {
@@ -264,11 +397,24 @@ describe('catalogue image metadata', () => {
     assertImageMetadata(records)
   })
 
+  it('has a photo for every Paris place and none borrowed for London or Lagos', () => {
+    // Only Paris has licensed photography. Anything else is a drawn cover,
+    // never a photo of another city passed off as this one.
+    for (const experience of EXPERIENCES) {
+      if (experience.destinationId === 'paris') {
+        expect(experience.imageUrl).not.toBeNull()
+      } else {
+        expect(experience.imageUrl).toBeNull()
+        expect(experience.imageCredit).toBeNull()
+      }
+    }
+  })
+
   it('serves every image from this origin rather than hot-linking', () => {
     // Catalogue photography used to be hot-linked from upload.wikimedia.org,
     // which made the only imagery in the product depend on a third party at
     // runtime. The files are ours now, under public/images.
-    for (const experience of EXPERIENCES) {
+    for (const experience of PHOTOGRAPHED) {
       expect(experience.imageUrl).toMatch(/^\/images\/[\w-]+\.(jpg|jpeg|png|webp)$/)
     }
   })
@@ -279,13 +425,13 @@ describe('catalogue image metadata', () => {
     // `process.cwd()`, not `import.meta.url`: under jsdom the module url is an
     // http:// one and `fileURLToPath` rejects it.
     const publicDir = join(process.cwd(), 'public')
-    for (const experience of EXPERIENCES) {
-      expect(existsSync(join(publicDir, experience.imageUrl))).toBe(true)
+    for (const experience of PHOTOGRAPHED) {
+      expect(existsSync(join(publicDir, experience.imageUrl ?? ''))).toBe(true)
     }
   })
 
   it('credits every image with an author, a licence and a source page', () => {
-    for (const experience of EXPERIENCES) {
+    for (const experience of PHOTOGRAPHED) {
       expect(experience.imageCredit).not.toBeNull()
       expect(experience.imageCredit?.author.trim()).not.toBe('')
       expect(experience.imageCredit?.license.trim()).not.toBe('')
@@ -294,7 +440,7 @@ describe('catalogue image metadata', () => {
   })
 
   it('gives every record its own distinct image', () => {
-    const urls = EXPERIENCES.map((experience) => experience.imageUrl)
+    const urls = PHOTOGRAPHED.map((experience) => experience.imageUrl)
     expect(new Set(urls).size).toBe(urls.length)
   })
 })
