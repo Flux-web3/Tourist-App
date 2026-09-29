@@ -1,7 +1,7 @@
 # Tourist
 
 An AI travel companion MVP: plan a trip, draft its days, then track what you
-actually spend. Live at <https://tourist-app-nu-six.vercel.app/>.
+actually spend. Live at <https://tourist-app-blush.vercel.app/>.
 
 React 19, TypeScript, Vite 7, Tailwind v4 and React Router 7. Everything is
 stored in the browser (`localStorage`); there is no backend and no account.
