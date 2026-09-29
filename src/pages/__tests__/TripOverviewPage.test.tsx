@@ -1,10 +1,11 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { addDays, formatDateRange, formatLongDate, todayISO } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import TripOverviewPage from '@/pages/TripOverviewPage'
+import { services } from '@/services'
 import { DEMO_TRIP_ID } from '@/services/persistence'
 import { demoStateFor, renderWithProviders } from '@/test/renderWithProviders'
 import {
@@ -402,11 +403,29 @@ describe('TripOverviewPage', () => {
 
     it('will not start a second run while one is in flight', async () => {
       const user = userEvent.setup()
-      renderOverview(fixtureState({ generation: makeGeneration({ status: 'loading' }) }))
+      // A real run held open. A `loading` status read back from storage is not
+      // in flight: the provider settles it on load, since nothing survives a reload.
+      const generate = vi
+        .spyOn(services.itinerary, 'generate')
+        .mockImplementation(() => new Promise(() => {}))
+      renderOverview()
 
       await openMenu(user)
+      await user.click(screen.getByRole('menuitem', { name: 'Regenerate itinerary' }))
+      expect(await screen.findByText('Regenerating the itinerary draft.')).toBeInTheDocument()
 
+      await openMenu(user)
       expect(screen.getByRole('menuitem', { name: 'Regenerate itinerary' })).toBeDisabled()
+      expect(generate).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers Regenerate again after a reload interrupted the last run', async () => {
+      const user = userEvent.setup()
+      renderOverview(fixtureState({ generation: makeGeneration({ status: 'loading' }) }))
+
+      expect(screen.getByRole('alert')).toHaveTextContent(/closed or reloaded/)
+      await openMenu(user)
+      expect(screen.getByRole('menuitem', { name: 'Regenerate itinerary' })).toBeEnabled()
     })
   })
 

@@ -631,6 +631,37 @@ describe('TouristProvider generation', () => {
     expect(allIds(ctx().state.daysByTrip[TRIP_ID]).length).toBeGreaterThan(0)
   })
 
+  it('turns a draft interrupted by a reload into a retryable error, not a spinner forever', async () => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    // What storage holds when the tab was closed or reloaded mid-draft.
+    const interrupted = seededState()
+    interrupted.generation[TRIP_ID] = {
+      status: 'loading',
+      error: null,
+      startedAt: '2026-04-01T09:00:00.000Z',
+      completedAt: null,
+    }
+    seedState(interrupted)
+    const planBefore = allIds(interrupted.daysByTrip[TRIP_ID])
+    renderProvider()
+
+    const restored = generationFor(TRIP_ID)
+    expect(restored.status).toBe('error')
+    expect(restored.error).toMatch(/closed or reloaded.*not changed/)
+    expect(readStored().generation[TRIP_ID].status).toBe('error')
+    expect(allIds(ctx().state.daysByTrip[TRIP_ID])).toEqual(planBefore)
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = ctx().actions.retryGeneration(TRIP_ID)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+      await pending
+    })
+    expect(generationFor(TRIP_ID).status).toBe('success')
+  })
+
   it('does nothing for a trip that does not exist', async () => {
     vi.useFakeTimers({ now: FIXED_NOW })
     seedState(seededState())

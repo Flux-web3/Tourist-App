@@ -66,6 +66,29 @@ function timestamp(): string {
   return new Date().toISOString()
 }
 
+const INTERRUPTED_GENERATION_MESSAGE =
+  'Drafting stopped when the page was closed or reloaded. Your plan was not changed. Try again.'
+
+/**
+ * A `loading` status read from storage is always stale: no request survives a
+ * page load. Restored as-is, it left the trip on "Drafting your itinerary…"
+ * forever with Regenerate disabled, and only clearing all data got it back. It
+ * becomes a retryable error instead, so the traveller sees what happened.
+ */
+function settleInterruptedGenerations(
+  generation: PersistedState['generation'],
+): PersistedState['generation'] {
+  if (!Object.values(generation).some((entry) => entry.status === 'loading')) return generation
+  return Object.fromEntries(
+    Object.entries(generation).map(([tripId, entry]) => [
+      tripId,
+      entry.status === 'loading'
+        ? { ...entry, status: 'error', error: INTERRUPTED_GENERATION_MESSAGE, completedAt: null }
+        : entry,
+    ]),
+  )
+}
+
 export function TouristProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(touristReducer, undefined, createInitialTouristState)
   const [pendingItemId, setPendingItemId] = useState<string | null>(null)
@@ -116,7 +139,11 @@ export function TouristProvider({ children }: { children: ReactNode }) {
      * traveller's own would be the one dishonest thing in the product.
      */
     const base = loaded ?? createEmptyState()
-    const initial: PersistedState = { ...base, themePreference: readThemePreference() }
+    const initial: PersistedState = {
+      ...base,
+      generation: settleInterruptedGenerations(base.generation),
+      themePreference: readThemePreference(),
+    }
     dispatch({ type: 'hydrate', state: initial })
     if (!loaded) services.persistence.save(initial)
   }, [])
