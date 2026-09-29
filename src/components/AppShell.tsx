@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useAppState } from '@/state/useTourist'
@@ -14,14 +14,14 @@ function useTripContextId(): string | null {
 
 function Brand() {
   return (
-    // `end` matters: without it react-router marks the logo aria-current="page"
-    // on every /trips/* route and screen readers announce it as the current page.
-    <NavLink to="/trips" end className="flex items-center gap-2 rounded-control">
+    // The logo goes home to the landing page, as it does on the landing page
+    // itself. Trips stays one tap away in the primary nav and the mobile tab bar.
+    <Link to="/" className="flex items-center gap-2 rounded-control" aria-label="Tourist, home">
       <span className="grid h-9 w-9 place-items-center rounded-control bg-navy text-btn-primary-fg">
         <Icon name="travel_explore" size={20} />
       </span>
       <span className="text-headline-sm">Tourist</span>
-    </NavLink>
+    </Link>
   )
 }
 

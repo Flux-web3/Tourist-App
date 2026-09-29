@@ -27,10 +27,16 @@ describe('AppShell', () => {
     expect(screen.getByRole('main')).toHaveTextContent('Screen body')
   })
 
-  it('brands the header with a link back to the trips list', () => {
-    renderShell('/explore', createEmptyState())
-
-    expect(screen.getByRole('link', { name: 'Tourist' })).toHaveAttribute('href', '/trips')
+  it('sends the logo home to the landing page, from any screen', () => {
+    for (const route of ['/explore', '/trips', '/trips/trip-1/budget']) {
+      const { unmount } = renderShell(route, createEmptyState())
+      const home = screen.getByRole('link', { name: 'Tourist, home' })
+      expect(home).toHaveAttribute('href', '/')
+      expect(home).toHaveTextContent('Tourist')
+      // The trips list is still one step away in the primary navigation.
+      expect(screen.getAllByRole('link', { name: 'Trips' })[0]).toHaveAttribute('href', '/trips')
+      unmount()
+    }
   })
 
   it('gives the desktop and mobile navigation distinct landmark names', () => {
