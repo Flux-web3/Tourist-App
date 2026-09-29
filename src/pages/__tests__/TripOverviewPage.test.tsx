@@ -626,8 +626,9 @@ describe('TripOverviewPage moving a trip to another city', () => {
     let refused: unknown = 'not called'
     let accepted: unknown = null
     await act(async () => {
-      refused = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_london_tower_of_london', { dayId })
-      accepted = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_louvre_museum', { dayId })
+      // Explicit times, so the refusal can only come from the city guard, not from a full day.
+      refused = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_london_tower_of_london', { dayId, startTime: '10:00' })
+      accepted = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_louvre_museum', { dayId, startTime: '10:00' })
     })
     expect(refused).toBeNull()
     expect(accepted).toMatchObject({ experienceId: 'exp_louvre_museum', source: 'catalog' })

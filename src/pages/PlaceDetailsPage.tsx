@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { AddToTripDialog } from '@/components/AddToTripDialog'
+import { AddToTripDialog, type AddedPlace } from '@/components/AddToTripDialog'
 import { PlaceImage } from '@/components/PlaceImage'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -11,7 +11,7 @@ import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { getDestination } from '@/data/destinations'
-import { formatDuration, formatShortDate } from '@/domain/format'
+import { formatDuration, formatShortDate, formatTime } from '@/domain/format'
 import { formatPrice } from '@/domain/money'
 import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTrip } from '@/state/useTourist'
@@ -84,6 +84,7 @@ export default function PlaceDetailsPage() {
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [addOpen, setAddOpen] = useState(false)
   const [addedDay, setAddedDay] = useState<ItineraryDay | null>(null)
+  const [addedPlace, setAddedPlace] = useState<AddedPlace | null>(null)
 
   useEffect(() => {
     let active = true
@@ -182,11 +183,18 @@ export default function PlaceDetailsPage() {
           role="status"
           className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-actual-border bg-actual-bg px-4 py-3 text-actual-ink"
         >
-          <p className="min-w-0 text-body-md">
-            {`${experience.name} was added to Day ${addedDay.index} · ${formatShortDate(
-              addedDay.date,
-            )} of ${trip.name}.`}
-          </p>
+          <div className="min-w-0">
+            <p className="text-body-md">
+              {`${experience.name} was added to Day ${addedDay.index} · ${formatShortDate(
+                addedDay.date,
+              )} of ${trip.name}.`}
+            </p>
+            {addedPlace?.suggested ? (
+              <p className="mt-1 text-body-sm">
+                {`Tourist suggested the ${formatTime(addedPlace.startTime) ?? addedPlace.startTime} start; you can change it in the itinerary.`}
+              </p>
+            ) : null}
+          </div>
           <ButtonLink
             to={`/trips/${trip.id}/itinerary`}
             size="sm"
@@ -306,9 +314,10 @@ export default function PlaceDetailsPage() {
           trip={trip}
           experience={experience}
           onClose={() => setAddOpen(false)}
-          onAdded={(day) => {
+          onAdded={(day, place) => {
             setAddOpen(false)
             setAddedDay(day)
+            setAddedPlace(place)
           }}
         />
       ) : null}

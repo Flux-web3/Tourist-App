@@ -198,8 +198,32 @@ export interface Experience {
   imageAlt: string
   imageCredit: ImageCredit | null
   tags: string[]
+  /** Free text shown as-is ("Demo hours: 09:00 - 18:00, closed Tuesdays"). */
   hoursNote: string
+  /**
+   * `hoursNote` in a form the scheduler can read, and nothing more: every
+   * value is taken from the note (a test holds the two together). Null when
+   * the note names no hours ("always open", "hourly departures").
+   */
+  visitWindow: VisitWindow | null
   bestTime: string
+}
+
+export type Weekday = 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday'
+
+/**
+ * A place's usual demo hours, static and never a claim about a given date.
+ *
+ * `closes` is when a visit must be over. It is null when the note gives only a
+ * start ("evening shows typically from 19:30"). A value at or before `opens`
+ * ("05:30 - 00:30", "midnight" as `00:00`) runs past midnight. "Sunset" is
+ * recorded as 18:00, early enough to hold in any season.
+ */
+export interface VisitWindow {
+  opens: string
+  closes: string | null
+  /** Only days the note names as "closed <Day>s". */
+  closedOn?: readonly Weekday[]
 }
 
 export interface ImageCredit {

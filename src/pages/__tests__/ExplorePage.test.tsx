@@ -466,6 +466,8 @@ describe('ExplorePage', () => {
       }
       expect(within(dialog).getByText('9:00 AM')).toBeInTheDocument()
 
+      // Three hours of Louvre do not fit around day one's stops, so a time is typed.
+      await user.type(within(dialog).getByLabelText('Start time'), '10:15')
       await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
       await waitFor(() =>
@@ -531,11 +533,9 @@ describe('ExplorePage', () => {
       await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
 
       await user.click(within(cardNamed('Louvre Museum')).getByRole('button', { name: 'Add to trip' }))
-      await user.click(
-        within(screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })).getByRole('button', {
-          name: 'Add to itinerary',
-        }),
-      )
+      const first = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
+      await user.type(within(first).getByLabelText('Start time'), '10:15')
+      await user.click(within(first).getByRole('button', { name: 'Add to itinerary' }))
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
       const louvresOnDayOne = () =>
         readStoredState()
@@ -559,7 +559,7 @@ describe('ExplorePage', () => {
       expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeEnabled()
     })
 
-    it('puts the place after the last stop when no time is given', async () => {
+    it('suggests a time within the place’s usual hours when none is given', async () => {
       const user = userEvent.setup()
       renderWithTrip()
       await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
@@ -567,13 +567,86 @@ describe('ExplorePage', () => {
       await user.click(within(cardNamed('Eiffel Tower Summit')).getByRole('button', { name: 'Add to trip' }))
       const dialog = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
       expect(daySelect(dialog)).toHaveValue('day-1')
-      expect(within(dialog).getByText("Optional. Left empty, it goes after the day's last stop.")).toBeInTheDocument()
+      expect(
+        within(dialog).getByText(
+          "Optional. Left empty, Tourist suggests a time within the place's usual hours that fits around the day's other stops.",
+        ),
+      ).toBeInTheDocument()
+      expect(within(dialog).queryByText("Optional. Left empty, it goes after the day's last stop.")).not.toBeInTheDocument()
+      // Day one runs 9:00, 13:00, 16:00 and 19:30; 2 hr 30 min fit between the first two.
+      expect(
+        within(dialog).getByText('Suggested: 10:15 AM, within its usual hours 09:30–23:45. You can change it.'),
+      ).toBeInTheDocument()
+
+      // Typing a time replaces the suggestion.
+      await user.type(within(dialog).getByLabelText('Start time'), '14:00')
+      expect(within(dialog).queryByText(/^Suggested:/)).not.toBeInTheDocument()
+      await user.clear(within(dialog).getByLabelText('Start time'))
+      expect(within(dialog).getByText(/^Suggested: 10:15 AM/)).toBeInTheDocument()
+
       await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
-      await waitFor(() => expect(screen.getByRole('link', { name: 'Open itinerary' })).toBeInTheDocument())
+      await waitFor(() =>
+        expect(
+          screen.getByText('Tourist suggested the 10:15 AM start; you can change it in the itinerary.'),
+        ).toBeInTheDocument(),
+      )
       const dayOne = readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
       expect(dayOne?.items).toHaveLength(5)
-      expect(dayOne?.items[4].startTime).toBe('21:00')
+      const added = dayOne?.items.find((item) => item.experienceId === 'exp_eiffel_tower')
+      expect(added).toMatchObject({ startTime: '10:15', endTime: '12:45' })
+      expect(dayOne?.items.map((item) => item.startTime)).toEqual(['09:00', '10:15', '13:00', '16:00', '19:30'])
+    })
+
+    it('says when nothing fits, and adds only once a time is typed or another day is chosen', async () => {
+      const user = userEvent.setup()
+      renderWithTrip()
+      await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+
+      await user.click(within(cardNamed('Louvre Museum')).getByRole('button', { name: 'Add to trip' }))
+      const dialog = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
+      expect(within(dialog).getByText('No time fits on Day 1')).toBeInTheDocument()
+      expect(
+        within(dialog).getByText(
+          "Louvre Museum (3 hr) does not fit within its usual hours 09:00–18:00 around this day's other stops. Enter a start time, or choose another day.",
+        ),
+      ).toBeInTheDocument()
+      expect(within(dialog).queryByText(/^Suggested:/)).not.toBeInTheDocument()
+      const add = within(dialog).getByRole('button', { name: 'Add to itinerary' })
+      expect(add).toBeDisabled()
+      await user.click(add)
+      expect(readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')?.items).toHaveLength(4)
+
+      // Another day with room gets a suggestion and can be saved.
+      await user.selectOptions(daySelect(dialog), 'day-2')
+      expect(within(dialog).queryByText('No time fits on Day 2')).not.toBeInTheDocument()
+      expect(within(dialog).getByText(/^Suggested: 10:45 AM, within its usual hours 09:00–18:00/)).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeEnabled()
+
+      // Back on the full day, a typed time is the traveller's choice and is kept as given.
+      await user.selectOptions(daySelect(dialog), 'day-1')
+      expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeDisabled()
+      await user.type(within(dialog).getByLabelText('Start time'), '20:45')
+      expect(within(dialog).queryByText('No time fits on Day 1')).not.toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
+
+      await waitFor(() => expect(screen.getByText(/Louvre Museum was added to Day 1/)).toBeInTheDocument())
+      expect(screen.queryByText(/Tourist suggested/)).not.toBeInTheDocument()
+      const dayOne = readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
+      expect(dayOne?.items.find((item) => item.experienceId === 'exp_louvre_museum')?.startTime).toBe('20:45')
+    })
+
+    it('suggests an evening slot for an evening venue', async () => {
+      const user = userEvent.setup()
+      renderAt(FIXTURE_TRIP_ID, fixtureState({ trip: LONDON_TRIP }))
+      await waitFor(() => expect(cardNamed('West End Theatre Night')).toBeInTheDocument())
+
+      await user.click(within(cardNamed('West End Theatre Night')).getByRole('button', { name: 'Add to trip' }))
+      const dialog = screen.getByRole('dialog', { name: 'Add to London Calling' })
+      await user.selectOptions(daySelect(dialog), 'day-2')
+      expect(
+        within(dialog).getByText('Suggested: 7:30 PM, within its usual hours from 19:30. You can change it.'),
+      ).toBeInTheDocument()
     })
 
     it('leaves the itinerary untouched when the traveller backs out', async () => {

@@ -14,7 +14,6 @@ import type { PersistedState } from '@/services/contracts'
 import { useTourist, useTrip } from '@/state/useTourist'
 import type { ItineraryItem, Trip } from '@/domain/types'
 
-const DAY_ONE_DATE = FIXTURE_DAY_ONE_DATE
 const DAY_TWO_DATE = addDays(FIXTURE_DAY_ONE_DATE, 1)
 
 function renderPlace(experienceId: string, options: { tripId?: string; state?: PersistedState } = {}) {
@@ -200,7 +199,7 @@ describe('PlaceDetailsPage', () => {
     expect(screen.queryByRole('button', { name: 'Add to trip' })).not.toBeInTheDocument()
   })
 
-  it('adds the place to the first day in the first free slot', async () => {
+  it('adds the place at a suggested time within its usual hours, on a day with room for it', async () => {
     const user = userEvent.setup()
     renderPlace('exp_louvre_museum', { tripId: FIXTURE_TRIP_ID })
     await screen.findByRole('heading', { level: 1, name: 'Louvre Museum' })
@@ -212,26 +211,46 @@ describe('PlaceDetailsPage', () => {
     expect(within(dialog).getByText('Estimated price: €22 and up')).toBeInTheDocument()
     expect(daySelect(dialog)).toHaveValue('day-1')
     expect(within(dialog).getByText('Louvre highlights')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        "Optional. Left empty, Tourist suggests a time within the place's usual hours that fits around the day's other stops.",
+      ),
+    ).toBeInTheDocument()
+
+    // Day one (9:00, 13:00, 16:00, 19:30) has no three-hour gap before 18:00: no late fallback.
+    expect(within(dialog).getByText('No time fits on Day 1')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeDisabled()
+
+    await user.selectOptions(daySelect(dialog), 'day-2')
+    expect(
+      within(dialog).getByText('Suggested: 10:45 AM, within its usual hours 09:00–18:00. You can change it.'),
+    ).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
     await waitFor(() =>
       expect(
         screen.getByText(
-          `Louvre Museum was added to Day 1 · ${formatShortDate(DAY_ONE_DATE)} of Paris in the Spring.`,
+          `Louvre Museum was added to Day 2 · ${formatShortDate(DAY_TWO_DATE)} of Paris in the Spring.`,
         ),
       ).toBeInTheDocument(),
     )
+    expect(
+      screen.getByText('Tourist suggested the 10:45 AM start; you can change it in the itinerary.'),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open itinerary' })).toHaveAttribute(
       'href',
       `/trips/${FIXTURE_TRIP_ID}/itinerary`,
     )
-    const dayOne = readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
-    expect(dayOne?.items).toHaveLength(5)
-    expect(dayOne?.items[4]).toMatchObject({
+    const days = readStoredState().daysByTrip[FIXTURE_TRIP_ID]
+    expect(days.find((day) => day.id === 'day-1')?.items).toHaveLength(4)
+    const dayTwo = days.find((day) => day.id === 'day-2')
+    expect(dayTwo?.items).toHaveLength(2)
+    expect(dayTwo?.items[1]).toMatchObject({
       title: 'Louvre Museum',
       category: 'culture',
-      startTime: '21:00',
+      startTime: '10:45',
+      endTime: '13:45',
       estimatedCost: 22,
       experienceId: 'exp_louvre_museum',
       location: '1st arrondissement, Paris',
@@ -325,15 +344,24 @@ describe('PlaceDetailsPage', () => {
       await user.click(screen.getByRole('button', { name: 'Add to trip' }))
       const dialog = screen.getByRole('dialog', { name: 'Add to London Calling' })
       expect(within(dialog).getByText('Estimated price: £35 and up')).toBeInTheDocument()
+      // A day ending with a 19:30 evening stop and no three-hour daytime gap: the
+      // Tower is never pushed to 21:00 or later, the traveller is asked instead.
+      expect(within(dialog).getByText('No time fits on Day 1')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeDisabled()
+      await user.selectOptions(daySelect(dialog), 'day-2')
+      expect(within(dialog).getByText(/^Suggested: 10:45 AM, within its usual hours 09:00–17:30/)).toBeInTheDocument()
       await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
-      await waitFor(() => expect(screen.getByText(/Tower of London was added to Day 1/)).toBeInTheDocument())
-      const dayOne = readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
-      expect(dayOne?.items.at(-1)).toMatchObject({
+      await waitFor(() => expect(screen.getByText(/Tower of London was added to Day 2/)).toBeInTheDocument())
+      const days = readStoredState().daysByTrip[FIXTURE_TRIP_ID]
+      expect(days.find((day) => day.id === 'day-1')?.items).toHaveLength(4)
+      expect(days.find((day) => day.id === 'day-2')?.items.at(-1)).toMatchObject({
         experienceId: 'exp_london_tower_of_london',
         currency: 'GBP',
         estimatedCost: 35,
         location: 'Tower Hill, London',
+        startTime: '10:45',
+        endTime: '13:45',
       })
     })
   })
@@ -432,7 +460,7 @@ describe('PlaceDetailsPage', () => {
             <button type="button" disabled={!hydrated} onClick={() => void attempt('exp_london_tower_of_london')}>
               Add London place
             </button>
-            <button type="button" disabled={!hydrated} onClick={() => void attempt('exp_louvre_museum')}>
+            <button type="button" disabled={!hydrated} onClick={() => void attempt('exp_sainte_chapelle')}>
               Add Paris place
             </button>
             <p>{result}</p>
@@ -445,9 +473,9 @@ describe('PlaceDetailsPage', () => {
       expect(await screen.findByText('refused')).toBeInTheDocument()
       expect(readStoredState().daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')?.items).toHaveLength(4)
 
-      // Same trip, same day, a Paris place: still allowed.
+      // Same trip, same day, a Paris place that fits the day: still allowed.
       await user.click(screen.getByRole('button', { name: 'Add Paris place' }))
-      expect(await screen.findByText('added exp_louvre_museum')).toBeInTheDocument()
+      expect(await screen.findByText('added exp_sainte_chapelle')).toBeInTheDocument()
     })
 
     it('has the provider refuse any place for a legacy trip with no destination', async () => {

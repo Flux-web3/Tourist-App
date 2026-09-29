@@ -7,23 +7,55 @@ import { SelectField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { getDestination } from '@/data/destinations'
 import { formatDuration, formatShortDate, formatTime, isValidTime } from '@/domain/format'
+import {
+  isListedClosedOn,
+  suggestPlaceSlot,
+  weekdayOf,
+  type PlaceSlotSuggestion,
+} from '@/domain/itinerary'
 import { formatAmount } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTripDays } from '@/state/useTourist'
-import type { Experience, ItineraryDay, ItineraryItem, Trip } from '@/domain/types'
+import type { Experience, ItineraryDay, ItineraryItem, Trip, VisitWindow } from '@/domain/types'
 
 export interface AddToTripDialogProps {
   trip: Trip
   experience: Experience
   onClose: () => void
-  onAdded: (day: ItineraryDay) => void
+  /** `added.suggested` is true when Tourist chose the start time, not the traveller. */
+  onAdded: (day: ItineraryDay, added: AddedPlace) => void
 }
+
+export interface AddedPlace {
+  startTime: string
+  suggested: boolean
+}
+
+const START_TIME_HINT =
+  "Optional. Left empty, Tourist suggests a time within the place's usual hours that fits around the day's other stops."
 
 const ADD_FAILED =
   'This place could not be added to the selected day. Nothing in your itinerary has changed.'
 
 /** Enough of the day to place a stop sensibly, without turning the sheet into a page. */
 const PREVIEW_LIMIT = 4
+
+/** "09:00–18:00", or "from 19:30" when the note gives no closing time. Demo hours, never live. */
+function hoursLabel(window: VisitWindow): string {
+  return window.closes === null ? `from ${window.opens}` : `${window.opens}–${window.closes}`
+}
+
+function suggestionLine(suggestion: Extract<PlaceSlotSuggestion, { kind: 'slot' }>): string {
+  const time = formatTime(suggestion.startTime) ?? suggestion.startTime
+  switch (suggestion.windowSource) {
+    case 'hours':
+      return `Suggested: ${time}, within its usual hours ${hoursLabel(suggestion.window)}. You can change it.`
+    case 'evening-default':
+      return `Suggested: ${time}, an evening slot that fits around the day's other stops. You can change it.`
+    case 'daytime-default':
+      return `Suggested: ${time}, a daytime slot that fits around the day's other stops. You can change it.`
+  }
+}
 
 function DayPreview({ day }: { day: ItineraryDay }) {
   const shown: ItineraryItem[] = day.items.slice(0, PREVIEW_LIMIT)
@@ -84,6 +116,18 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
   const alreadyOnDay =
     selectedDay?.items.some((item) => item.experienceId === experience.id) ?? false
 
+  // Worked out from the same day the provider will add to, so what the sheet
+  // promises is what gets saved. Only when no time is typed: a typed time is
+  // always the traveller's choice.
+  const suggestion =
+    selectedDay && !startTime && !alreadyOnDay && !wrongCity
+      ? suggestPlaceSlot(selectedDay, experience)
+      : null
+  const noSlot = suggestion?.kind === 'none'
+  // A reminder, never a block: the hours are static demo data, not this date's.
+  const closedWeekday =
+    selectedDay && !wrongCity && isListedClosedOn(experience, selectedDay.date) ? weekdayOf(selectedDay.date) : null
+
   const priceLine = experience.isFree
     ? 'Free to visit'
     : `${formatAmount(experience.priceFrom, experience.currency)} and up`
@@ -94,7 +138,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
       setError({ title: 'Choose a day first', message: 'Pick the day this place should be added to.' })
       return
     }
-    if (alreadyOnDay || wrongCity) return
+    if (alreadyOnDay || wrongCity || noSlot) return
     if (startTime && !isValidTime(startTime)) {
       setError({
         title: 'That start time was not read',
@@ -114,7 +158,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
         setError({ title: 'Nothing was added', message: ADD_FAILED })
         return
       }
-      onAdded(target)
+      onAdded(target, { startTime: item.startTime, suggested: !startTime })
     } catch {
       setError({ title: 'Nothing was added', message: ADD_FAILED })
     } finally {
@@ -140,7 +184,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
             icon={<Icon name="add" size={18} />}
             loading={submitting}
             loadingLabel="Adding"
-            disabled={days.length === 0 || alreadyOnDay || wrongCity}
+            disabled={days.length === 0 || alreadyOnDay || wrongCity || noSlot}
           >
             Add to itinerary
           </Button>
@@ -209,8 +253,26 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           value={startTime}
           onChange={(event) => setStartTime(event.target.value)}
           disabled={days.length === 0 || wrongCity}
-          hint="Optional. Left empty, it goes after the day's last stop."
+          hint={START_TIME_HINT}
         />
+
+        {suggestion?.kind === 'slot' ? (
+          <p className="text-body-sm text-ink-muted" aria-live="polite">
+            {suggestionLine(suggestion)}
+          </p>
+        ) : null}
+        {noSlot && selectedDay ? (
+          <Alert tone="warning" title={`No time fits on Day ${selectedDay.index}`}>
+            {suggestion.windowSource === 'hours'
+              ? `${experience.name} (${formatDuration(experience.durationMinutes)}) does not fit within its usual hours ${hoursLabel(suggestion.window)} around this day's other stops. Enter a start time, or choose another day.`
+              : `${experience.name} (${formatDuration(experience.durationMinutes)}) does not fit around this day's other stops. Enter a start time, or choose another day.`}
+          </Alert>
+        ) : null}
+        {closedWeekday ? (
+          <p className="text-body-sm text-ink-muted">
+            {`Its demo hours list it as closed on ${closedWeekday}s, and this day is a ${closedWeekday}. Check before you go.`}
+          </p>
+        ) : null}
 
         {error ? <Alert tone="danger" title={error.title}>{error.message}</Alert> : null}
 

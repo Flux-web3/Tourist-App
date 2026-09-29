@@ -11,6 +11,7 @@ import {
   nextEmptySlotStartTime,
   removeItemFromDays,
   replaceItemInDays,
+  suggestPlaceSlot,
   updateItemInDays,
 } from '@/domain/itinerary'
 import { applyTheme, readThemePreference } from '@/lib/theme'
@@ -554,8 +555,17 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const days = current.daysByTrip[tripId] ?? []
       const day = findDayById(days, placement.dayId)
       if (!day) return null
+      // A typed time is the traveller's call and is kept as given. Without one the
+      // place goes where its usual hours and the day's stops leave room, and
+      // when nowhere does, nothing is added: the dialog shows the same answer
+      // from `suggestPlaceSlot` and asks for a time instead.
+      let startTime = placement.startTime ?? ''
+      if (!startTime) {
+        const suggestion = suggestPlaceSlot(day, experience)
+        if (suggestion.kind === 'none') return null
+        startTime = suggestion.startTime
+      }
       const at = timestamp()
-      const startTime = placement.startTime || nextEmptySlotStartTime(day)
       const item: ItineraryItem = {
         id: createId('itm'),
         tripId,

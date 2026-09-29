@@ -2148,3 +2148,111 @@ describe('TouristProvider item currency', () => {
     expect(ctx().state).toBe(before)
   })
 })
+
+describe('TouristProvider adding a place without a start time', () => {
+  function stateWithDay(items: ItineraryItem[], trip: Partial<Trip> = {}): PersistedState {
+    return {
+      ...seededState(),
+      trips: [makeTrip(trip)],
+      daysByTrip: { [TRIP_ID]: [makeDay(TRIP_ID, 1, items)] },
+    }
+  }
+
+  async function add(experienceId: string, startTime?: string): Promise<ItineraryItem | null> {
+    const box: { created: ItineraryItem | null } = { created: null }
+    await act(async () => {
+      box.created = await ctx().actions.addExperienceToTrip(TRIP_ID, experienceId, {
+        dayId: `${TRIP_ID}_d1`,
+        ...(startTime ? { startTime } : {}),
+      })
+    })
+    return box.created
+  }
+
+  it('fits the place into the first gap within its usual hours', async () => {
+    seedState(seededState())
+    renderProvider()
+    const before = ctx().state.daysByTrip[TRIP_ID]
+
+    // Day one holds 08:00 - 10:00 and a 10:00 stop; the Louvre opens at 09:00 and takes three hours.
+    const created = await add('exp_louvre_museum')
+
+    expect(created).toMatchObject({ startTime: '11:15', endTime: '14:15', experienceId: 'exp_louvre_museum' })
+    const after = ctx().state.daysByTrip[TRIP_ID]
+    expect(after[0].items.map((item) => item.startTime)).toEqual(['08:00', '10:00', '11:15'])
+    expect(after[0].items[0]).toBe(before[0].items[0])
+    expect(after[0].items[1]).toBe(before[0].items[1])
+    expect(after[1]).toBe(before[1])
+  })
+
+  it('adds nothing to the reported London day instead of putting the Tower at 21:30', async () => {
+    const london = { destination: 'London, United Kingdom', destinationId: 'london', currency: 'GBP' } as const
+    seedState(
+      stateWithDay(
+        [
+          makeItem(TRIP_ID, 'itm_abbey', { startTime: '09:30', endTime: '11:00' }),
+          makeItem(TRIP_ID, 'itm_lunch', { startTime: '12:30', endTime: '13:30', category: 'food' }),
+          makeItem(TRIP_ID, 'itm_tate', { startTime: '14:00', endTime: '16:30' }),
+          makeItem(TRIP_ID, 'itm_pub', { startTime: '20:00', endTime: '22:00', category: 'nightlife' }),
+        ],
+        london,
+      ),
+    )
+    renderProvider()
+    const before = ctx().state
+
+    expect(await add('exp_london_tower_of_london')).toBeNull()
+    expect(ctx().state.daysByTrip).toBe(before.daysByTrip)
+    expect(readStored().daysByTrip[TRIP_ID][0].items).toHaveLength(4)
+
+    // A time the traveller types is theirs, even a late one.
+    const typed = await add('exp_london_tower_of_london', '21:30')
+    expect(typed?.startTime).toBe('21:30')
+  })
+
+  it('keeps a place on the final morning clear of the departure, or does not add it', async () => {
+    seedState(
+      stateWithDay([
+        makeItem(TRIP_ID, 'itm_breakfast', { startTime: '08:00', endTime: '09:00', category: 'food' }),
+        makeItem(TRIP_ID, 'itm_departure', {
+          startTime: '12:00',
+          endTime: '13:30',
+          category: 'transit',
+          role: 'departure',
+        }),
+      ]),
+    )
+    renderProvider()
+
+    expect(await add('exp_louvre_museum')).toBeNull()
+    const chapel = await add('exp_sainte_chapelle')
+    expect(chapel).toMatchObject({ startTime: '09:15', endTime: '10:15' })
+  })
+
+  it('never modifies the traveller’s own, edited or moved stops', async () => {
+    const own = makeItem(TRIP_ID, 'itm_own', { startTime: '09:00', endTime: '10:00', source: 'user' })
+    const edited = makeItem(TRIP_ID, 'itm_edited', { startTime: '13:00', endTime: '14:00', editedByUser: true })
+    const moved = makeItem(TRIP_ID, 'itm_moved', {
+      startTime: '16:00',
+      endTime: null,
+      editedByUser: true,
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    })
+    seedState(stateWithDay([own, edited, moved]))
+    renderProvider()
+    const before = ctx().state.daysByTrip[TRIP_ID][0].items
+
+    const created = await add('exp_sainte_chapelle')
+
+    expect(created?.startTime).toBe('10:15')
+    const after = ctx().state.daysByTrip[TRIP_ID][0].items
+    expect(after).toHaveLength(4)
+    for (const original of before) {
+      expect(after.find((item) => item.id === original.id)).toBe(original)
+    }
+    const stored = readStored().daysByTrip[TRIP_ID][0].items
+    expect(stored.find((item) => item.id === 'itm_own')).toEqual(own)
+    expect(stored.find((item) => item.id === 'itm_edited')).toEqual(edited)
+    expect(stored.find((item) => item.id === 'itm_moved')).toEqual(moved)
+  })
+})

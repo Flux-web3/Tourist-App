@@ -1,5 +1,5 @@
 import { DESTINATIONS, getDestination, type Destination } from '@/data/destinations'
-import type { Experience, ImageCredit, ItineraryCategory } from '@/domain/types'
+import type { Experience, ImageCredit, ItineraryCategory, VisitWindow } from '@/domain/types'
 
 /**
  * Curated demo catalogue.
@@ -156,6 +156,12 @@ interface SeedSpec {
   coverAlt?: string
   tags: string[]
   hoursNote: string
+  /**
+   * Read off `hoursNote` by hand, never added to it. A note that gives no hours
+   * gets null, and the scheduler falls back to a daytime (for nightlife, an
+   * evening) default rather than a guess about this particular place.
+   */
+  visitWindow: VisitWindow | null
   bestTime: string
 }
 
@@ -185,6 +191,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'eiffel',
     tags: ['iconic', 'views', 'sunset'],
     hoursNote: 'Demo hours: roughly 09:30 - 23:45 daily',
+    visitWindow: { opens: '09:30', closes: '23:45' },
     bestTime: 'Late afternoon',
   },
   {
@@ -202,6 +209,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'louvre',
     tags: ['museum', 'art', 'monuments'],
     hoursNote: 'Demo hours: 09:00 - 18:00, closed Tuesdays',
+    visitWindow: { opens: '09:00', closes: '18:00', closedOn: ['Tuesday'] },
     bestTime: 'Morning, at opening',
   },
   {
@@ -219,6 +227,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'orsay',
     tags: ['museum', 'impressionism', 'architecture'],
     hoursNote: 'Demo hours: 09:30 - 18:00, closed Mondays',
+    visitWindow: { opens: '09:30', closes: '18:00', closedOn: ['Monday'] },
     bestTime: 'Late morning',
   },
   {
@@ -236,6 +245,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'sainteChapelle',
     tags: ['architecture', 'stained glass', 'quick'],
     hoursNote: 'Demo hours: 09:00 - 17:00 daily',
+    visitWindow: { opens: '09:00', closes: '17:00' },
     bestTime: 'Midday, for the light',
   },
   {
@@ -254,6 +264,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'sacreCoeur',
     tags: ['views', 'free', 'neighbourhood'],
     hoursNote: 'Demo hours: basilica open all day, square always open',
+    visitWindow: null,
     bestTime: 'Early morning, before the crowds',
   },
   {
@@ -272,6 +283,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'luxembourg',
     tags: ['free', 'gardens', 'relaxed'],
     hoursNote: 'Demo hours: 07:30 - sunset daily',
+    visitWindow: { opens: '07:30', closes: '18:00' },
     bestTime: 'Late afternoon',
   },
   {
@@ -289,6 +301,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'seine',
     tags: ['river', 'sunset', 'orientation'],
     hoursNote: 'Demo hours: hourly departures in season',
+    visitWindow: null,
     bestTime: 'Sunset',
   },
   {
@@ -307,6 +320,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'palaisRoyal',
     tags: ['free', 'architecture', 'sheltered'],
     hoursNote: 'Demo hours: open all day, galleries 10:00 - 19:00',
+    visitWindow: { opens: '10:00', closes: '19:00' },
     bestTime: 'Mid-morning',
   },
   {
@@ -325,6 +339,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'notreDame',
     tags: ['cathedral', 'free', 'history'],
     hoursNote: 'Demo hours: 07:50 - 19:00 daily',
+    visitWindow: { opens: '07:50', closes: '19:00' },
     bestTime: 'Morning',
   },
   {
@@ -342,6 +357,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'versailles',
     tags: ['day trip', 'palace', 'gardens'],
     hoursNote: 'Demo hours: 09:00 - 18:30 daily',
+    visitWindow: { opens: '09:00', closes: '18:30' },
     bestTime: 'Full day, arriving at opening',
   },
   {
@@ -360,6 +376,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'canal',
     tags: ['free', 'canal', 'local'],
     hoursNote: 'Demo hours: always open, best in daylight',
+    visitWindow: null,
     bestTime: 'Mid-morning',
   },
   {
@@ -378,6 +395,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'marais',
     tags: ['free', 'neighbourhood', 'shops'],
     hoursNote: 'Demo hours: streets always open, shops 10:00 - 19:00',
+    visitWindow: { opens: '10:00', closes: '19:00' },
     bestTime: 'Late morning, when the shops open',
   },
   {
@@ -395,6 +413,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'metro',
     tags: ['transport', 'art', 'cheap'],
     hoursNote: 'Demo hours: 05:30 - 00:30, roughly every 5 minutes',
+    visitWindow: { opens: '05:30', closes: '00:30' },
     bestTime: 'Off-peak, to avoid crowding',
   },
   {
@@ -412,6 +431,7 @@ const PARIS_SPECS: SeedSpec[] = [
     image: 'market',
     tags: ['food', 'market', 'guided'],
     hoursNote: 'Demo hours: 10:00 - 15:00, market closed Mondays',
+    visitWindow: { opens: '10:00', closes: '15:00', closedOn: ['Monday'] },
     bestTime: 'Late morning',
   },
 ]
@@ -433,6 +453,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for the Tower of London, not a photograph',
     tags: ['castle', 'history', 'crown jewels'],
     hoursNote: 'Demo hours: roughly 09:00 - 17:30, shorter in winter',
+    visitWindow: { opens: '09:00', closes: '17:30' },
     bestTime: 'Morning, at opening',
   },
   {
@@ -450,6 +471,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for the British Museum, not a photograph',
     tags: ['museum', 'free', 'history'],
     hoursNote: 'Demo hours: roughly 10:00 - 17:00 daily, later on Fridays',
+    visitWindow: { opens: '10:00', closes: '17:00' },
     bestTime: 'Weekday morning',
   },
   {
@@ -466,6 +488,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Borough Market, not a photograph',
     tags: ['market', 'street food', 'lunch'],
     hoursNote: 'Demo hours: roughly 10:00 - 17:00, shorter on Sundays',
+    visitWindow: { opens: '10:00', closes: '17:00' },
     bestTime: 'Late morning, before the lunch rush',
   },
   {
@@ -483,6 +506,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Hyde Park and Kensington Gardens, not a photograph',
     tags: ['free', 'park', 'relaxed'],
     hoursNote: 'Demo hours: roughly 05:00 - midnight daily',
+    visitWindow: { opens: '05:00', closes: '00:00' },
     bestTime: 'Afternoon',
   },
   {
@@ -500,6 +524,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Tate Modern, not a photograph',
     tags: ['museum', 'free', 'modern art'],
     hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    visitWindow: { opens: '10:00', closes: '18:00' },
     bestTime: 'Late afternoon',
   },
   {
@@ -517,6 +542,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Camden Market, not a photograph',
     tags: ['free', 'market', 'vintage'],
     hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    visitWindow: { opens: '10:00', closes: '18:00' },
     bestTime: 'Weekday, to avoid the weekend crowds',
   },
   {
@@ -533,6 +559,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for a West End theatre night, not a photograph',
     tags: ['theatre', 'evening', 'musicals'],
     hoursNote: 'Demo hours: evening shows typically from 19:30, some matinées',
+    visitWindow: { opens: '19:30', closes: null },
     bestTime: 'Evening',
   },
   {
@@ -549,6 +576,7 @@ const LONDON_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Westminster Abbey, not a photograph',
     tags: ['church', 'history', 'architecture'],
     hoursNote: 'Demo hours: roughly 09:30 - 15:30 Mon - Sat, services only on Sundays',
+    visitWindow: { opens: '09:30', closes: '15:30' },
     bestTime: 'Weekday morning',
   },
 ]
@@ -570,6 +598,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for the Lekki Conservation Centre, not a photograph',
     tags: ['nature', 'canopy walk', 'wildlife'],
     hoursNote: 'Demo hours: roughly 08:00 - 17:00 daily',
+    visitWindow: { opens: '08:00', closes: '17:00' },
     bestTime: 'Early morning, before the heat',
   },
   {
@@ -587,6 +616,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Nike Art Gallery, not a photograph',
     tags: ['free', 'art', 'textiles'],
     hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
+    visitWindow: { opens: '10:00', closes: '18:00' },
     bestTime: 'Late morning',
   },
   {
@@ -604,6 +634,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for the Lekki Arts and Crafts Market, not a photograph',
     tags: ['free', 'market', 'crafts'],
     hoursNote: 'Demo hours: roughly 09:00 - 18:00 daily',
+    visitWindow: { opens: '09:00', closes: '18:00' },
     bestTime: 'Morning',
   },
   {
@@ -620,6 +651,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Tarkwa Bay Beach, not a photograph',
     tags: ['beach', 'boat', 'day out'],
     hoursNote: 'Demo hours: boats roughly 08:00 - 17:00, daylight only',
+    visitWindow: { opens: '08:00', closes: '17:00' },
     bestTime: 'Weekday, arriving mid-morning',
   },
   {
@@ -636,6 +668,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for the New Afrika Shrine, not a photograph',
     tags: ['live music', 'afrobeat', 'evening'],
     hoursNote: 'Demo hours: evenings, with live shows typically late on weekends',
+    visitWindow: null,
     bestTime: 'Weekend night',
   },
   {
@@ -652,6 +685,7 @@ const LAGOS_SPECS: SeedSpec[] = [
     coverAlt: 'A drawn cover for Glover Court Suya, not a photograph',
     tags: ['street food', 'suya', 'evening'],
     hoursNote: 'Demo hours: roughly 17:00 - 23:00, evenings only',
+    visitWindow: { opens: '17:00', closes: '23:00' },
     bestTime: 'Evening',
   },
 ]
@@ -685,6 +719,7 @@ function buildExperience(destination: Destination, spec: SeedSpec): Experience {
     imageCredit: image?.credit ?? null,
     tags: spec.tags,
     hoursNote: spec.hoursNote,
+    visitWindow: spec.visitWindow,
     bestTime: spec.bestTime,
   }
 }

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addDays } from '@/domain/format'
+import { EXPERIENCES, EXPERIENCES_BY_ID } from '@/data/experiences'
+import { addDays, addMinutesToTime, timeToMinutes } from '@/domain/format'
 import {
+  DAYTIME_DEFAULT_WINDOW,
+  DEPARTURE_BUFFER_MINUTES,
+  EVENING_DEFAULT_WINDOW,
+  SLOT_BUFFER_MINUTES,
   belongsToDestination,
   countItems,
   estimateTotal,
@@ -8,6 +13,7 @@ import {
   findDayForDate,
   findItemInDays,
   insertItemAt,
+  isListedClosedOn,
   isPreservedOnRegenerate,
   mergeGeneratedDays,
   moveItemInDays,
@@ -16,10 +22,14 @@ import {
   replaceItemInDays,
   sortItems,
   stripOtherDestinationItems,
+  suggestPlaceSlot,
   summariseDestinationChange,
   updateItemInDays,
+  weekdayOf,
+  type PlaceForSlot,
 } from '@/domain/itinerary'
-import type { ItineraryDay, ItineraryItem } from '@/domain/types'
+import { FINAL_DAY_BUFFER_MINUTES } from '@/services/itineraryGenerator'
+import type { Experience, ItineraryDay, ItineraryItem } from '@/domain/types'
 
 const TRIP_ID = 'trip_1'
 const NOW = '2025-03-01T00:00:00.000Z'
@@ -1463,5 +1473,267 @@ describe('summariseDestinationChange', () => {
 
   it('counts nothing for an empty plan', () => {
     expect(summariseDestinationChange([], 'paris')).toEqual({ draftStops: 0, guidePlaces: 0, ownStops: 0 })
+  })
+})
+
+describe('suggestPlaceSlot', () => {
+  function place(id: string): Experience {
+    const found = EXPERIENCES_BY_ID.get(id)
+    if (!found) throw new Error(`no catalogue place ${id}`)
+    return found
+  }
+
+  /** A stop from `start` to `end` (or with no end time). */
+  function stop(
+    id: string,
+    start: string,
+    end: string | null,
+    overrides: Partial<ItineraryItem> = {},
+  ): ItineraryItem {
+    return item({ id, startTime: start, endTime: end, ...overrides })
+  }
+
+  function slotOf(dayValue: ItineraryDay, placeValue: PlaceForSlot): string | null {
+    const suggestion = suggestPlaceSlot(dayValue, placeValue)
+    return suggestion.kind === 'slot' ? suggestion.startTime : null
+  }
+
+  const TOWER = 'exp_london_tower_of_london'
+  const BRITISH_MUSEUM = 'exp_london_british_museum'
+  const WEST_END = 'exp_london_west_end_show'
+  const LOUVRE = 'exp_louvre_museum'
+  const EIFFEL = 'exp_eiffel_tower'
+  const LEKKI = 'exp_lagos_lekki_conservation_centre'
+  const NIKE = 'exp_lagos_nike_art_gallery'
+  const SHRINE = 'exp_lagos_new_afrika_shrine'
+  const SUYA = 'exp_lagos_glover_court_suya'
+
+  describe('an empty day', () => {
+    it('starts a place at its opening time, or 09:00 when it opens earlier', () => {
+      const empty = day({ items: [] })
+      expect(slotOf(empty, place(TOWER))).toBe('09:00')
+      expect(slotOf(empty, place(BRITISH_MUSEUM))).toBe('10:00')
+      expect(slotOf(empty, place(LOUVRE))).toBe('09:00')
+      expect(slotOf(empty, place(EIFFEL))).toBe('09:30')
+      // Lekki opens at 08:00, but nothing is suggested before 09:00.
+      expect(slotOf(empty, place(LEKKI))).toBe('09:00')
+    })
+
+    it('reports the window it used and where it came from', () => {
+      expect(suggestPlaceSlot(day({ items: [] }), place(TOWER))).toEqual({
+        kind: 'slot',
+        startTime: '09:00',
+        window: { opens: '09:00', closes: '17:30' },
+        windowSource: 'hours',
+      })
+    })
+  })
+
+  it('takes the next fitting gap after a morning stop, on the quarter hour', () => {
+    const morning = day({ items: [stop('m', '09:00', '10:30')] })
+    // 10:30 plus the 15-minute buffer.
+    expect(slotOf(morning, place(BRITISH_MUSEUM))).toBe('10:45')
+    const odd = day({ items: [stop('m', '09:00', '10:37')] })
+    expect(slotOf(odd, place(BRITISH_MUSEUM))).toBe('11:00')
+  })
+
+  it('uses a remaining daytime gap between a morning and an afternoon stop', () => {
+    const busy = day({ items: [stop('am', '09:00', '11:00'), stop('pm', '14:00', '16:00')] })
+    // 90 minutes fit between 11:15 and 13:45.
+    expect(slotOf(busy, place(NIKE))).toBe('11:15')
+
+    // Three hours do not fit before a 13:00 lunch, but do after it and still end by 18:00.
+    const lunch = day({ items: [stop('am', '09:00', '11:00'), stop('lunch', '13:00', '14:00')] })
+    expect(slotOf(lunch, place(LOUVRE))).toBe('14:15')
+  })
+
+  it('treats a stop with no end time as an hour long', () => {
+    const noEnd = day({ items: [stop('open', '10:00', null)] })
+    // 09:00 plus three hours runs into 10:00, so the next start is 11:00 plus the buffer.
+    expect(slotOf(noEnd, place(TOWER))).toBe('11:15')
+  })
+
+  describe('the reported London day: full daytime, then a pub stop at 20:00', () => {
+    const londonDay = day({
+      items: [
+        stop('breakfast', '08:00', '09:00'),
+        stop('abbey', '09:30', '11:00'),
+        stop('lunch', '12:30', '13:30'),
+        stop('tate', '14:00', '16:30'),
+        stop('pub', '20:00', '22:00', { category: 'nightlife' }),
+      ],
+    })
+
+    it('finds no sensible slot for the Tower of London instead of 21:30', () => {
+      // What the old rule does with this day.
+      expect(nextEmptySlotStartTime(londonDay)).toBe('21:30')
+
+      expect(suggestPlaceSlot(londonDay, place(TOWER)).kind).toBe('none')
+      expect(slotOf(londonDay, place(TOWER))).toBeNull()
+    })
+
+    it('offers the evening show only where it fits before 23:00', () => {
+      // 22:15 plus three hours would run past 23:00.
+      expect(slotOf(londonDay, place(WEST_END))).toBeNull()
+      const earlyPub = day({ items: [stop('pub', '17:00', '19:00')] })
+      expect(slotOf(earlyPub, place(WEST_END))).toBe('19:30')
+    })
+  })
+
+  describe('a final day with a 12:00 departure', () => {
+    const lastDay = day({
+      items: [
+        stop('breakfast', '08:00', '09:00'),
+        stop('departure', '12:00', '13:30', { role: 'departure', category: 'transit' }),
+      ],
+    })
+
+    it('ends the place the final-day buffer before the departure', () => {
+      const startTime = slotOf(lastDay, place('exp_sainte_chapelle'))
+      expect(startTime).toBe('09:15')
+      const end = timeToMinutes(addMinutesToTime(startTime ?? '', 60))
+      expect(end).toBeLessThanOrEqual(timeToMinutes('12:00') - DEPARTURE_BUFFER_MINUTES)
+    })
+
+    it('finds no slot for a place too long for the morning, never one after the departure', () => {
+      expect(slotOf(lastDay, place(LOUVRE))).toBeNull()
+      expect(slotOf(lastDay, place(TOWER))).toBeNull()
+      expect(slotOf(lastDay, place(WEST_END))).toBeNull()
+      expect(slotOf(lastDay, place(SUYA))).toBeNull()
+    })
+
+    it('reads the departure item itself, so a moved departure is respected', () => {
+      const later = day({ items: [stop('departure', '18:00', '19:00', { role: 'departure' })] })
+      expect(slotOf(later, place(LOUVRE))).toBe('09:00')
+      expect(slotOf(later, place(SUYA))).toBeNull()
+    })
+  })
+
+  it('never starts before an arrival has ended', () => {
+    const arrivalDay = day({
+      items: [stop('arrival', '15:00', '16:00', { role: 'arrival', category: 'transit' })],
+    })
+    expect(slotOf(arrivalDay, place(NIKE))).toBe('16:15')
+    // The Tower closes at 17:30, so after a 16:00 arrival it cannot fit.
+    expect(slotOf(arrivalDay, place(TOWER))).toBeNull()
+  })
+
+  it('ends a place with a known closing time by that time', () => {
+    const abbey = place('exp_london_westminster_abbey')
+    expect(slotOf(day({ items: [stop('am', '09:00', '13:00')] }), abbey)).toBe('13:15')
+    // 14:45 plus 90 minutes would end after the 15:30 close.
+    expect(slotOf(day({ items: [stop('am', '09:00', '14:30')] }), abbey)).toBeNull()
+
+    for (const experience of EXPERIENCES) {
+      const window = experience.visitWindow
+      if (!window || window.closes === null || window.closes <= window.opens) continue
+      const startTime = slotOf(day({ items: [] }), experience)
+      if (startTime === null) continue
+      expect(timeToMinutes(startTime) + experience.durationMinutes).toBeLessThanOrEqual(
+        timeToMinutes(window.closes),
+      )
+    }
+  })
+
+  it('gives a place without hours a daytime slot, and no evening fallback', () => {
+    const canal = place('exp_canal_saint_martin')
+    expect(canal.visitWindow).toBeNull()
+    expect(suggestPlaceSlot(day({ items: [] }), canal)).toEqual({
+      kind: 'slot',
+      startTime: '09:00',
+      window: DAYTIME_DEFAULT_WINDOW,
+      windowSource: 'daytime-default',
+    })
+    const fullDay = day({ items: [stop('all', '09:00', '17:00')] })
+    expect(slotOf(fullDay, canal)).toBeNull()
+  })
+
+  it('puts evening venues in the evening, not the morning', () => {
+    const empty = day({ items: [] })
+    expect(slotOf(empty, place(WEST_END))).toBe('19:30')
+    expect(slotOf(empty, place(SUYA))).toBe('17:00')
+    expect(suggestPlaceSlot(empty, place(SHRINE))).toEqual({
+      kind: 'slot',
+      startTime: '18:00',
+      window: EVENING_DEFAULT_WINDOW,
+      windowSource: 'evening-default',
+    })
+    expect(slotOf(day({ items: [stop('dinner', '17:00', '18:30')] }), place(SUYA))).toBe('18:45')
+  })
+
+  it('never overlaps a stop, and stays on the quarter hour, in hours and within 09:00 - 23:00', () => {
+    const shapes: ItineraryItem[][] = [
+      [],
+      [stop('a', '09:00', '10:30')],
+      [stop('a', '09:00', '11:00'), stop('b', '13:00', null), stop('c', '19:30', '21:00')],
+      [stop('a', '10:10', '12:05'), stop('b', '12:00', '12:40'), stop('c', '15:55', '16:20')],
+      [stop('arr', '13:00', '14:00', { role: 'arrival' }), stop('d', '18:00', '19:30')],
+      [stop('b', '07:30', '08:30'), stop('dep', '15:00', '16:00', { role: 'departure' })],
+    ]
+    for (const items of shapes) {
+      const dayValue = day({ items })
+      for (const experience of EXPERIENCES) {
+        const startTime = slotOf(dayValue, experience)
+        if (startTime === null) continue
+        const start = timeToMinutes(startTime)
+        const end = start + experience.durationMinutes
+        expect(start % 15).toBe(0)
+        expect(start).toBeGreaterThanOrEqual(9 * 60)
+        expect(end).toBeLessThanOrEqual(23 * 60)
+        const window = experience.visitWindow
+        if (window) expect(start).toBeGreaterThanOrEqual(timeToMinutes(window.opens))
+        for (const other of items) {
+          const otherStart = timeToMinutes(other.startTime)
+          const otherEnd = other.endTime === null ? otherStart + 60 : timeToMinutes(other.endTime)
+          const clear =
+            end + SLOT_BUFFER_MINUTES <= otherStart || start >= otherEnd + SLOT_BUFFER_MINUTES
+          expect(clear, `${experience.id} at ${startTime} against ${other.id}`).toBe(true)
+          if (other.role === 'departure') {
+            expect(end).toBeLessThanOrEqual(otherStart - DEPARTURE_BUFFER_MINUTES)
+          }
+          if (other.role === 'arrival') expect(start).toBeGreaterThan(otherEnd)
+        }
+      }
+    }
+  })
+
+  it('depends only on the place’s hours, length and kind, never its city or trip', () => {
+    const busy = day({ items: [stop('a', '09:00', '11:00'), stop('b', '15:00', '16:00')] })
+    const tate = place('exp_london_tate_modern')
+    const camden = place('exp_london_camden_market')
+    const lookalike: PlaceForSlot = { ...place(NIKE), durationMinutes: tate.durationMinutes }
+    expect(slotOf(busy, tate)).toBe('11:15')
+    expect(slotOf(busy, camden)).toBe('11:15')
+    expect(slotOf(busy, lookalike)).toBe('11:15')
+    expect(slotOf(day({ tripId: 'another_trip', items: busy.items }), tate)).toBe('11:15')
+  })
+
+  it('does not modify the day it reads', () => {
+    const items = [
+      stop('a', '09:00', '10:00'),
+      stop('b', '12:00', null, { source: 'user', editedByUser: true }),
+    ]
+    const dayValue = day({ items })
+    const snapshot = JSON.stringify(dayValue)
+    suggestPlaceSlot(dayValue, place(LOUVRE))
+    expect(JSON.stringify(dayValue)).toBe(snapshot)
+    expect(dayValue.items).toBe(items)
+  })
+
+  it('keeps the departure buffer equal to the generator’s final-day buffer', () => {
+    expect(DEPARTURE_BUFFER_MINUTES).toBe(FINAL_DAY_BUFFER_MINUTES)
+  })
+})
+
+describe('isListedClosedOn', () => {
+  it('matches only the weekdays a place’s demo hours name as closed', () => {
+    const louvre = EXPERIENCES_BY_ID.get('exp_louvre_museum')
+    const tower = EXPERIENCES_BY_ID.get('exp_london_tower_of_london')
+    if (!louvre || !tower) throw new Error('catalogue places missing')
+    expect(weekdayOf('2025-03-04')).toBe('Tuesday')
+    expect(isListedClosedOn(louvre, '2025-03-04')).toBe(true)
+    expect(isListedClosedOn(louvre, '2025-03-03')).toBe(false)
+    expect(isListedClosedOn(tower, '2025-03-04')).toBe(false)
+    expect(isListedClosedOn(louvre, 'not a date')).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import { AddToTripDialog } from '@/components/AddToTripDialog'
+import { AddToTripDialog, type AddedPlace } from '@/components/AddToTripDialog'
 import { PlaceImage } from '@/components/PlaceImage'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -17,7 +17,7 @@ import {
   GUIDE_DESTINATIONS,
   destinationHasPlaces,
 } from '@/data/experiences'
-import { formatShortDate } from '@/domain/format'
+import { formatShortDate, formatTime } from '@/domain/format'
 import { CURRENCY_SYMBOLS, formatPrice } from '@/domain/money'
 import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist, useTrip } from '@/state/useTourist'
@@ -225,7 +225,7 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
   const [response, setResponse] = useState<{ query: CatalogQuery; results: Experience[] } | null>(null)
 
   const [addTarget, setAddTarget] = useState<Experience | null>(null)
-  const [added, setAdded] = useState<{ name: string; day: ItineraryDay } | null>(null)
+  const [added, setAdded] = useState<{ name: string; day: ItineraryDay; place: AddedPlace } | null>(null)
 
   // The trip's destination is the only source of truth for what Explore shows
   // inside a trip; the general guide lets the traveller pick a city.
@@ -410,11 +410,18 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
           role="status"
           className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-actual-border bg-actual-bg px-4 py-3 text-actual-ink"
         >
-          <p className="min-w-0 text-body-md">
-            {`${added.name} was added to Day ${added.day.index} · ${formatShortDate(
-              added.day.date,
-            )} of ${trip.name}.`}
-          </p>
+          <div className="min-w-0">
+            <p className="text-body-md">
+              {`${added.name} was added to Day ${added.day.index} · ${formatShortDate(
+                added.day.date,
+              )} of ${trip.name}.`}
+            </p>
+            {added.place.suggested ? (
+              <p className="mt-1 text-body-sm">
+                {`Tourist suggested the ${formatTime(added.place.startTime) ?? added.place.startTime} start; you can change it in the itinerary.`}
+              </p>
+            ) : null}
+          </div>
           <ButtonLink
             to={`/trips/${trip.id}/itinerary`}
             size="sm"
@@ -582,9 +589,9 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
           trip={trip}
           experience={addTarget}
           onClose={() => setAddTarget(null)}
-          onAdded={(day) => {
+          onAdded={(day, place) => {
             setAddTarget(null)
-            setAdded({ name: addTarget.name, day })
+            setAdded({ name: addTarget.name, day, place })
           }}
         />
       ) : null}

@@ -1,8 +1,15 @@
 import { EXPERIENCES_BY_ID } from '@/data/experiences'
 import { sumAmounts } from './money'
-import { differenceInDays, timeToMinutes } from './format'
+import { differenceInDays, parseISODate, timeToMinutes } from './format'
 import { nowISO } from './ids'
-import type { CurrencyCode, ItineraryDay, ItineraryItem } from './types'
+import type {
+  CurrencyCode,
+  Experience,
+  ItineraryDay,
+  ItineraryItem,
+  VisitWindow,
+  Weekday,
+} from './types'
 
 /**
  * Every function here is pure: it takes days, returns new days, and never
@@ -397,4 +404,132 @@ export function nextEmptySlotStartTime(day: ItineraryDay): string {
   const minutes = Math.min(latest + 90, 22 * 60)
   const hours = Math.floor(minutes / 60)
   return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
+/*
+ * Suggesting a start time for a catalogue place.
+ *
+ * `nextEmptySlotStartTime` above only looks at the day's latest start, which is
+ * fine for the traveller's own stops (they pick the time) but put the Tower of
+ * London at 21:30 after an evening pub stop. A place has usual hours and a
+ * length, so it is fitted between the day's stops instead, inside those hours,
+ * or not suggested at all.
+ */
+
+/** Gap kept between one stop's end and the next start; the generator's BUFFER_MINUTES. */
+export const SLOT_BUFFER_MINUTES = 15
+
+/**
+ * How long before a departure a suggested place must end. It mirrors the
+ * generator's `FINAL_DAY_BUFFER_MINUTES` (a test holds them equal); the domain
+ * cannot import services, and reading the departure's own start time here
+ * means a departure the traveller moved is respected too.
+ */
+export const DEPARTURE_BUFFER_MINUTES = 90
+
+/** A stop saved without an end time is assumed to take this long. */
+export const DEFAULT_STOP_MINUTES = 60
+
+/** Suggestions snap to the quarter hour so they read like times people pick. */
+const SLOT_STEP_MINUTES = 15
+
+/**
+ * Nothing is suggested to start before 09:00 or end after 23:00, whatever a
+ * place's hours say: Hyde Park opening at 05:00 or the Metro running to 00:30
+ * does not make either a sensible suggestion. A typed time is never limited.
+ */
+const EARLIEST_SUGGESTED_START = '09:00'
+const LATEST_SUGGESTED_END = '23:00'
+
+/** For a place whose note gives no hours: a plain working day. */
+export const DAYTIME_DEFAULT_WINDOW: VisitWindow = { opens: '09:00', closes: '18:00' }
+
+/** For nightlife whose note gives no hours ("evenings, with live shows late"). */
+export const EVENING_DEFAULT_WINDOW: VisitWindow = { opens: '18:00', closes: LATEST_SUGGESTED_END }
+
+export type PlaceForSlot = Pick<Experience, 'durationMinutes' | 'category' | 'visitWindow'>
+
+export type SlotWindowSource = 'hours' | 'daytime-default' | 'evening-default'
+
+export type PlaceSlotSuggestion =
+  | { kind: 'slot'; startTime: string; window: VisitWindow; windowSource: SlotWindowSource }
+  | { kind: 'none'; window: VisitWindow; windowSource: SlotWindowSource }
+
+function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
+/** The window a place is scheduled in, and where it came from. */
+export function placeVisitWindow(place: PlaceForSlot): { window: VisitWindow; source: SlotWindowSource } {
+  if (place.visitWindow) return { window: place.visitWindow, source: 'hours' }
+  return place.category === 'nightlife'
+    ? { window: EVENING_DEFAULT_WINDOW, source: 'evening-default' }
+    : { window: DAYTIME_DEFAULT_WINDOW, source: 'daytime-default' }
+}
+
+/**
+ * The earliest start, on the quarter hour, at which `place` fits whole into
+ * `day`: inside its usual hours, clear of every existing stop by
+ * `SLOT_BUFFER_MINUTES`, after any arrival, and ending
+ * `DEPARTURE_BUFFER_MINUTES` before any departure. When nothing fits the answer
+ * is `none`, never a late time; the traveller then picks one.
+ *
+ * Only the day's existing stops are read. Pure: nothing is modified.
+ */
+export function suggestPlaceSlot(day: ItineraryDay, place: PlaceForSlot): PlaceSlotSuggestion {
+  const { window, source } = placeVisitWindow(place)
+  const opens = timeToMinutes(window.opens)
+  const rawCloses = window.closes === null ? null : timeToMinutes(window.closes)
+  // A close at or before the opening ("05:30 - 00:30", midnight) is past midnight.
+  const closes = rawCloses === null || rawCloses <= opens ? Number.POSITIVE_INFINITY : rawCloses
+
+  const busy = day.items
+    .map((item) => {
+      const start = timeToMinutes(item.startTime)
+      const end = item.endTime === null ? start : timeToMinutes(item.endTime)
+      return { start, end: end > start ? end : start + DEFAULT_STOP_MINUTES, role: item.role }
+    })
+    .sort((a, b) => a.start - b.start)
+
+  let earliest = Math.max(opens, timeToMinutes(EARLIEST_SUGGESTED_START))
+  let latestEnd = Math.min(closes, timeToMinutes(LATEST_SUGGESTED_END))
+  for (const stop of busy) {
+    if (stop.role === 'arrival') earliest = Math.max(earliest, stop.end + SLOT_BUFFER_MINUTES)
+    if (stop.role === 'departure') latestEnd = Math.min(latestEnd, stop.start - DEPARTURE_BUFFER_MINUTES)
+  }
+
+  const duration = Math.max(0, place.durationMinutes)
+  const roundUp = (minutes: number) => Math.ceil(minutes / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES
+  let start = roundUp(earliest)
+  for (const stop of busy) {
+    if (start + duration > latestEnd) break
+    if (start + duration + SLOT_BUFFER_MINUTES <= stop.start) break
+    start = Math.max(start, roundUp(stop.end + SLOT_BUFFER_MINUTES))
+  }
+  return start + duration <= latestEnd
+    ? { kind: 'slot', startTime: minutesToTime(start), window, windowSource: source }
+    : { kind: 'none', window, windowSource: source }
+}
+
+const WEEKDAYS: readonly Weekday[] = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+]
+
+/** The weekday a dated day falls on, or null for a date that does not parse. */
+export function weekdayOf(dateISO: string): Weekday | null {
+  const date = parseISODate(dateISO)
+  return date ? WEEKDAYS[date.getUTCDay()] : null
+}
+
+/** Whether the place's demo hours name `dateISO`'s weekday as a closed day. */
+export function isListedClosedOn(place: Pick<Experience, 'visitWindow'>, dateISO: string): boolean {
+  const weekday = weekdayOf(dateISO)
+  return weekday !== null && (place.visitWindow?.closedOn ?? []).includes(weekday)
 }
