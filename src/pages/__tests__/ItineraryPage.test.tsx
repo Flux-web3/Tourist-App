@@ -826,7 +826,7 @@ describe('ItineraryPage travel stops', () => {
     const lastDay = daySection(1)
     const notice = within(lastDay).getByText('2 stops are after your departure').closest('[role="status"]')
     expect(notice).toHaveTextContent(
-      'Late gallery visit, Farewell lunch start at or after 12:00 PM, when you leave. Move them earlier or to another day.',
+      'Late gallery visit, Farewell lunch start at or after 12:00 PM, the time on your departure stop. Move them earlier or to another day.',
     )
     expect(within(stopCard('Late gallery visit')).getByText('After your departure')).toBeInTheDocument()
     expect(within(stopCard('Farewell lunch')).getByText('After your departure')).toBeInTheDocument()
@@ -841,7 +841,7 @@ describe('ItineraryPage travel stops', () => {
     expect(within(daySection(1)).getByText('This stop is after your departure')).toBeInTheDocument()
     expect(
       within(daySection(1)).getByText(
-        'Late gallery visit starts at or after 12:00 PM, when you leave. Move it earlier or to another day.',
+        'Late gallery visit starts at or after 12:00 PM, the time on your departure stop. Move it earlier or to another day.',
       ),
     ).toBeInTheDocument()
   })

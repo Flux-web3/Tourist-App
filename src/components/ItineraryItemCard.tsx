@@ -70,6 +70,9 @@ export function ItineraryItemCard({
   const movePanelRef = useRef<HTMLDivElement>(null)
 
   const travelRole = item.role === 'arrival' || item.role === 'departure' ? item.role : null
+  // Tourist has no ticket time, so a drafted travel stop's time is a guess
+  // until the traveller edits it; after that it is their time, not ours.
+  const placeholderTime = travelRole !== null && !item.editedByUser
   const pending = pendingItemId === item.id
   const swapBlocked = pendingItemId !== null && !pending
 
@@ -138,6 +141,8 @@ export function ItineraryItemCard({
             {timeRange ? (
               <p className="tnum rounded-badge bg-surface-high px-2 py-0.5 text-label-md text-ink-muted">
                 {timeRange}
+                {/* Said at the time itself: a note at the end of the description was easy to miss. */}
+                {placeholderTime ? <span className="text-ink-subtle"> (placeholder)</span> : null}
               </p>
             ) : null}
 
@@ -208,7 +213,9 @@ export function ItineraryItemCard({
 
           {travelRole ? (
             <p className="mt-2 text-body-sm text-ink-subtle">
-              Travel stop, so it is never swapped for an activity. Edit it to match your booking.
+              {placeholderTime
+                ? `Placeholder time: Tourist does not know your flight or train. Edit this stop to your real ${travelRole} time. It is never swapped for an activity.`
+                : 'Travel stop, timed by you. It is never swapped for an activity.'}
             </p>
           ) : null}
 

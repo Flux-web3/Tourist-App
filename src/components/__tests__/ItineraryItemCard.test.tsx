@@ -417,8 +417,12 @@ describe('ItineraryItemCard travel stops', () => {
 
     const card = screen.getByRole('article', { name: item.title })
     expect(within(card).getByText(marker)).toBeInTheDocument()
+    // Tourist has no ticket time: the drafted time must read as a placeholder, at the time itself.
+    expect(within(card).getByText('(placeholder)')).toBeInTheDocument()
     expect(
-      within(card).getByText('Travel stop, so it is never swapped for an activity. Edit it to match your booking.'),
+      within(card).getByText(
+        `Placeholder time: Tourist does not know your flight or train. Edit this stop to your real ${marker.toLowerCase()} time. It is never swapped for an activity.`,
+      ),
     ).toBeInTheDocument()
 
     const menu = await openMenu(user, `Actions for ${item.title}`)
@@ -426,6 +430,15 @@ describe('ItineraryItemCard travel stops', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
     expect(within(menu).getByRole('menuitem', { name: 'Move to another day' })).toBeInTheDocument()
     expect(within(menu).getByRole('menuitem', { name: 'Remove' })).toBeInTheDocument()
+  })
+
+  it('drops the placeholder wording once the traveller has set the time themselves', () => {
+    const edited = { ...DEPARTURE, editedByUser: true, startTime: '18:30', endTime: '20:30' }
+    renderCard({ item: edited, day: makeDay('day-1', '2026-03-10', 0, [edited]) })
+
+    const card = screen.getByRole('article', { name: edited.title })
+    expect(within(card).queryByText('(placeholder)')).not.toBeInTheDocument()
+    expect(within(card).getByText('Travel stop, timed by you. It is never swapped for an activity.')).toBeInTheDocument()
   })
 
   it('still offers Replace on an ordinary stop and on one from a draft saved before roles', async () => {

@@ -593,7 +593,7 @@ export default function ItineraryPage() {
                         afterDeparture.late.length === 1 ? 'starts' : 'start'
                       } at or after ${
                         formatTime(afterDeparture.departure.startTime) ?? afterDeparture.departure.startTime
-                      }, when you leave. Move ${afterDeparture.late.length === 1 ? 'it' : 'them'} earlier or to another day.`}
+                      }, the time on your departure stop. Move ${afterDeparture.late.length === 1 ? 'it' : 'them'} earlier or to another day.`}
                     </Alert>
                   ) : null}
 
