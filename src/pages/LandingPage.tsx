@@ -19,17 +19,17 @@ const STEPS = [
   {
     title: 'Answer a few questions',
     description:
-      'Where you are going, when, who is coming, what you enjoy, and the ceiling you will accept.',
+      'Where you are going, when, who is coming, what you enjoy, and your budget limit.',
   },
   {
     title: 'Argue with the draft',
     description:
-      'Tourist drafts a day-by-day plan and prices every stop. Move it, rewrite it, or throw a stop away.',
+      'Tourist drafts a day-by-day plan and prices every stop. Move it, rewrite it, or remove what doesn’t fit.',
   },
   {
     title: 'Keep the trip honest',
     description:
-      'Log what you really pay as you go, and keep the details you need on the day in your trip notes.',
+      'Log what you really pay as you go, and keep the details you need right in your trip notes.',
   },
 ] as const
 

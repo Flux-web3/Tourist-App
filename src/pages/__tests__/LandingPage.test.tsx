@@ -63,6 +63,15 @@ describe('LandingPage', () => {
     expect(screen.getAllByRole('button', { name: 'Try the demo' })).toHaveLength(2)
   })
 
+  it('explains the three steps in plain words', () => {
+    renderLanding()
+
+    const steps = screen.getByRole('region', { name: 'How it works' })
+    expect(steps).toHaveTextContent('what you enjoy, and your budget limit.')
+    expect(steps).toHaveTextContent('Move it, rewrite it, or remove what doesn’t fit.')
+    expect(steps).toHaveTextContent('keep the details you need right in your trip notes.')
+  })
+
   it('sends Plan your trip to the entry flow, not straight into a new trip', async () => {
     const user = userEvent.setup()
     renderLanding()
