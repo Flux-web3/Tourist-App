@@ -71,6 +71,10 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
   }))
 
   const selectedDay = days.find((day) => day.id === dayId) ?? null
+  // Adding the same place to the same day twice only doubled its share of the
+  // estimate; nobody visits the Louvre at 18:15 and again at 19:45.
+  const alreadyOnDay =
+    selectedDay?.items.some((item) => item.experienceId === experience.id) ?? false
 
   const priceLine = experience.isFree
     ? 'Free to visit'
@@ -82,6 +86,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
       setError({ title: 'Choose a day first', message: 'Pick the day this place should be added to.' })
       return
     }
+    if (alreadyOnDay) return
     if (startTime && !isValidTime(startTime)) {
       setError({
         title: 'That start time was not read',
@@ -127,7 +132,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
             icon={<Icon name="add" size={18} />}
             loading={submitting}
             loadingLabel="Adding"
-            disabled={days.length === 0}
+            disabled={days.length === 0 || alreadyOnDay}
           >
             Add to itinerary
           </Button>
@@ -177,6 +182,12 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
               onChange={(event) => setDayId(event.target.value)}
             />
             {selectedDay ? <DayPreview day={selectedDay} /> : null}
+            {alreadyOnDay ? (
+              <Alert tone="warning" title={`${experience.name} is already on this day`}>
+                Choose another day to add it again, or move the stop you already have from the
+                itinerary.
+              </Alert>
+            ) : null}
           </>
         )}
 
@@ -186,7 +197,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           value={startTime}
           onChange={(event) => setStartTime(event.target.value)}
           disabled={days.length === 0}
-          hint="Optional. Left empty, it goes in the first free slot."
+          hint="Optional. Left empty, it goes after the day's last stop."
         />
 
         {error ? <Alert tone="danger" title={error.title}>{error.message}</Alert> : null}

@@ -483,7 +483,41 @@ describe('ExplorePage', () => {
       expect(added?.experienceId).toBe('exp_eiffel_tower')
     })
 
-    it('finds the first free slot when no time is given', async () => {
+    it('refuses to put the same place on the same day twice', async () => {
+      const user = userEvent.setup()
+      renderWithTrip()
+      await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
+
+      await user.click(within(cardNamed('Louvre Museum')).getByRole('button', { name: 'Add to trip' }))
+      await user.click(
+        within(screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })).getByRole('button', {
+          name: 'Add to itinerary',
+        }),
+      )
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      const louvresOnDayOne = () =>
+        readStoredState()
+          .daysByTrip[FIXTURE_TRIP_ID].find((day) => day.id === 'day-1')
+          ?.items.filter((item) => item.experienceId === 'exp_louvre_museum').length
+
+      expect(louvresOnDayOne()).toBe(1)
+
+      // A second attempt on the same day is stopped, and says why.
+      await user.click(within(cardNamed('Louvre Museum')).getByRole('button', { name: 'Add to trip' }))
+      const dialog = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
+      expect(within(dialog).getByText('Louvre Museum is already on this day')).toBeInTheDocument()
+      const add = within(dialog).getByRole('button', { name: 'Add to itinerary' })
+      expect(add).toBeDisabled()
+      await user.click(add)
+      expect(louvresOnDayOne()).toBe(1)
+
+      // Another day is still fine.
+      await user.selectOptions(daySelect(dialog), 'day-2')
+      expect(within(dialog).queryByText('Louvre Museum is already on this day')).not.toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Add to itinerary' })).toBeEnabled()
+    })
+
+    it('puts the place after the last stop when no time is given', async () => {
       const user = userEvent.setup()
       renderWithTrip()
       await waitFor(() => expect(screen.getByText('14 places')).toBeInTheDocument())
@@ -491,7 +525,7 @@ describe('ExplorePage', () => {
       await user.click(within(cardNamed('Eiffel Tower Summit')).getByRole('button', { name: 'Add to trip' }))
       const dialog = screen.getByRole('dialog', { name: 'Add to Paris in the Spring' })
       expect(daySelect(dialog)).toHaveValue('day-1')
-      expect(within(dialog).getByText('Optional. Left empty, it goes in the first free slot.')).toBeInTheDocument()
+      expect(within(dialog).getByText("Optional. Left empty, it goes after the day's last stop.")).toBeInTheDocument()
       await user.click(within(dialog).getByRole('button', { name: 'Add to itinerary' }))
 
       await waitFor(() => expect(screen.getByRole('link', { name: 'Open itinerary' })).toBeInTheDocument())
