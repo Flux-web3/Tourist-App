@@ -1,6 +1,6 @@
 import { createId, nowISO } from '@/domain/ids'
 import { eachDay } from '@/domain/format'
-import { mergeGeneratedDays } from '@/domain/itinerary'
+import { mergeGeneratedDays, stripOtherDestinationItems } from '@/domain/itinerary'
 import { getDestination, matchDestination } from '@/data/destinations'
 import { suggestTripName, validateTripDraft } from '@/domain/validation'
 import { buildItinerary } from './itineraryGenerator'
@@ -169,6 +169,16 @@ export const tripService: TripService = {
     if (!next.name) {
       next.name = suggestTripName(next.destination, next.startDate, next.destinationId)
     }
+    /*
+      A name Tourist suggested ("London in September") describes the trip, not
+      the traveller's wording, so it follows the trip: moved to Paris, it read
+      "Curated Paris places you can add to any day of London in September". A
+      name the traveller wrote themselves is never touched.
+    */
+    const suggestedBefore = suggestTripName(current.destination, current.startDate, currentDestinationId)
+    if (next.name === suggestedBefore) {
+      next.name = suggestTripName(next.destination, next.startDate, next.destinationId)
+    }
 
     /**
      * The same rules that gate creation gate an edit. Without this a patch went
@@ -190,7 +200,17 @@ export const tripService: TripService = {
     let daysByTrip = state.daysByTrip
 
     if (shouldReflow(current, next)) {
-      const existing = state.daysByTrip[tripId] ?? []
+      /*
+        A new city is not a new date range. What a date or pace change keeps
+        (catalogue places, hand-edited AI stops) was planned for the old city,
+        so it goes before the re-flow, leaving only the traveller's own stops
+        and any place in the new city's guide. Done here rather than in the
+        dialog so every caller that moves a trip gets the same plan.
+      */
+      const existing =
+        destinationId !== currentDestinationId
+          ? stripOtherDestinationItems(state.daysByTrip[tripId] ?? [], destinationId)
+          : (state.daysByTrip[tripId] ?? [])
       const regenerated = buildItinerary(next, 0, timestamp)
       daysByTrip = { ...state.daysByTrip, [tripId]: mergeGeneratedDays(existing, regenerated) }
     }

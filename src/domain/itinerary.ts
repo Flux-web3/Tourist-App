@@ -1,3 +1,4 @@
+import { EXPERIENCES_BY_ID } from '@/data/experiences'
 import { sumAmounts } from './money'
 import { differenceInDays, timeToMinutes } from './format'
 import { nowISO } from './ids'
@@ -281,6 +282,79 @@ export function mergeGeneratedDays(
     const carried = rescued.get(index)
     return { ...day, items: sortItems(carried ? [...day.items, ...carried] : day.items) }
   })
+}
+
+/**
+ * Whether a stop still belongs on the trip once it is moved to `destinationId`.
+ *
+ * `mergeGeneratedDays` keeps hand-edited AI stops and catalogue places because
+ * a date or pace change leaves them true. A new city does not: "Tower of
+ * London" in a Paris plan is wrong however much the traveller edited it. So on
+ * a destination change every AI stop goes (arrival and departure included,
+ * the new city's replace them), and a catalogue place stays only when it is in
+ * the new city's guide. A place Tourist no longer lists, or a trip moving to no
+ * listed city, cannot be shown to belong, so it goes too - the same rule
+ * `addExperienceToTrip` applies before a place is ever added.
+ *
+ * The traveller's own stops always stay. Tourist cannot tell whether "Dinner
+ * with Sam" was about the old city, and deleting it would be silent data loss.
+ */
+export function belongsToDestination(item: ItineraryItem, destinationId: string | null): boolean {
+  switch (item.source) {
+    case 'user':
+      return true
+    case 'catalog': {
+      const place = item.experienceId === null ? undefined : EXPERIENCES_BY_ID.get(item.experienceId)
+      return destinationId !== null && place?.destinationId === destinationId
+    }
+    case 'ai':
+      return false
+  }
+}
+
+/**
+ * The days with every stop tied to another destination taken out (see
+ * `belongsToDestination`). Days and their dates are kept, so the caller can
+ * re-draft them for the new city with `mergeGeneratedDays` exactly as any
+ * other re-flow does. Pure: `days` is never modified.
+ */
+export function stripOtherDestinationItems(
+  days: readonly ItineraryDay[],
+  destinationId: string | null,
+): ItineraryDay[] {
+  return days.map((day) => ({
+    ...day,
+    items: day.items.filter((item) => belongsToDestination(item, destinationId)),
+  }))
+}
+
+/** What moving a trip's plan to another destination would do to it, stop by stop. */
+export interface DestinationChangeSummary {
+  /** AI-drafted stops (edited or not) that will be removed and re-drafted. */
+  draftStops: number
+  /** Catalogue places from another city's guide that will be removed. */
+  guidePlaces: number
+  /** Stops the traveller wrote themselves, which are always kept. */
+  ownStops: number
+}
+
+/**
+ * Counts `stripOtherDestinationItems` would act on, so the edit dialog can say
+ * what a destination change removes before the traveller saves it. Built from
+ * the same predicate, so the warning and the save cannot disagree.
+ */
+export function summariseDestinationChange(
+  days: readonly ItineraryDay[],
+  destinationId: string | null,
+): DestinationChangeSummary {
+  const summary: DestinationChangeSummary = { draftStops: 0, guidePlaces: 0, ownStops: 0 }
+  for (const item of days.flatMap((day) => day.items)) {
+    if (item.source === 'user') summary.ownStops += 1
+    else if (belongsToDestination(item, destinationId)) continue
+    else if (item.source === 'catalog') summary.guidePlaces += 1
+    else summary.draftStops += 1
+  }
+  return summary
 }
 
 /**

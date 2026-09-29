@@ -294,3 +294,97 @@ describe('DestinationCombobox', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('DestinationCombobox support level', () => {
+  it('describes every option as a curated guide or general suggestions, never by colour alone', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.click(combobox())
+
+    for (const destination of DESTINATIONS) {
+      const option = screen.getByRole('option', { name: destination.displayName })
+      const expected = destination.guide === 'curated' ? 'Curated guide' : 'General suggestions'
+      expect(option).toHaveAccessibleDescription(expected)
+      expect(within(option).getByText(expected)).toBeInTheDocument()
+    }
+    expect(screen.getByRole('option', { name: 'Paris, France' })).toHaveAccessibleDescription('Curated guide')
+    expect(screen.getByRole('option', { name: 'Tokyo, Japan' })).toHaveAccessibleDescription('General suggestions')
+  })
+
+  it('never gives two options the same name', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const displayNames = DESTINATIONS.map((destination) => destination.displayName)
+    expect(new Set(displayNames).size).toBe(displayNames.length)
+
+    await user.click(combobox())
+    const rendered = optionNames()
+    expect(rendered).toHaveLength(DESTINATIONS.length)
+    expect(new Set(rendered).size).toBe(rendered.length)
+  })
+
+  it.each([
+    ['UK', 'london', 'London, United Kingdom'],
+    ['NYC', 'new-york', 'New York, United States'],
+    ['nigeria', 'lagos', 'Lagos, Nigeria'],
+    ['united states', 'new-york', 'New York, United States'],
+  ])('commits the full display name when "%s" is chosen', async (query, id, displayName) => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<Harness onSelect={onSelect} />)
+
+    await user.type(combobox(), `${query}{Enter}`)
+
+    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id, displayName }))
+    expect(combobox()).toHaveValue(displayName)
+    await user.tab()
+    expect(combobox()).toHaveValue(displayName)
+  })
+
+  it('commits the full display name when an alias match is clicked', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(combobox(), 'uk')
+    await user.click(screen.getByRole('option', { name: 'London, United Kingdom' }))
+
+    expect(combobox()).toHaveValue('London, United Kingdom')
+  })
+
+  it('says under the field that a general destination has no curated guide', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(combobox(), 'tokyo{Enter}')
+
+    const hint =
+      'Tourist has no curated guide for Tokyo yet: Explore is empty and the draft uses general activity types, not local picks.'
+    expect(screen.getByText(hint)).toBeInTheDocument()
+    expect(combobox()).toHaveAccessibleDescription(hint)
+  })
+
+  it('adds no guide hint for a curated destination', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(combobox(), 'london{Enter}')
+
+    expect(screen.queryByText(/no curated guide/)).not.toBeInTheDocument()
+    expect(combobox()).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('announces no results as a status, not as an option', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(combobox(), 'lisbon')
+
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'No destinations match "lisbon". Tourist covers a fixed set of cities in this prototype.',
+    )
+    expect(screen.getByRole('listbox', { hidden: true })).toHaveAccessibleName('Cities')
+  })
+})

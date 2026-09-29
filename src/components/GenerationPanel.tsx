@@ -4,7 +4,8 @@ import { Button, Spinner } from '@/components/ui/Button'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { Icon } from '@/components/ui/Icon'
 import { formatAmount } from '@/domain/money'
-import { PROTOTYPE_LABEL } from '@/lib/labels'
+import { DRAFT_PRICE_CURRENCY } from '@/services/itineraryGenerator'
+import { PROTOTYPE_LABEL, describeTripGuide } from '@/lib/labels'
 import { summariseDraft } from '@/services'
 import { useGeneration, useTourist } from '@/state/useTourist'
 import type { ItineraryDay, Trip } from '@/domain/types'
@@ -39,6 +40,7 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
     if (loading) setWatchedRun(true)
   }, [loading])
   const succeeded = generation.status === 'success' && watchedRun
+  const general = describeTripGuide(trip).guide === 'general'
 
   const liveMessage = (() => {
     if (loading) return 'Drafting your itinerary…'
@@ -95,7 +97,9 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
           } ${draft.itemCount === 1 ? 'stop' : 'stops'} · ${formatAmount(
             draft.estimate,
             trip.currency,
-          )} estimated. Every stop stays editable, and anything you add is kept through the next regeneration.`}
+          )} estimated.${
+            general ? ' These are general suggestions, not local picks.' : ''
+          } Every stop stays editable, and anything you add is kept through the next regeneration.`}
         </Alert>
       ) : null}
     </div>
@@ -111,31 +115,53 @@ export function GenerationPanel({ trip, days }: { trip: Trip; days: ItineraryDay
  * the reassurance that makes the regenerate control safe to press, not a
  * paragraph anyone needs to re-read on every visit.
  */
-export function DraftProvenanceNote() {
+export function DraftProvenanceNote({ trip }: { trip: Pick<Trip, 'destinationId' | 'destination'> }) {
+  const { guide, place, listed, currency } = describeTripGuide(trip)
+  const general = guide === 'general'
   return (
-    <Disclosure
-      tone="ai"
-      icon="auto_awesome"
-      summary={
-        <>
-          <strong className="font-semibold">{PROTOTYPE_LABEL.aiDraft}.</strong> Made on this device,
-          not booked. Regenerating keeps your edits.
-        </>
-      }
-    >
-      <p>
-        Not a live AI service. The plan is put together in your browser by a deterministic generator
-        drawing on the {PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue, so nothing leaves
-        this device and the same trip always produces the same draft. Every price is an estimate:{' '}
-        {PROTOTYPE_LABEL.informationMayChange.toLowerCase()}.
-      </p>
-      <p className="mt-2">
-        <strong className="font-semibold">Regenerating never takes your own work away.</strong> It
-        replaces {PROTOTYPE_LABEL.aiDraft} suggestions, but it always keeps the activities you added
-        yourself, the {PROTOTYPE_LABEL.catalogDemo.toLowerCase()} items from the{' '}
-        {PROTOTYPE_LABEL.curatedGuide.toLowerCase()}, and anything you have edited. Use Replace on a
-        single stop when you only want one thing to change.
-      </p>
-    </Disclosure>
+    <>
+      <Disclosure
+        tone="ai"
+        icon="auto_awesome"
+        summary={
+          <>
+            <strong className="font-semibold">{PROTOTYPE_LABEL.aiDraft}.</strong> Made on this device,
+            not booked. Regenerating keeps your edits.
+          </>
+        }
+      >
+        <p>
+          {`Not a live AI service. The plan is put together in your browser by a deterministic generator drawing on ${
+            general
+              ? `a bank of general activity types, because Tourist has no curated guide for ${place}`
+              : `the ${PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue for ${place}`
+          }, so nothing leaves this device and the same trip always produces the same draft. Every price is an estimate: ${PROTOTYPE_LABEL.informationMayChange.toLowerCase()}.`}
+        </p>
+        <p className="mt-2">
+          <strong className="font-semibold">Regenerating never takes your own work away.</strong> It
+          replaces {PROTOTYPE_LABEL.aiDraft} suggestions, but it always keeps the activities you added
+          yourself, the {PROTOTYPE_LABEL.catalogDemo.toLowerCase()} items from the{' '}
+          {PROTOTYPE_LABEL.curatedGuide.toLowerCase()}, and anything you have edited. Use Replace on a
+          single stop when you only want one thing to change.
+        </p>
+      </Disclosure>
+      {/*
+        Stays open rather than folding into the disclosure above: whether the
+        stops are local knowledge or placeholders is the first thing a reader of
+        this plan needs, and it is exactly what a closed summary would hide. Calm
+        on purpose; nothing is wrong, the draft is just general.
+      */}
+      {general ? (
+        <p className="flex items-start gap-2 rounded-control border border-line bg-surface-low px-3 py-2 text-body-sm text-ink-muted">
+          <Icon name="info" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+          <span className="min-w-0">
+            <strong className="font-semibold text-ink">{`General suggestions for ${place}.`}</strong>{' '}
+            {listed
+              ? `Tourist has no curated guide for ${place} yet, so these stops are general activity types named for the city, not local recommendations. Prices are rough estimates in ${currency}, the local currency, not quotes.`
+              : `${place} is not one of Tourist's listed cities, so these stops are general activity types, not local recommendations. Prices are rough reference estimates in ${DRAFT_PRICE_CURRENCY}, not local prices.`}
+          </span>
+        </p>
+      ) : null}
+    </>
   )
 }

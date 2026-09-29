@@ -613,3 +613,30 @@ describe('CreateTripPage', () => {
     expect(storedTrips()).toHaveLength(0)
   })
 })
+
+describe('CreateTripPage destination support level', () => {
+  it('says a general destination has no curated guide, and a curated one needs no caveat', async () => {
+    renderCreate()
+
+    await chooseDestination('tok', 'Tokyo, Japan')
+    expect(destinationInput()).toHaveAccessibleDescription(
+      'Tourist has no curated guide for Tokyo yet: Explore is empty and the draft uses general activity types, not local picks.',
+    )
+
+    await chooseDestination('paris', 'Paris, France')
+    expect(screen.queryByText(/no curated guide/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['UK', 'London, United Kingdom'],
+    ['NYC', 'New York, United States'],
+    ['nigeria', 'Lagos, Nigeria'],
+  ])('stores the full display name when the traveller searches "%s"', async (query, displayName) => {
+    const user = userEvent.setup()
+    renderCreate()
+
+    await user.type(destinationInput(), `${query}{Enter}`)
+
+    expect(destinationInput()).toHaveValue(displayName)
+  })
+})

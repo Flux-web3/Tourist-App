@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { addDays } from '@/domain/format'
 import {
+  belongsToDestination,
   countItems,
   estimateTotal,
   findDayById,
@@ -14,6 +15,8 @@ import {
   removeItemFromDays,
   replaceItemInDays,
   sortItems,
+  stripOtherDestinationItems,
+  summariseDestinationChange,
   updateItemInDays,
 } from '@/domain/itinerary'
 import type { ItineraryDay, ItineraryItem } from '@/domain/types'
@@ -1323,5 +1326,142 @@ describe('replaceItemInDays keeps the slot’s history and the day’s order', (
 
     expect(titlesOf(next[0])).toEqual(['First', 'Third', 'Alternative'])
     expect(next[0].items[2].id).toBe('target')
+  })
+})
+
+/**
+ * A new destination is not a new date range: what a date change keeps (guide
+ * places, hand-edited AI stops) was planned for the old city. Only the
+ * traveller's own stops, and places in the new city's own guide, survive.
+ */
+describe('stripOtherDestinationItems', () => {
+  const days = [
+    day({
+      items: [
+        item({ id: 'arrive', source: 'ai', role: 'arrival', startTime: '09:00' }),
+        item({ id: 'ai_plain', source: 'ai', startTime: '10:00' }),
+        item({ id: 'ai_edited', source: 'ai', editedByUser: true, startTime: '11:00' }),
+        item({ id: 'own', source: 'user', startTime: '19:30' }),
+      ],
+    }),
+    day({
+      id: 'trip_1_d2',
+      date: '2025-03-06',
+      index: 2,
+      items: [
+        item({ id: 'tower', source: 'catalog', experienceId: 'exp_london_tower_of_london', currency: 'GBP' }),
+        item({ id: 'louvre', source: 'catalog', experienceId: 'exp_louvre_museum' }),
+        item({ id: 'unlisted_place', source: 'catalog', experienceId: 'exp_gone_from_catalogue' }),
+        item({ id: 'own_edited', source: 'user', editedByUser: true }),
+        item({ id: 'depart', source: 'ai', role: 'departure', startTime: '18:00' }),
+      ],
+    }),
+  ]
+
+  it('keeps the traveller’s own stops and the new city’s guide places, and nothing else', () => {
+    const next = stripOtherDestinationItems(days, 'paris')
+
+    expect(idsOf(next[0])).toEqual(['own'])
+    expect(idsOf(next[1])).toEqual(['louvre', 'own_edited'])
+  })
+
+  it('removes every AI stop, edited or not, arrival and departure included', () => {
+    const ids = stripOtherDestinationItems(days, 'london').flatMap(idsOf)
+
+    expect(ids).not.toContain('arrive')
+    expect(ids).not.toContain('ai_plain')
+    expect(ids).not.toContain('ai_edited')
+    expect(ids).not.toContain('depart')
+    // The same rule read from the other side: London's own place stays in London.
+    expect(ids).toEqual(['own', 'tower', 'own_edited'])
+  })
+
+  it('keeps no guide place when the trip moves to no listed city', () => {
+    expect(stripOtherDestinationItems(days, null).flatMap(idsOf)).toEqual(['own', 'own_edited'])
+  })
+
+  it('keeps every day and its date, even one left empty', () => {
+    const next = stripOtherDestinationItems([...days, day({ id: 'trip_1_d3', date: '2025-03-07', index: 3 })], 'rome')
+
+    expect(next.map((entry) => [entry.id, entry.date, entry.index])).toEqual([
+      ['trip_1_d1', '2025-03-05', 1],
+      ['trip_1_d2', '2025-03-06', 2],
+      ['trip_1_d3', '2025-03-07', 3],
+    ])
+    expect(next[1].items.map((entry) => entry.id)).toEqual(['own_edited'])
+  })
+
+  it('does not modify the days it was given', () => {
+    const snapshot = JSON.stringify(days)
+
+    stripOtherDestinationItems(days, 'paris')
+
+    expect(JSON.stringify(days)).toBe(snapshot)
+  })
+
+  it('leaves the kept stops unchanged', () => {
+    const next = stripOtherDestinationItems(days, 'paris')
+
+    expect(next[1].items[0]).toBe(days[1].items[1])
+  })
+})
+
+describe('belongsToDestination', () => {
+  it('always keeps a traveller-written stop', () => {
+    expect(belongsToDestination(item({ source: 'user' }), 'paris')).toBe(true)
+    expect(belongsToDestination(item({ source: 'user' }), null)).toBe(true)
+  })
+
+  it('never keeps an AI stop', () => {
+    expect(belongsToDestination(item({ source: 'ai', editedByUser: true }), 'paris')).toBe(false)
+  })
+
+  it('keeps a guide place only in its own city', () => {
+    const tower = item({ source: 'catalog', experienceId: 'exp_london_tower_of_london' })
+
+    expect(belongsToDestination(tower, 'london')).toBe(true)
+    expect(belongsToDestination(tower, 'paris')).toBe(false)
+    expect(belongsToDestination(item({ source: 'catalog', experienceId: null }), 'paris')).toBe(false)
+  })
+})
+
+describe('summariseDestinationChange', () => {
+  const days = [
+    day({
+      items: [
+        item({ id: 'a1', source: 'ai', role: 'arrival' }),
+        item({ id: 'a2', source: 'ai', editedByUser: true }),
+        item({ id: 'u1', source: 'user' }),
+        item({ id: 'c1', source: 'catalog', experienceId: 'exp_london_tower_of_london' }),
+      ],
+    }),
+    day({
+      id: 'trip_1_d2',
+      date: '2025-03-06',
+      index: 2,
+      items: [
+        item({ id: 'a3', source: 'ai' }),
+        item({ id: 'c2', source: 'catalog', experienceId: 'exp_louvre_museum' }),
+        item({ id: 'u2', source: 'user' }),
+      ],
+    }),
+  ]
+
+  it('counts what a move would remove and what it keeps', () => {
+    expect(summariseDestinationChange(days, 'paris')).toEqual({ draftStops: 3, guidePlaces: 1, ownStops: 2 })
+    expect(summariseDestinationChange(days, 'rome')).toEqual({ draftStops: 3, guidePlaces: 2, ownStops: 2 })
+  })
+
+  it('agrees with what stripOtherDestinationItems removes', () => {
+    for (const destinationId of ['paris', 'london', 'rome', null]) {
+      const summary = summariseDestinationChange(days, destinationId)
+      const kept = stripOtherDestinationItems(days, destinationId).flatMap(idsOf).length
+
+      expect(countItems(days) - kept).toBe(summary.draftStops + summary.guidePlaces)
+    }
+  })
+
+  it('counts nothing for an empty plan', () => {
+    expect(summariseDestinationChange([], 'paris')).toEqual({ draftStops: 0, guidePlaces: 0, ownStops: 0 })
   })
 })

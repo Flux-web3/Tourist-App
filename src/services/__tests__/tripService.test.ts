@@ -582,7 +582,7 @@ describe('tripService.update', () => {
     expect(ids).not.toContain('itm_ai_plain')
   })
 
-  it('keeps traveller-owned items exactly once and drops unedited AI items on a destination reflow', () => {
+  it('keeps only the traveller-written stop, exactly once, on a destination reflow', () => {
     const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
     const tripId = created.trip?.id ?? ''
     const seeded = seedItemsInto(created.state, tripId)
@@ -590,9 +590,11 @@ describe('tripService.update', () => {
     const result = tripService.update(seeded, tripId, { destination: 'Lagos, Nigeria', destinationId: 'lagos' })
     const ids = allItems(result.state, tripId).map((item) => item.id)
 
+    // A Paris guide place and an AI stop drafted for Paris do not belong in
+    // Lagos, edited or not. See 'tripService.update when the destination changes'.
     expect(ids.filter((id) => id === 'itm_user_added')).toHaveLength(1)
-    expect(ids.filter((id) => id === 'itm_catalog_added')).toHaveLength(1)
-    expect(ids.filter((id) => id === 'itm_ai_edited')).toHaveLength(1)
+    expect(ids).not.toContain('itm_catalog_added')
+    expect(ids).not.toContain('itm_ai_edited')
     expect(ids).not.toContain('itm_ai_plain')
   })
 
@@ -1445,5 +1447,294 @@ describe('tripService.remove', () => {
 
     expect(result.hasDemoData).toBe(true)
     expect(result.trips.map((trip) => trip.id)).toEqual([DEMO_TRIP_ID])
+  })
+})
+
+/**
+ * Re-flowing on a new destination used to keep everything `mergeGeneratedDays`
+ * keeps on a date change: catalogue places and hand-edited AI stops. A London
+ * trip moved to Paris still showed "Tower of London" priced in GBP. A new city
+ * now takes out every AI stop and every place from another city's guide, and
+ * keeps only what the traveller wrote themselves.
+ */
+describe('tripService.update when the destination changes', () => {
+  const LONDON_PLACE = 'exp_london_tower_of_london'
+
+  function londonTrip(): { state: PersistedState; tripId: string; editedId: string } {
+    const created = tripService.create(
+      baseState(),
+      validDraft({ destination: 'London, United Kingdom', destinationId: 'london', currency: 'GBP' }),
+      'usr_fixture',
+    )
+    const tripId = created.trip?.id ?? ''
+    const days = daysOf(created.state, tripId)
+    const edited = days[1]?.items.find((item) => item.source === 'ai' && item.role === undefined)
+    if (!edited) throw new Error('fixture London trip has no ordinary AI stop on day two')
+    const withStops = days.map((day, index) => {
+      if (index === 0) {
+        return {
+          ...day,
+          items: [
+            ...day.items,
+            syntheticItem({
+              id: 'itm_london_place',
+              tripId,
+              source: 'catalog',
+              title: 'Tower of London',
+              experienceId: LONDON_PLACE,
+              currency: 'GBP',
+              estimatedCost: 34,
+            }),
+            syntheticItem({
+              id: 'itm_own',
+              tripId,
+              source: 'user',
+              title: 'Dinner with Sam',
+              startTime: '19:30',
+              currency: 'GBP',
+            }),
+          ],
+        }
+      }
+      if (index === 1) {
+        return {
+          ...day,
+          items: day.items.map((item) =>
+            item.id === edited.id ? { ...item, title: 'Changing of the Guard, early', editedByUser: true } : item,
+          ),
+        }
+      }
+      return day
+    })
+    return {
+      tripId,
+      editedId: edited.id,
+      state: {
+        ...created.state,
+        daysByTrip: { ...created.state.daysByTrip, [tripId]: withStops },
+        expensesByTrip: {
+          ...created.state.expensesByTrip,
+          [tripId]: [
+            {
+              id: 'exp_fixture',
+              tripId,
+              description: 'Oyster card top-up',
+              amount: 40,
+              currency: 'GBP',
+              category: 'transport',
+              date: START,
+              notes: '',
+              createdAt: FIXED_ISO,
+              updatedAt: FIXED_ISO,
+            },
+          ],
+        },
+        notesByTrip: {
+          ...created.state.notesByTrip,
+          [tripId]: [
+            {
+              id: 'not_fixture',
+              tripId,
+              title: 'Hotel',
+              body: 'Near Kings Cross',
+              pinned: false,
+              createdAt: FIXED_ISO,
+              updatedAt: FIXED_ISO,
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  function toParis(state: PersistedState, tripId: string) {
+    return tripService.update(state, tripId, { destination: 'Paris, France', destinationId: 'paris' })
+  }
+
+  it('takes the London guide place and every London AI stop out of the plan', () => {
+    const { state, tripId, editedId } = londonTrip()
+    const londonAiIds = allItems(state, tripId)
+      .filter((item) => item.source === 'ai')
+      .map((item) => item.id)
+
+    const result = toParis(state, tripId)
+    const items = allItems(result.state, tripId)
+    const ids = items.map((item) => item.id)
+
+    expect(result.trip?.destinationId).toBe('paris')
+    expect(ids).not.toContain('itm_london_place')
+    expect(items.some((item) => item.experienceId === LONDON_PLACE)).toBe(false)
+    // Edited or not, a stop drafted for London does not belong in Paris.
+    expect(ids).not.toContain(editedId)
+    expect(ids.filter((id) => londonAiIds.includes(id))).toEqual([])
+  })
+
+  it('re-drafts every day for Paris', () => {
+    const { state, tripId } = londonTrip()
+
+    const result = toParis(state, tripId)
+    const drafted = allItems(result.state, tripId).filter((item) => item.source === 'ai')
+
+    expect(drafted.length).toBeGreaterThan(0)
+    expect(drafted.every((item) => item.currency === 'EUR')).toBe(true)
+    for (const day of daysOf(result.state, tripId)) {
+      expect(day.items.some((item) => item.source === 'ai')).toBe(true)
+    }
+    // The only GBP stop left is the traveller's own.
+    expect(
+      allItems(result.state, tripId)
+        .filter((item) => item.currency === 'GBP')
+        .map((item) => item.id),
+    ).toEqual(['itm_own'])
+  })
+
+  it('keeps the traveller-written stop, unchanged and on its date', () => {
+    const { state, tripId } = londonTrip()
+    const original = allItems(state, tripId).find((item) => item.id === 'itm_own')
+
+    const result = toParis(state, tripId)
+    const firstDay = daysOf(result.state, tripId)[0]
+
+    expect(firstDay?.date).toBe(START)
+    expect(firstDay?.items.find((item) => item.id === 'itm_own')).toEqual(original)
+    expect(allItems(result.state, tripId).filter((item) => item.id === 'itm_own')).toHaveLength(1)
+  })
+
+  it('leaves the currency, budget, travellers, dates, expenses and notes alone', () => {
+    const { state, tripId } = londonTrip()
+    const before = state.trips.find((trip) => trip.id === tripId)
+
+    const result = toParis(state, tripId)
+
+    expect(result.trip).toMatchObject({
+      currency: 'GBP',
+      budget: before?.budget,
+      travelers: before?.travelers,
+      startDate: before?.startDate,
+      endDate: before?.endDate,
+    })
+    expect(result.state.expensesByTrip[tripId]).toBe(state.expensesByTrip[tripId])
+    expect(result.state.expensesByTrip[tripId]?.[0]).toMatchObject({ amount: 40, currency: 'GBP' })
+    expect(result.state.notesByTrip?.[tripId]).toBe(state.notesByTrip?.[tripId])
+    expect(daysOf(result.state, tripId).map((day) => day.date)).toEqual(eachDay(START, END))
+  })
+
+  it('keeps a place that is in the new city guide', () => {
+    const { state, tripId } = londonTrip()
+    const parisPlace = syntheticItem({
+      id: 'itm_paris_place',
+      tripId,
+      source: 'catalog',
+      experienceId: 'exp_louvre_museum',
+    })
+    const withParisPlace: PersistedState = {
+      ...state,
+      daysByTrip: {
+        ...state.daysByTrip,
+        [tripId]: daysOf(state, tripId).map((day, index) =>
+          index === 2 ? { ...day, items: [...day.items, parisPlace] } : day,
+        ),
+      },
+    }
+
+    const result = toParis(withParisPlace, tripId)
+
+    expect(daysOf(result.state, tripId)[2]?.items.map((item) => item.id)).toContain('itm_paris_place')
+  })
+
+  it('checks a pre-catalogue trip against the city it moves to', () => {
+    const { state, tripId, editedId } = londonTrip()
+    const legacy: PersistedState = {
+      ...state,
+      trips: state.trips.map((trip) =>
+        trip.id === tripId ? { ...trip, destination: 'Lisbon', destinationId: null } : trip,
+      ),
+    }
+
+    const result = toParis(legacy, tripId)
+    const ids = allItems(result.state, tripId).map((item) => item.id)
+
+    expect(result.trip?.destinationId).toBe('paris')
+    expect(ids).not.toContain('itm_london_place')
+    expect(ids).not.toContain(editedId)
+    expect(ids).toContain('itm_own')
+  })
+
+  it('leaves the itinerary untouched on a rename or a budget change', () => {
+    const { state, tripId } = londonTrip()
+    const trip = state.trips.find((candidate) => candidate.id === tripId)
+    if (!trip) throw new Error('fixture trip is missing')
+
+    const result = tripService.update(state, tripId, wholeDraft(trip, { name: 'London, again', budget: 4100 }))
+
+    expect(result.trip).toMatchObject({ name: 'London, again', budget: 4100 })
+    expect(result.state.daysByTrip[tripId]).toBe(state.daysByTrip[tripId])
+    expect(JSON.stringify(result.state.daysByTrip[tripId])).toBe(JSON.stringify(state.daysByTrip[tripId]))
+  })
+
+  it('still keeps the edited AI stop and the London place on a date-only change', () => {
+    const { state, tripId, editedId } = londonTrip()
+
+    const result = tripService.update(state, tripId, { endDate: addDays(END, 1) })
+    const ids = allItems(result.state, tripId).map((item) => item.id)
+
+    expect(ids).toContain(editedId)
+    expect(ids).toContain('itm_london_place')
+    expect(ids).toContain('itm_own')
+  })
+
+  it('does not modify the state it was given', () => {
+    const { state, tripId } = londonTrip()
+    const snapshot = JSON.stringify(state)
+
+    toParis(state, tripId)
+
+    expect(JSON.stringify(state)).toBe(snapshot)
+  })
+})
+
+describe('tripService.update keeps a suggested name in step with the trip', () => {
+  function created(name: string) {
+    const result = tripService.create(
+      baseState(),
+      validDraft({ name, destination: 'London, United Kingdom', destinationId: 'london', currency: 'GBP' }),
+      'usr_fixture',
+    )
+    return { state: result.state, trip: result.trip as Trip }
+  }
+
+  it('renames a trip still called what Tourist suggested when its city changes', () => {
+    const { state, trip } = created('')
+    expect(trip.name).toBe(suggestTripName(trip.destination, trip.startDate, 'london'))
+
+    // What EditTripDialog sends: the whole draft, name unchanged.
+    const moved = tripService.update(state, trip.id, {
+      name: trip.name,
+      destination: 'Paris, France',
+      destinationId: 'paris',
+    }).trip
+
+    expect(moved?.name).toBe(suggestTripName('Paris, France', trip.startDate, 'paris'))
+    expect(moved?.name).not.toMatch(/London/)
+  })
+
+  it('never touches a name the traveller wrote', () => {
+    const { state, trip } = created('Sam turns 30')
+
+    const moved = tripService.update(state, trip.id, {
+      name: trip.name,
+      destination: 'Paris, France',
+      destinationId: 'paris',
+    }).trip
+
+    expect(moved?.name).toBe('Sam turns 30')
+  })
+
+  it('leaves a suggested name alone when nothing it describes changes', () => {
+    const { state, trip } = created('')
+
+    const renamedBudget = tripService.update(state, trip.id, { name: trip.name, budget: 4000 }).trip
+
+    expect(renamedBudget?.name).toBe(trip.name)
   })
 })

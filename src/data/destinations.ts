@@ -34,6 +34,14 @@ export interface Destination {
   priceStep: number
   /** Extra words a search should match: "UK", "NYC", "Big Apple". */
   aliases: readonly string[]
+  /**
+   * How much Tourist actually knows about the place, said out loud wherever
+   * it matters so a thin destination never passes for a covered one.
+   * - `curated`: hand-written Explore places and a local itinerary bank.
+   * - `general`: no Explore places; drafts use general activity types named
+   *   for the city, not local recommendations.
+   */
+  guide: 'curated' | 'general'
 }
 
 export const DESTINATIONS: readonly Destination[] = [
@@ -46,6 +54,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 1,
     priceStep: 1,
     aliases: [],
+    guide: 'curated',
   },
   {
     id: 'london',
@@ -56,6 +65,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 0.9,
     priceStep: 1,
     aliases: ['UK', 'England', 'Britain', 'Great Britain'],
+    guide: 'curated',
   },
   {
     id: 'lagos',
@@ -66,6 +76,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 900,
     priceStep: 500,
     aliases: [],
+    guide: 'curated',
   },
   {
     id: 'new-york',
@@ -76,6 +87,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 1.2,
     priceStep: 1,
     aliases: ['NYC', 'USA', 'US', 'America', 'Manhattan'],
+    guide: 'general',
   },
   {
     id: 'tokyo',
@@ -86,6 +98,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 150,
     priceStep: 100,
     aliases: [],
+    guide: 'general',
   },
   {
     id: 'dubai',
@@ -96,6 +109,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 4.5,
     priceStep: 5,
     aliases: ['UAE', 'Emirates'],
+    guide: 'general',
   },
   {
     id: 'rome',
@@ -106,6 +120,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 0.95,
     priceStep: 1,
     aliases: ['Roma'],
+    guide: 'general',
   },
   {
     id: 'barcelona',
@@ -116,6 +131,7 @@ export const DESTINATIONS: readonly Destination[] = [
     priceLevel: 0.9,
     priceStep: 1,
     aliases: [],
+    guide: 'general',
   },
 ]
 

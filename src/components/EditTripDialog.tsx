@@ -14,10 +14,11 @@ import {
 import { Icon } from '@/components/ui/Icon'
 import { getDestination, type Destination } from '@/data/destinations'
 import { formatDate, todayISO } from '@/domain/format'
+import { summariseDestinationChange, type DestinationChangeSummary } from '@/domain/itinerary'
 import { CURRENCIES, CURRENCY_SYMBOLS } from '@/domain/money'
 import { TRIP_LIMITS, TRAVEL_PACES, maxBudgetFor, suggestTripName, validateTripDraft } from '@/domain/validation'
 import { INTEREST_LABEL } from '@/lib/labels'
-import { useTourist } from '@/state/useTourist'
+import { useTourist, useTripDays } from '@/state/useTourist'
 import type { TravelInterest, TravelPace, Trip, TripDraft, TripDraftErrors } from '@/domain/types'
 
 const INTEREST_OPTIONS: ReadonlyArray<{ value: TravelInterest; label: string }> = [
@@ -51,6 +52,37 @@ function toDraft(trip: Trip): TripDraft {
   }
 }
 
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/**
+ * What saving a new destination will do, in the traveller's terms. `fromGuide`
+ * is false for a pre-catalogue trip, whose saved places cannot have come from
+ * a guide for a city Tourist does not list.
+ */
+function destinationChangeCopy(
+  from: string,
+  to: string,
+  fromGuide: boolean,
+  { draftStops, guidePlaces, ownStops }: DestinationChangeSummary,
+): { title: string; body: string } {
+  const removed = [
+    draftStops > 0 ? plural(draftStops, `${from} stop`, `${from} stops`) : null,
+    guidePlaces > 0
+      ? `${plural(guidePlaces, 'place', 'places')} ${fromGuide ? `from the ${from} guide` : 'saved from Explore'}`
+      : null,
+  ].filter((part): part is string => part !== null)
+  const kept =
+    ownStops > 0
+      ? `Your ${plural(ownStops, 'own stop', 'own stops')}, expenses and notes are kept.`
+      : 'Your expenses and notes are kept.'
+  return {
+    title: `Changing ${from} to ${to} re-drafts the itinerary for ${to}.`,
+    body: `${removed.join(' and ')} will be removed. ${kept}`,
+  }
+}
+
 function SectionLabel({ children, divider = true }: { children: ReactNode; divider?: boolean }) {
   return (
     <h3
@@ -73,10 +105,12 @@ export function EditTripDialog({
   onClose: () => void
 }) {
   const { actions } = useTourist()
+  const days = useTripDays(trip.id)
   const [draft, setDraft] = useState<TripDraft>(() => toDraft(trip))
   const [errors, setErrors] = useState<TripDraftErrors>({})
   const [submitted, setSubmitted] = useState(false)
   const formId = useId()
+  const changeSummaryId = useId()
   const summaryRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -149,6 +183,26 @@ export function EditTripDialog({
     destinationNote = `${chosen.city} uses ${chosen.currency}. This trip stays in ${draft.currency}; change Currency below if you want ${chosen.currency}.`
   }
 
+  /*
+    A new city takes the old city's drafted stops and guide places out of the
+    plan (see `stripOtherDestinationItems`), so the traveller is told what goes
+    before saving, with counts from this trip, and the primary button names
+    the consequence. Nothing is said when nothing would be removed: a trip with
+    no plan yet, or one holding only the traveller's own stops.
+  */
+  const currentDestinationId = trip.destinationId ?? null
+  const destinationChange =
+    chosen && chosen.id !== currentDestinationId ? summariseDestinationChange(days, chosen.id) : null
+  const changeWarning =
+    chosen && destinationChange && destinationChange.draftStops + destinationChange.guidePlaces > 0
+      ? destinationChangeCopy(
+          getDestination(currentDestinationId)?.city ?? trip.destination.trim(),
+          chosen.city,
+          currentDestinationId !== null,
+          destinationChange,
+        )
+      : null
+
   const selectDestination = (destination: Destination | null) => {
     update({ destinationId: destination?.id ?? null, destination: destination?.displayName ?? '' })
   }
@@ -159,14 +213,20 @@ export function EditTripDialog({
       onClose={onClose}
       size="lg"
       title="Edit trip"
-      description="New dates, a new destination or a new pace re-flow the itinerary draft. Anything you added or edited yourself is kept."
+      description="New dates or a new pace re-flow the itinerary draft and keep anything you added or edited yourself. A new destination re-drafts it for that city."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form={formId} variant="primary" icon={<Icon name="check" size={18} />}>
-            Save changes
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            icon={<Icon name="check" size={18} />}
+            aria-describedby={changeWarning ? changeSummaryId : undefined}
+          >
+            {changeWarning ? 'Change destination and re-draft' : 'Save changes'}
           </Button>
         </>
       }
@@ -227,6 +287,14 @@ export function EditTripDialog({
             note={destinationNote}
             onSelect={selectDestination}
           />
+
+          {changeWarning ? (
+            <div id={changeSummaryId} className="sm:col-span-2">
+              <Alert tone="warning" title={changeWarning.title}>
+                {changeWarning.body}
+              </Alert>
+            </div>
+          ) : null}
 
           <TextField
             label="Start date"

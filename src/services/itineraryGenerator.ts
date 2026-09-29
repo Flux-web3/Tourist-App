@@ -7,6 +7,7 @@ import type {
   ItineraryCategory,
   ItineraryDay,
   ItineraryItem,
+  ItineraryItemRole,
   TravelInterest,
   TravelPace,
   Trip,
@@ -24,14 +25,17 @@ import type {
  * free-text `trip.destination`: searching that text for "paris" is how a
  * London trip once received the Paris guide. See `draftBankFor` for which
  * bank each destination drafts from and what currency its prices are in.
- * Landmark names are only used for a destination that has a curated bank;
- * any other destination receives generic, clearly-draft phrasing rather than
- * invented specifics.
+ * Named places are only used for a curated destination, whose bank is written
+ * entirely from real, well-known places in that city; any other destination
+ * receives generic activity types that make no claim of local knowledge.
  *
- * A day is laid out by three rules: the arrival opens day one, the departure
- * closes the final day, and every other stop starts at its template's natural
- * time or just after the previous stop ends, whichever is later. A stop that
- * cannot fit that way is left out rather than stacked on top of another.
+ * A day is laid out by fixed points and one rule. The arrival opens day one at
+ * its own time; the departure closes the final day at `DEPARTURE_START_TIME`
+ * and is never moved. Every other stop starts at its template's natural time
+ * or just after the previous stop ends, whichever is later, and on the final
+ * day must also end `FINAL_DAY_BUFFER_MINUTES` before the departure. A stop
+ * that cannot fit that way is left out rather than stacked on top of another
+ * or pushed past the departure.
  */
 
 /**
@@ -39,7 +43,7 @@ import type {
  * that has no catalogue destination.
  *
  * The Paris and generic template costs are not unitless: they are Paris prices
- * in euros (the Eiffel Tower summit is €29, the Louvre €22), with the generic
+ * in euros (the Eiffel Tower summit is €36, the Louvre €22), with the generic
  * bank pitched at the same level. A catalogue destination's draft is priced in
  * its own currency instead (see `localPrice`), but a trip with no catalogue
  * destination has no local price level to apply, so its stops keep these
@@ -54,12 +58,63 @@ import type {
 export const DRAFT_PRICE_CURRENCY: CurrencyCode = 'EUR'
 
 /**
+ * When the modelled departure leaves for the airport or station, on every
+ * bank. The app has no flight or train time, so this is a placeholder, and
+ * every departure's description says so and asks the traveller to move it to
+ * their ticket. Noon is the conservative guess: it is the usual latest hotel
+ * checkout, so a traveller who checks out and leaves has not been planned to
+ * sightsee after handing back the room, and an afternoon or evening flight
+ * still has the departure early rather than late.
+ */
+export const DEPARTURE_START_TIME = '12:00'
+
+/**
+ * How long before the departure the last ordinary stop of the final day must
+ * end. It covers getting back across town, collecting bags and checking out
+ * before the departure leaves; the departure itself already includes the
+ * transfer to the airport or station. Ninety minutes is deliberately generous:
+ * a big-city return trip alone can take most of an hour, and a missed flight
+ * costs far more than a shorter last morning. The final day may therefore hold
+ * only breakfast or nothing at all, which is correct.
+ */
+export const FINAL_DAY_BUFFER_MINUTES = 90
+
+/**
+ * When the arrival opens a one-day trip. A one-day trip is arrival and
+ * departure on the same date, so the arrival's usual mid-afternoon time would
+ * land after the noon departure. An early start makes it an honest day trip:
+ * arrive, perhaps one stop, leave. Like the departure it is a placeholder the
+ * description asks the traveller to move.
+ */
+const SAME_DAY_ARRIVAL_START = '07:00'
+
+/** Said whenever a swap is asked of an arrival or departure. */
+export const ANCHOR_SWAP_MESSAGE =
+  'Arrival and departure are travel, not sightseeing, so there is no alternative to swap in. Edit the time to match your ticket instead. Your plan is unchanged.'
+
+/** Said when a final-day stop has no alternative that still leaves time to get away. */
+export const NO_ALTERNATIVE_BEFORE_DEPARTURE_MESSAGE =
+  'Nothing else fits before your departure with time left to get there. Your plan is unchanged.'
+
+/**
+ * Thrown by `buildAlternativeItem` for an arrival or departure. A dedicated
+ * class so a caller can tell "this stop is not swappable" apart from a failed
+ * suggestion; its message is `ANCHOR_SWAP_MESSAGE` and is safe to show as is.
+ */
+export class AnchorSwapError extends Error {
+  constructor() {
+    super(ANCHOR_SWAP_MESSAGE)
+    this.name = 'AnchorSwapError'
+  }
+}
+
+/**
  * Stops placed by rule rather than drawn from the bank: the arrival opens day
  * one, the departure closes the final day. The transfer is kept in the Paris
  * bank as copy but is never scheduled or offered. None of them is ever picked
  * as an ordinary stop, placed on a middle day, or suggested as an alternative.
  */
-type AnchorRole = 'arrival' | 'departure' | 'transfer'
+type AnchorRole = ItineraryItemRole | 'transfer'
 
 interface DraftTemplate {
   id: string
@@ -67,7 +122,10 @@ interface DraftTemplate {
   category: ItineraryCategory
   location: string
   description: string
-  /** The time this stop naturally happens; the scheduler never moves it earlier. */
+  /**
+   * The time this stop naturally happens; the scheduler never moves it
+   * earlier. An arrival or departure is placed exactly here.
+   */
   startTime: string
   endTime: string | null
   estimatedCost: number
@@ -76,34 +134,40 @@ interface DraftTemplate {
   /** Absent for every ordinary, bookable stop. */
   role?: AnchorRole
   /**
+   * The meal a food stop is. A day holds at most one of each, so a picnic
+   * lunch is never followed by a second, sit-down lunch.
+   */
+  meal?: 'breakfast' | 'lunch' | 'dinner'
+  /**
    * Generic bank only: `location` for a trip with a catalogue destination,
    * with `{city}` standing for the city. `location` itself stays city-free
    * because a trip with no catalogue destination must not be given a guessed
    * one.
    */
   cityLocation?: string
-  /**
-   * Set on the London and Lagos entries, which share a pool with generic
-   * stops. The picker prefers a landmark over a generic stop it would
-   * otherwise tie with, so the draft reads as that city first. Paris's bank is
-   * all landmarks with nothing generic mixed in, so it needs no flag.
-   */
-  landmark?: true
 }
 
+/** Said on every arrival and departure: the app never knows the real ticket. */
+const PLACEHOLDER_NOTE = 'This time is a placeholder, not your ticket: move it to match your flight or train.'
+
+/**
+ * Paris, priced in euros at roughly current adult rates. Every stop is a real,
+ * well-known place, street or neighbourhood; prices are illustrative estimates.
+ */
 const PARIS_TEMPLATES: DraftTemplate[] = [
   {
     id: 'par_cafe',
-    title: 'Flat white and a pastry on a terrace',
+    title: 'Café crème and a croissant on a Saint-Germain terrace',
     category: 'food',
     location: 'Saint-Germain-des-Prés',
     description:
-      'Ease into the day at a neighbourhood café. Sit outside, order slowly, and let the street wake up around you.',
+      'Breakfast facing the street, the way the neighbourhood does it. The famous boulevard terraces charge for the view; the side-street cafés serve the same for less.',
     startTime: '08:30',
     endTime: '09:30',
-    estimatedCost: 14,
+    estimatedCost: 12,
     durationMinutes: 60,
     interest: 'food',
+    meal: 'breakfast',
   },
   {
     id: 'par_louvre',
@@ -111,7 +175,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'culture',
     location: 'Musée du Louvre',
     description:
-      'A focused two-hour route through the Denon wing rather than the whole building, finishing at the Mona Lisa.',
+      'A focused two-hour route through the Denon wing rather than the whole building, finishing at the Mona Lisa. Timed tickets are booked online.',
     startTime: '09:30',
     endTime: '11:30',
     estimatedCost: 22,
@@ -124,7 +188,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'culture',
     location: 'Musée d’Orsay',
     description:
-      'Level five for the impressionists, then the fifth-floor clock window before the crowds arrive.',
+      'Level five for the impressionists, then the great clock window on the same floor, looking across the Seine to the Louvre.',
     startTime: '10:00',
     endTime: '12:00',
     estimatedCost: 16,
@@ -137,10 +201,10 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'sightseeing',
     location: 'Champ de Mars',
     description:
-      'A pre-booked summit slot. Head up about an hour before sunset so the river lights are part of it.',
+      'Summit tickets are timed, so book ahead and aim to go up about an hour before sunset, so the river lights are part of it.',
     startTime: '17:00',
     endTime: '19:00',
-    estimatedCost: 29,
+    estimatedCost: 36,
     durationMinutes: 120,
     interest: 'culture',
   },
@@ -150,7 +214,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'sightseeing',
     location: 'Le Marais',
     description:
-      'A self-guided loop through the hidden courtyards, the covered market and the galleries off Rue des Rosiers.',
+      'A self-guided loop through the courtyards of the old mansions, the Marché des Enfants Rouges and the galleries of the upper Marais.',
     startTime: '11:00',
     endTime: '13:00',
     estimatedCost: 0,
@@ -163,7 +227,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'sightseeing',
     location: 'Montmartre',
     description:
-      'Climb the steps past the artists, take the terrace view, then drop into the back streets while they are still quiet.',
+      'Climb the steps to Sacré-Cœur, take the view from the terrace, then drop into the back streets while they are still quiet.',
     startTime: '08:00',
     endTime: '10:00',
     estimatedCost: 0,
@@ -176,12 +240,13 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'food',
     location: 'Marché d’Aligre',
     description:
-      'Bread, cheese and something sweet for the day, plus fruit for later. Go early; the best stalls go by ten.',
+      'Bread, cheese and something sweet for the day, plus fruit for later, from the stalls on Rue d’Aligre. Go early, before it gets busy.',
     startTime: '08:00',
     endTime: '09:15',
     estimatedCost: 18,
     durationMinutes: 75,
     interest: 'food',
+    meal: 'breakfast',
   },
   {
     id: 'par_lunch',
@@ -189,12 +254,13 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'food',
     location: 'Saint-Germain-des-Prés',
     description:
-      'The set menu at a no-reservation neighbourhood spot. Allow two hours; the pace is part of it.',
+      'The set lunch menu at a traditional neighbourhood bistro. Allow two hours; the pace is part of it.',
     startTime: '13:00',
     endTime: '15:00',
     estimatedCost: 38,
     durationMinutes: 120,
     interest: 'food',
+    meal: 'lunch',
   },
   {
     id: 'par_seine',
@@ -210,12 +276,14 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     interest: 'relaxed',
   },
   {
+    // The description used to finish in "the Picpus village", which is in the
+    // 12th arrondissement, not at Versailles; the Queen's Hamlet is.
     id: 'par_versailles',
     title: 'Versailles, palace and gardens',
     category: 'outdoors',
-    location: 'Versailles',
+    location: 'Château de Versailles',
     description:
-      'RER C out to Versailles, the Hall of Mirrors and a few rooms, then the gardens and the Picpus village.',
+      'RER C out to Versailles, the Hall of Mirrors and the state apartments, then the gardens and, if your legs allow, the Queen’s Hamlet.',
     startTime: '09:00',
     endTime: '14:00',
     estimatedCost: 32,
@@ -228,7 +296,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'outdoors',
     location: 'Canal Saint-Martin',
     description:
-      'Flat, shaded and quiet. Footbridges, water, and a coffee on the way back.',
+      'Iron footbridges, locks and plane trees along the canal, with a coffee on the way back.',
     startTime: '15:00',
     endTime: '16:30',
     estimatedCost: 0,
@@ -241,7 +309,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'outdoors',
     location: 'Luxembourg Gardens',
     description:
-      'An hour on the lawns, the carousel if it is running, and the palace on the north side.',
+      'An hour in the green chairs, the carousel if it is running, and the palace on the north side.',
     startTime: '14:00',
     endTime: '15:30',
     estimatedCost: 0,
@@ -249,16 +317,18 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     interest: 'relaxed',
   },
   {
-    id: 'par_workshop',
-    title: 'Atelier visit: a working studio',
+    // Replaces "Atelier visit: a working studio", an unnamed studio the
+    // description invented details for.
+    id: 'par_orangerie',
+    title: 'Musée de l’Orangerie and Monet’s Water Lilies',
     category: 'culture',
-    location: 'Oberkampf',
+    location: 'Jardin des Tuileries',
     description:
-      'A small group visit to a working atelier in the 11th, with time to talk to the artist afterwards.',
+      'Monet’s two oval rooms of Water Lilies, then the impressionist collection downstairs. Small enough to see properly in ninety minutes.',
     startTime: '14:30',
-    endTime: '16:30',
-    estimatedCost: 35,
-    durationMinutes: 120,
+    endTime: '16:00',
+    estimatedCost: 13,
+    durationMinutes: 90,
     interest: 'culture',
   },
   {
@@ -267,7 +337,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     category: 'nightlife',
     location: 'Oberkampf / République',
     description:
-      'Three small bars, all natural wine, all walkable. The last one is usually the best one.',
+      'Three natural-wine bars in the 11th, all walkable from each other. The area is full of them, so go wherever has a free table.',
     startTime: '20:00',
     endTime: '23:00',
     estimatedCost: 45,
@@ -275,29 +345,45 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     interest: 'nightlife',
   },
   {
+    // Replaces an unnamed "small theatre" with an invented seat count.
     id: 'par_show',
-    title: 'Evening performance at a small theatre',
+    title: 'Opera or ballet at the Palais Garnier',
     category: 'nightlife',
-    location: 'Bastille',
+    location: 'Opéra',
     description:
-      'A short evening show in a 500-seat room, the kind that plays in English and in French.',
+      'Whatever is on the programme that night, in Garnier’s gilded auditorium. Seats range from restricted-view to the best boxes, so this price is a mid-range estimate. Book ahead.',
     startTime: '19:30',
     endTime: '22:00',
-    estimatedCost: 42,
+    estimatedCost: 70,
     durationMinutes: 150,
     interest: 'nightlife',
   },
   {
+    // The covered passages this used to mention are in the 2nd, not the
+    // Marais; they are their own stop now (`par_passages`).
     id: 'par_shopping',
-    title: 'Independent design shops',
+    title: 'Design and vintage shops in the upper Marais',
     category: 'shopping',
     location: 'Le Marais / Rue du Temple',
     description:
-      'A slow run through the design and vintage shops, with the covered passages in between.',
+      'A slow run through the design, concept and vintage shops between Rue du Temple and Rue de Bretagne.',
     startTime: '15:00',
     endTime: '17:00',
     estimatedCost: 60,
     durationMinutes: 120,
+    interest: 'shopping',
+  },
+  {
+    id: 'par_passages',
+    title: 'The covered passages, Galerie Vivienne to Passage Jouffroy',
+    category: 'shopping',
+    location: 'Grands Boulevards',
+    description:
+      'The glass-roofed nineteenth-century arcades: Galerie Vivienne and Passage Choiseul, then Passage des Panoramas and Passage Jouffroy either side of the boulevard.',
+    startTime: '15:30',
+    endTime: '17:00',
+    estimatedCost: 20,
+    durationMinutes: 90,
     interest: 'shopping',
   },
   {
@@ -308,7 +394,7 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     description: 'Allow the extra hour. RER B to CDG, check-in, and a coffee before the flight.',
     startTime: '10:00',
     endTime: '12:00',
-    estimatedCost: 24,
+    estimatedCost: 13,
     durationMinutes: 120,
     interest: null,
     role: 'transfer',
@@ -318,84 +404,158 @@ const PARIS_TEMPLATES: DraftTemplate[] = [
     title: 'Arrive, drop bags, and walk the neighbourhood',
     category: 'transit',
     location: 'Your hotel',
-    description:
-      'Check in, leave the bags, and take one slow loop around the block before dinner.',
+    description: `In from the airport or station, bags left at the hotel, and one slow loop around the block to get your bearings. ${PLACEHOLDER_NOTE}`,
     startTime: '15:00',
     endTime: '16:30',
-    estimatedCost: 12,
+    estimatedCost: 13,
     durationMinutes: 90,
     interest: 'relaxed',
     role: 'arrival',
   },
   {
+    // Replaces "Market picnic in a park", which named no market and put the
+    // picnic in the Luxembourg Gardens, where most lawns are off limits.
     id: 'par_picnic',
-    title: 'Market picnic in a park',
+    title: 'Picnic lunch at the Square du Vert-Galant',
     category: 'food',
-    location: 'Luxembourg Gardens',
+    location: 'Île de la Cité',
     description:
-      'Buy lunch from the market, find a bench out of the sun, and eat like a local for the price of a sandwich.',
+      'Bread, cheese and fruit from the shops on the way, eaten by the water at the western tip of the island, below the Pont Neuf.',
     startTime: '12:30',
     endTime: '13:45',
     estimatedCost: 20,
     durationMinutes: 75,
     interest: 'food',
+    meal: 'lunch',
   },
   {
     id: 'par_depart',
     title: 'Check out, last coffee, and head for the airport',
     category: 'transit',
     location: 'Your hotel, then Charles de Gaulle',
-    description:
-      'Pack, settle the room, and leave the extra hour for the RER B out to CDG. Check the airport on your ticket; Orly is a different run entirely.',
-    startTime: '08:00',
-    endTime: '10:00',
-    estimatedCost: 24,
+    description: `Settle the room and take the RER B out to CDG, leaving the extra hour at the airport. Check the airport on your ticket; Orly is a different run entirely. ${PLACEHOLDER_NOTE}`,
+    startTime: DEPARTURE_START_TIME,
+    endTime: '14:00',
+    estimatedCost: 13,
     durationMinutes: 120,
     interest: null,
     role: 'departure',
   },
   {
+    // Replaces an unnamed "cellar jazz club" with "no sign", an invented venue.
     id: 'par_jazz',
-    title: 'Late set in a cellar jazz club',
+    title: 'Swing and jazz at Le Caveau de la Huchette',
     category: 'nightlife',
-    location: 'Saint-Germain-des-Prés',
-    description: 'Small room, no sign, two sets a night. Arrive ten minutes early.',
+    location: 'Latin Quarter',
+    description:
+      'A vaulted cellar on Rue de la Huchette that has been a jazz and swing-dancing club since the 1940s. Dance, or just watch.',
     startTime: '21:30',
     endTime: '23:30',
-    estimatedCost: 35,
+    estimatedCost: 18,
     durationMinutes: 120,
     interest: 'nightlife',
+  },
+  {
+    id: 'par_notre_dame',
+    title: 'Notre-Dame Cathedral',
+    category: 'culture',
+    location: 'Île de la Cité',
+    description:
+      'The cathedral reopened after the 2019 fire, restored inside and out. Entry is free; a timed slot booked online can shorten the queue.',
+    startTime: '09:00',
+    endTime: '10:30',
+    estimatedCost: 0,
+    durationMinutes: 90,
+    interest: 'culture',
+  },
+  {
+    id: 'par_sainte_chapelle',
+    title: 'Sainte-Chapelle and its stained glass',
+    category: 'culture',
+    location: 'Île de la Cité',
+    description:
+      'The upper chapel is almost all glass, fifteen tall windows of it. Go on a bright morning, when the light comes through.',
+    startTime: '10:00',
+    endTime: '11:00',
+    estimatedCost: 16,
+    durationMinutes: 60,
+    interest: 'culture',
+  },
+  {
+    id: 'par_pere_lachaise',
+    title: 'Père Lachaise Cemetery',
+    category: 'outdoors',
+    location: 'Père Lachaise, 20th arrondissement',
+    description:
+      'Cobbled, tree-lined avenues and the graves of Chopin, Oscar Wilde, Édith Piaf and Jim Morrison. Take a map; it is easy to get lost.',
+    startTime: '10:30',
+    endTime: '12:00',
+    estimatedCost: 0,
+    durationMinutes: 90,
+    interest: 'relaxed',
+  },
+  {
+    id: 'par_arc',
+    title: 'Arc de Triomphe rooftop at dusk',
+    category: 'sightseeing',
+    location: 'Place Charles-de-Gaulle',
+    description:
+      'Nearly three hundred steps up to the roof, with the twelve avenues fanning out below and the city lights coming on.',
+    startTime: '18:30',
+    endTime: '19:30',
+    estimatedCost: 16,
+    durationMinutes: 60,
+    interest: 'culture',
   },
 ]
 
 /**
  * Stops that fit any city, priced at the same Paris-euro reference level as
- * `PARIS_TEMPLATES`. A catalogue destination gets them with its city in the
- * location and its own local prices (`localiseGeneric`); a trip with no
- * catalogue destination gets them exactly as written.
+ * `PARIS_TEMPLATES`. They describe a kind of activity, never a venue, because
+ * a destination on this bank is one Tourist has no local content for: a
+ * catalogue destination gets them with its city in the location and its own
+ * local prices (`localiseGeneric`); a trip with no catalogue destination gets
+ * them exactly as written. Nothing here may assume a feature only some cities
+ * have (an old town, a covered market, a hot climate).
  */
 const GENERIC_TEMPLATES: DraftTemplate[] = [
   {
     id: 'gen_breakfast',
-    title: 'Breakfast where the locals eat',
+    title: 'Café breakfast near where you are staying',
     category: 'food',
-    location: 'City centre',
-    cityLocation: 'Central {city}',
+    location: 'Near your accommodation',
+    cityLocation: 'Near your accommodation in {city}',
     description: 'A short, unhurried breakfast to start the day and get your bearings.',
     startTime: '08:30',
     endTime: '09:30',
     estimatedCost: 12,
     durationMinutes: 60,
     interest: 'food',
+    meal: 'breakfast',
+  },
+  {
+    // Breakfast used to be the only generic stop short and early enough for a
+    // final morning, so any trip that had it the day before left with nothing.
+    id: 'gen_morning_walk',
+    title: 'Early walk around your neighbourhood',
+    category: 'outdoors',
+    location: 'Near your accommodation',
+    cityLocation: 'Near your accommodation in {city}',
+    description: 'The streets around where you are staying before they get busy, with a coffee on the way back.',
+    startTime: '08:00',
+    endTime: '09:00',
+    estimatedCost: 0,
+    durationMinutes: 60,
+    interest: 'relaxed',
   },
   {
     id: 'gen_old_town',
-    title: 'Old town walking loop',
+    title: 'Self-guided walk through a historic district',
     category: 'sightseeing',
-    location: 'Historic centre',
-    cityLocation: 'Historic {city}',
+    location: 'A historic district',
+    cityLocation: 'A historic district of {city}',
     description:
-      'A self-guided loop through the oldest streets, with a couple of stops that are easy to miss.',
+      'Pick one of the older neighbourhoods and walk it at your own pace. A walking-tour app or a free map fills in the history.',
     startTime: '10:00',
     endTime: '12:00',
     estimatedCost: 0,
@@ -404,11 +564,12 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_museum',
-    title: 'City museum, highlights floor',
+    title: 'A major museum, highlights only',
     category: 'culture',
-    location: 'Museum quarter',
-    cityLocation: '{city} museum quarter',
-    description: 'The collection that explains the city, in about two hours.',
+    location: 'City centre',
+    cityLocation: 'Central {city}',
+    description:
+      'Choose one of the main museums and give it about two hours rather than the whole collection. Check its opening days before you go.',
     startTime: '10:00',
     endTime: '12:00',
     estimatedCost: 18,
@@ -417,24 +578,25 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_market',
-    title: 'Covered market lunch',
+    title: 'A neighbourhood food market for lunch',
     category: 'food',
-    location: 'Central market',
-    cityLocation: 'Central market, {city}',
-    description: 'Eat at the market rather than near it. Cheaper, and better.',
+    location: 'City centre',
+    cityLocation: 'Central {city}',
+    description: 'Eat at the stalls rather than near them; it is usually quicker and cheaper.',
     startTime: '12:30',
     endTime: '14:00',
     estimatedCost: 16,
     durationMinutes: 90,
     interest: 'food',
+    meal: 'lunch',
   },
   {
     id: 'gen_viewpoint',
-    title: 'Viewpoint over the rooftops',
+    title: 'A viewpoint over the city',
     category: 'sightseeing',
-    location: 'Highest accessible point',
-    cityLocation: 'Highest accessible point in {city}',
-    description: 'The best free view in the city, usually at the top of something.',
+    location: 'A high point in the city',
+    cityLocation: 'A high point in {city}',
+    description: 'A hill, park or public terrace with a view across the city, late in the afternoon.',
     startTime: '16:00',
     endTime: '17:30',
     estimatedCost: 0,
@@ -443,11 +605,11 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_park',
-    title: 'Park and green space walk',
+    title: 'A walk in a city park',
     category: 'outdoors',
-    location: 'City park',
+    location: 'A city park',
     cityLocation: 'A park in central {city}',
-    description: 'Flat paths, some shade, and a good hour out of the heat.',
+    description: 'Flat paths, somewhere to sit, and an hour at a slower pace.',
     startTime: '15:00',
     endTime: '16:30',
     estimatedCost: 0,
@@ -456,11 +618,11 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_shops',
-    title: 'Independent shops and market stalls',
+    title: 'Browsing independent shops',
     category: 'shopping',
-    location: 'Old quarter',
-    cityLocation: 'Old quarter, {city}',
-    description: 'A slow run through the local shops, away from the main shopping streets.',
+    location: 'A shopping street',
+    cityLocation: 'A shopping area of {city}',
+    description: 'A slow run through smaller, independent shops, away from the big chains.',
     startTime: '15:00',
     endTime: '17:00',
     estimatedCost: 40,
@@ -469,24 +631,25 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_dinner',
-    title: 'Dinner where the tables are local',
+    title: 'Dinner at a neighbourhood restaurant',
     category: 'food',
-    location: 'Residential quarter',
+    location: 'A residential neighbourhood',
     cityLocation: 'A residential neighbourhood of {city}',
-    description: 'Something the neighbourhood eats, with a walk afterwards.',
+    description: 'Try the local cuisine somewhere small, then walk back.',
     startTime: '19:30',
     endTime: '21:30',
     estimatedCost: 30,
     durationMinutes: 120,
     interest: 'food',
+    meal: 'dinner',
   },
   {
     id: 'gen_night',
-    title: 'Evening in the local bar scene',
+    title: 'An evening out for drinks or live music',
     category: 'nightlife',
-    location: 'Nightlife quarter',
-    cityLocation: '{city} nightlife quarter',
-    description: 'A couple of low-key places, all walkable, all busy at the weekend.',
+    location: 'City centre',
+    cityLocation: 'Central {city}',
+    description: 'A drink or some live music somewhere central. Check what is on that night.',
     startTime: '21:00',
     endTime: '23:00',
     estimatedCost: 35,
@@ -495,10 +658,10 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
   },
   {
     id: 'gen_nature',
-    title: 'Half day outside the city',
+    title: 'Half day out of the city',
     category: 'outdoors',
-    location: 'Regional park',
-    cityLocation: 'Out of {city}',
+    location: 'Outside the city',
+    cityLocation: 'Outside {city}',
     description: 'A half-day trip out, with trails or water depending on the weather.',
     startTime: '09:00',
     endTime: '13:00',
@@ -512,7 +675,7 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
     category: 'transit',
     location: 'Your accommodation',
     cityLocation: 'Your accommodation in {city}',
-    description: 'Check in, drop the bags, and get oriented before the first proper day.',
+    description: `Get to where you are staying, drop the bags, and get oriented. ${PLACEHOLDER_NOTE}`,
     startTime: '14:00',
     endTime: '16:00',
     estimatedCost: 15,
@@ -524,11 +687,11 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
     id: 'gen_depart',
     title: 'Last look, then head out',
     category: 'transit',
-    location: 'Departure point',
+    location: 'Your accommodation, then your airport or station',
     cityLocation: 'Your accommodation, then out of {city}',
-    description: 'A short final loop, then allow the extra hour for the transfer.',
-    startTime: '09:00',
-    endTime: '11:00',
+    description: `Check out and head for your airport or station, leaving extra time for the transfer. ${PLACEHOLDER_NOTE}`,
+    startTime: DEPARTURE_START_TIME,
+    endTime: '14:00',
     estimatedCost: 20,
     durationMinutes: 120,
     interest: null,
@@ -537,24 +700,39 @@ const GENERIC_TEMPLATES: DraftTemplate[] = [
 ]
 
 /**
- * London landmarks, priced in pounds at roughly current adult walk-up rates.
- * They are illustrative draft estimates like every other generated price, and
- * are written in GBP directly rather than scaled from the euro reference.
+ * London, priced in pounds at roughly current adult rates. Illustrative draft
+ * estimates like every other generated price, written in GBP directly rather
+ * than scaled from the euro reference. Every stop is a real, well-known place
+ * or area; the bank stands alone, with nothing generic mixed in.
  */
 const LONDON_TEMPLATES: DraftTemplate[] = [
   {
-    id: 'lon_breakfast',
-    title: 'Full English at a neighbourhood café',
-    category: 'food',
-    location: 'Marylebone',
+    id: 'lon_primrose',
+    title: 'Morning walk up Primrose Hill',
+    category: 'outdoors',
+    location: 'Primrose Hill',
     description:
-      'Eggs, bacon, beans and a pot of tea at a proper café, the kind with steamed-up windows and a regular in every corner.',
+      'A short climb to one of the best-known views of the London skyline, then back down along the edge of Regent’s Park.',
+    startTime: '08:00',
+    endTime: '09:00',
+    estimatedCost: 0,
+    durationMinutes: 60,
+    interest: 'outdoors',
+  },
+  {
+    // Replaces "Full English at a neighbourhood café", an unnamed café.
+    id: 'lon_beigel',
+    title: 'Beigels on Brick Lane',
+    category: 'food',
+    location: 'Brick Lane, Spitalfields',
+    description:
+      'Salt beef, or smoked salmon and cream cheese, from the long-running beigel bakeries at the top of Brick Lane.',
     startTime: '08:30',
     endTime: '09:30',
-    estimatedCost: 14,
+    estimatedCost: 8,
     durationMinutes: 60,
     interest: 'food',
-    landmark: true,
+    meal: 'breakfast',
   },
   {
     id: 'lon_tower',
@@ -568,7 +746,19 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 35,
     durationMinutes: 150,
     interest: 'culture',
-    landmark: true,
+  },
+  {
+    id: 'lon_st_pauls',
+    title: 'St Paul’s Cathedral and the Whispering Gallery',
+    category: 'culture',
+    location: 'City of London',
+    description:
+      'Wren’s cathedral, then the 257 steps up to the Whispering Gallery, and on to the outside galleries for the view over the City if you have the legs.',
+    startTime: '09:30',
+    endTime: '11:30',
+    estimatedCost: 26,
+    durationMinutes: 120,
+    interest: 'culture',
   },
   {
     id: 'lon_british_museum',
@@ -582,7 +772,6 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 120,
     interest: 'culture',
-    landmark: true,
   },
   {
     id: 'lon_abbey',
@@ -596,7 +785,19 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 30,
     durationMinutes: 90,
     interest: 'culture',
-    landmark: true,
+  },
+  {
+    id: 'lon_nhm',
+    title: 'Natural History Museum',
+    category: 'culture',
+    location: 'South Kensington',
+    description:
+      'Free to enter. The blue whale skeleton hanging in Hintze Hall, then the dinosaur gallery before the school groups arrive.',
+    startTime: '10:00',
+    endTime: '12:00',
+    estimatedCost: 0,
+    durationMinutes: 120,
+    interest: 'culture',
   },
   {
     id: 'lon_kew',
@@ -610,7 +811,45 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 22,
     durationMinutes: 240,
     interest: 'outdoors',
-    landmark: true,
+  },
+  {
+    id: 'lon_greenwich',
+    title: 'Greenwich, the Royal Observatory and the park',
+    category: 'sightseeing',
+    location: 'Greenwich',
+    description:
+      'A river boat or the DLR out to Greenwich, the Prime Meridian at the Royal Observatory, and the view back over London from the top of the park.',
+    startTime: '10:00',
+    endTime: '14:00',
+    estimatedCost: 24,
+    durationMinutes: 240,
+    interest: 'culture',
+  },
+  {
+    id: 'lon_guard',
+    title: 'Changing the Guard at Buckingham Palace',
+    category: 'sightseeing',
+    location: 'Buckingham Palace',
+    description:
+      'Free, outdoors and crowded, so arrive early for a spot by the railings. It does not run every day; check the schedule the day before.',
+    startTime: '10:30',
+    endTime: '12:00',
+    estimatedCost: 0,
+    durationMinutes: 90,
+    interest: 'culture',
+  },
+  {
+    id: 'lon_portobello',
+    title: 'Portobello Road Market',
+    category: 'shopping',
+    location: 'Notting Hill',
+    description:
+      'The pastel terraces of Notting Hill, then the length of Portobello Road. Saturday is the big day, when the antiques stalls are out.',
+    startTime: '10:30',
+    endTime: '12:30',
+    estimatedCost: 25,
+    durationMinutes: 120,
+    interest: 'shopping',
   },
   {
     id: 'lon_borough',
@@ -624,7 +863,34 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 18,
     durationMinutes: 75,
     interest: 'food',
-    landmark: true,
+    meal: 'lunch',
+  },
+  {
+    id: 'lon_chinatown',
+    title: 'Dim sum in Chinatown',
+    category: 'food',
+    location: 'Chinatown, Soho',
+    description:
+      'Lunchtime dim sum around Gerrard Street, a short walk from Leicester Square. Order a few plates at a time.',
+    startTime: '12:30',
+    endTime: '13:45',
+    estimatedCost: 22,
+    durationMinutes: 75,
+    interest: 'food',
+    meal: 'lunch',
+  },
+  {
+    id: 'lon_tate_modern',
+    title: 'Tate Modern and the Turbine Hall',
+    category: 'culture',
+    location: 'Bankside',
+    description:
+      'The collection is free to enter. Start with whatever fills the Turbine Hall, then the viewing level at the top of the Blavatnik Building.',
+    startTime: '14:00',
+    endTime: '15:30',
+    estimatedCost: 0,
+    durationMinutes: 90,
+    interest: 'culture',
   },
   {
     id: 'lon_national_gallery',
@@ -638,7 +904,19 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 90,
     interest: 'culture',
-    landmark: true,
+  },
+  {
+    id: 'lon_regents_park',
+    title: 'Regent’s Park and Queen Mary’s Rose Garden',
+    category: 'outdoors',
+    location: 'Regent’s Park',
+    description:
+      'The Inner Circle and its rose garden, then round to the boating lake. At its best in June; green all year.',
+    startTime: '14:00',
+    endTime: '15:30',
+    estimatedCost: 0,
+    durationMinutes: 90,
+    interest: 'relaxed',
   },
   {
     id: 'lon_hyde_park',
@@ -652,7 +930,6 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 90,
     interest: 'outdoors',
-    landmark: true,
   },
   {
     id: 'lon_camden',
@@ -666,21 +943,32 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 30,
     durationMinutes: 120,
     interest: 'shopping',
-    landmark: true,
+  },
+  {
+    id: 'lon_covent_garden',
+    title: 'Covent Garden and Neal’s Yard',
+    category: 'shopping',
+    location: 'Covent Garden',
+    description:
+      'The market hall and the street performers on the piazza, then the side streets up to the painted courtyard of Neal’s Yard.',
+    startTime: '15:30',
+    endTime: '17:00',
+    estimatedCost: 20,
+    durationMinutes: 90,
+    interest: 'shopping',
   },
   {
     id: 'lon_tea',
-    title: 'Afternoon tea',
+    title: 'Afternoon tea in Mayfair',
     category: 'food',
     location: 'Mayfair',
     description:
-      'Sandwiches, scones with clotted cream and a stand of small cakes. Book ahead and do not plan a big dinner.',
+      'Sandwiches, scones with clotted cream and a stand of small cakes at one of the grand hotels. Book ahead and do not plan a big dinner.',
     startTime: '15:30',
     endTime: '17:00',
     estimatedCost: 55,
     durationMinutes: 90,
     interest: 'food',
-    landmark: true,
   },
   {
     id: 'lon_south_bank',
@@ -694,7 +982,6 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 90,
     interest: 'relaxed',
-    landmark: true,
   },
   {
     id: 'lon_eye',
@@ -702,13 +989,26 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     category: 'sightseeing',
     location: 'South Bank',
     description:
-      'One slow half-hour rotation as the lights come on along the Thames, with Parliament right below.',
+      'Book a slot near sunset: one slow half-hour rotation as the lights come on along the Thames, with Parliament right below.',
     startTime: '18:00',
     endTime: '19:00',
     estimatedCost: 32,
     durationMinutes: 60,
     interest: 'relaxed',
-    landmark: true,
+  },
+  {
+    id: 'lon_curry',
+    title: 'Curry on Brick Lane',
+    category: 'food',
+    location: 'Brick Lane, Spitalfields',
+    description:
+      'Dinner on London’s best-known curry street. Walk the length of it before choosing; the menus are posted outside.',
+    startTime: '19:00',
+    endTime: '20:30',
+    estimatedCost: 25,
+    durationMinutes: 90,
+    interest: 'food',
+    meal: 'dinner',
   },
   {
     id: 'lon_theatre',
@@ -722,29 +1022,52 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 65,
     durationMinutes: 165,
     interest: 'nightlife',
-    landmark: true,
+  },
+  {
+    id: 'lon_globe',
+    title: 'A play at Shakespeare’s Globe',
+    category: 'nightlife',
+    location: 'Bankside',
+    description:
+      'Standing in the yard is the cheapest way in; this estimate is for a seat. The open-air theatre plays in the warmer months, and the candlelit Sam Wanamaker Playhouse next door in winter.',
+    startTime: '19:30',
+    endTime: '22:30',
+    estimatedCost: 35,
+    durationMinutes: 180,
+    interest: 'culture',
+  },
+  {
+    id: 'lon_jazz',
+    title: 'Live jazz at Ronnie Scott’s',
+    category: 'nightlife',
+    location: 'Soho',
+    description:
+      'The Frith Street jazz club, open since the 1950s. Book ahead for the main show.',
+    startTime: '20:00',
+    endTime: '22:30',
+    estimatedCost: 45,
+    durationMinutes: 150,
+    interest: 'nightlife',
   },
   {
     id: 'lon_pubs',
     title: 'Historic pubs off Fleet Street',
     category: 'nightlife',
-    location: 'The City of London',
+    location: 'City of London',
     description:
-      'Three old pubs down narrow courts, all walkable. Ye Olde Cheshire Cheese is the one to finish in.',
+      'Three old pubs down the narrow courts off Fleet Street, all walkable, finishing at Ye Olde Cheshire Cheese.',
     startTime: '20:00',
     endTime: '22:30',
     estimatedCost: 30,
     durationMinutes: 150,
     interest: 'nightlife',
-    landmark: true,
   },
   {
     id: 'lon_arrive',
     title: 'Arrive via Heathrow or St Pancras and check in',
     category: 'transit',
     location: 'Your hotel',
-    description:
-      'The Elizabeth line or the Piccadilly line in from Heathrow, or straight off the train at St Pancras. Drop the bags and take one slow loop around the block.',
+    description: `The Elizabeth line or the Piccadilly line in from Heathrow, or straight off the train at St Pancras. Drop the bags and take one slow loop around the block. ${PLACEHOLDER_NOTE}`,
     startTime: '15:00',
     endTime: '16:30',
     estimatedCost: 13,
@@ -757,10 +1080,9 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
     title: 'Check out and head for Heathrow or St Pancras',
     category: 'transit',
     location: 'Your hotel, then Heathrow or St Pancras',
-    description:
-      'Pack, settle the room, and leave the extra hour for the Elizabeth line out to Heathrow. Gatwick, Stansted and Luton are different runs entirely, so check the ticket.',
-    startTime: '08:00',
-    endTime: '10:00',
+    description: `Settle the room and take the Elizabeth line out to Heathrow, or head for the train at St Pancras, leaving the extra hour. Gatwick, Stansted and Luton are different runs entirely, so check the ticket. ${PLACEHOLDER_NOTE}`,
+    startTime: DEPARTURE_START_TIME,
+    endTime: '14:00',
     estimatedCost: 13,
     durationMinutes: 120,
     interest: null,
@@ -769,9 +1091,10 @@ const LONDON_TEMPLATES: DraftTemplate[] = [
 ]
 
 /**
- * Lagos landmarks, priced in naira in whole ₦500 steps. Illustrative draft
- * estimates like every other generated price; street food and market spend
- * vary a lot, and the airport runs are priced as a pre-booked car.
+ * Lagos, priced in naira in whole ₦500 steps. Illustrative draft estimates
+ * like every other generated price; street food and market spend vary a lot,
+ * and the airport runs are priced as a pre-booked car. Every stop is a real,
+ * well-known place, area or local dish; the bank stands alone.
  */
 const LAGOS_TEMPLATES: DraftTemplate[] = [
   {
@@ -786,7 +1109,7 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 3000,
     durationMinutes: 60,
     interest: 'food',
-    landmark: true,
+    meal: 'breakfast',
   },
   {
     id: 'lag_conservation',
@@ -800,7 +1123,6 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 10000,
     durationMinutes: 150,
     interest: 'outdoors',
-    landmark: true,
   },
   {
     id: 'lag_heritage',
@@ -814,7 +1136,6 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 120,
     interest: 'culture',
-    landmark: true,
   },
   {
     id: 'lag_tarkwa',
@@ -828,7 +1149,32 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 15000,
     durationMinutes: 300,
     interest: 'outdoors',
-    landmark: true,
+  },
+  {
+    id: 'lag_badagry',
+    title: 'Day trip to Badagry and the Point of No Return',
+    category: 'sightseeing',
+    location: 'Badagry',
+    description:
+      'A long drive west to the old slave port: the Heritage Museum, the Brazilian Barracoon, and the walk to the Point of No Return on the beach. Go with a driver and leave early.',
+    startTime: '08:00',
+    endTime: '15:00',
+    estimatedCost: 30000,
+    durationMinutes: 420,
+    interest: 'culture',
+  },
+  {
+    id: 'lag_national_museum',
+    title: 'National Museum Lagos',
+    category: 'culture',
+    location: 'Onikan, Lagos Island',
+    description:
+      'Nigeria’s national collection, with Nok terracottas, Ife heads and Benin bronzes, beside Tafawa Balewa Square.',
+    startTime: '10:00',
+    endTime: '11:30',
+    estimatedCost: 2000,
+    durationMinutes: 90,
+    interest: 'culture',
   },
   {
     id: 'lag_balogun',
@@ -842,21 +1188,34 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 15000,
     durationMinutes: 120,
     interest: 'shopping',
-    landmark: true,
   },
   {
+    // Nike Art Gallery is in Lekki Phase 1; the floor count it used to state
+    // could not be checked, so it is gone.
     id: 'lag_nike',
     title: 'Nike Art Gallery',
     category: 'culture',
-    location: 'Lekki',
+    location: 'Lekki Phase 1',
     description:
-      'Four floors of Nigerian art, from adire textiles to contemporary painting. Free to enter; take your time on the top floor.',
+      'Floor after floor of Nigerian art, from adire textiles to contemporary painting. Free to enter; take your time on the upper floors.',
     startTime: '11:00',
     endTime: '13:00',
     estimatedCost: 0,
     durationMinutes: 120,
     interest: 'culture',
-    landmark: true,
+  },
+  {
+    id: 'lag_jazzhole',
+    title: 'Books and records at the Jazzhole',
+    category: 'shopping',
+    location: 'Awolowo Road, Ikoyi',
+    description:
+      'A long-running bookshop and record store with a café at the back. Browse the highlife and Afrobeat shelves.',
+    startTime: '11:00',
+    endTime: '12:00',
+    estimatedCost: 0,
+    durationMinutes: 60,
+    interest: 'shopping',
   },
   {
     id: 'lag_buka',
@@ -870,7 +1229,21 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 5000,
     durationMinutes: 75,
     interest: 'food',
-    landmark: true,
+    meal: 'lunch',
+  },
+  {
+    id: 'lag_ofada',
+    title: 'Ofada rice and ayamase for lunch',
+    category: 'food',
+    location: 'Ikeja',
+    description:
+      'Local unpolished rice with ayamase, the green pepper stew, often served in leaves. Ask for it milder if you need to.',
+    startTime: '12:30',
+    endTime: '13:30',
+    estimatedCost: 5000,
+    durationMinutes: 60,
+    interest: 'food',
+    meal: 'lunch',
   },
   {
     id: 'lag_kalakuta',
@@ -878,13 +1251,38 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     category: 'culture',
     location: 'Ikeja',
     description:
-      'Fela Kuti’s former home, now a museum of his rooms, instruments and stage costumes, with a terrace on the roof.',
+      'Fela Kuti’s former home, now a museum of his rooms, clothes and instruments, with a terrace on the roof.',
     startTime: '13:30',
     endTime: '15:00',
     estimatedCost: 5000,
     durationMinutes: 90,
     interest: 'culture',
-    landmark: true,
+  },
+  {
+    id: 'lag_landmark_beach',
+    title: 'An afternoon at Landmark Beach',
+    category: 'outdoors',
+    location: 'Oniru, Victoria Island',
+    description:
+      'A managed beach with loungers, food and an entry fee, a short drive from Victoria Island. The Atlantic surf is strong, so swim only where the lifeguards say.',
+    startTime: '14:00',
+    endTime: '17:00',
+    estimatedCost: 10000,
+    durationMinutes: 180,
+    interest: 'relaxed',
+  },
+  {
+    id: 'lag_art_twenty_one',
+    title: 'Art Twenty One gallery',
+    category: 'culture',
+    location: 'Victoria Island',
+    description:
+      'A contemporary art space in the Eko Hotel complex, showing Nigerian and African artists. Free to enter.',
+    startTime: '15:00',
+    endTime: '16:00',
+    estimatedCost: 0,
+    durationMinutes: 60,
+    interest: 'culture',
   },
   {
     id: 'lag_lekki_market',
@@ -898,7 +1296,6 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 20000,
     durationMinutes: 120,
     interest: 'shopping',
-    landmark: true,
   },
   {
     id: 'lag_bridge',
@@ -912,7 +1309,6 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 0,
     durationMinutes: 60,
     interest: 'relaxed',
-    landmark: true,
   },
   {
     id: 'lag_freedom_park',
@@ -920,13 +1316,12 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     category: 'culture',
     location: 'Lagos Island',
     description:
-      'The old colonial prison grounds, now a park with a stage. There is usually live music or a play at the weekend.',
+      'The old colonial prison grounds, now a park with a stage. There is often live music or a play at the weekend.',
     startTime: '17:30',
     endTime: '19:30',
     estimatedCost: 2000,
     durationMinutes: 120,
     interest: 'culture',
-    landmark: true,
   },
   {
     id: 'lag_terra_kulture',
@@ -934,13 +1329,12 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     category: 'nightlife',
     location: 'Victoria Island',
     description:
-      'Nigerian theatre in an intimate arts centre. Eat at its restaurant first; the show starts on time.',
+      'Nigerian theatre in an intimate arts centre with a restaurant. Plays run mostly at weekends, so check what is on.',
     startTime: '18:00',
     endTime: '20:30',
     estimatedCost: 10000,
     durationMinutes: 150,
     interest: 'nightlife',
-    landmark: true,
   },
   {
     id: 'lag_suya',
@@ -954,7 +1348,20 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 8000,
     durationMinutes: 60,
     interest: 'food',
-    landmark: true,
+    meal: 'dinner',
+  },
+  {
+    id: 'lag_bogobiri',
+    title: 'Live music at Bogobiri House',
+    category: 'nightlife',
+    location: 'Ikoyi',
+    description:
+      'A small, art-filled guesthouse and bar that hosts live music and spoken-word nights. Check which night the band is on.',
+    startTime: '20:00',
+    endTime: '22:30',
+    estimatedCost: 10000,
+    durationMinutes: 150,
+    interest: 'nightlife',
   },
   {
     id: 'lag_shrine',
@@ -968,15 +1375,13 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     estimatedCost: 5000,
     durationMinutes: 180,
     interest: 'nightlife',
-    landmark: true,
   },
   {
     id: 'lag_arrive',
     title: 'Arrive at Murtala Muhammed Airport and check in',
     category: 'transit',
     location: 'Your hotel',
-    description:
-      'Clear arrivals at Murtala Muhammed in Ikeja, then a pre-booked car to the hotel. Allow two hours for the drive; the traffic decides.',
+    description: `Clear arrivals at Murtala Muhammed in Ikeja, then a pre-booked car to the hotel. Allow two hours for the drive; the traffic decides. ${PLACEHOLDER_NOTE}`,
     startTime: '15:00',
     endTime: '17:00',
     estimatedCost: 25000,
@@ -989,10 +1394,9 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
     title: 'Check out and head for Murtala Muhammed Airport',
     category: 'transit',
     location: 'Your hotel, then Murtala Muhammed Airport',
-    description:
-      'Settle the room and leave far more time than the distance suggests; the drive to Ikeja is the unpredictable part of the day.',
-    startTime: '08:00',
-    endTime: '10:30',
+    description: `Settle the room and take a pre-booked car to Ikeja, leaving far more time than the distance suggests; the drive is the unpredictable part of the day. ${PLACEHOLDER_NOTE}`,
+    startTime: DEPARTURE_START_TIME,
+    endTime: '14:30',
     estimatedCost: 25000,
     durationMinutes: 150,
     interest: null,
@@ -1001,35 +1405,28 @@ const LAGOS_TEMPLATES: DraftTemplate[] = [
 ]
 
 /**
- * A curated bank for one catalogue destination.
- *
- * `mixGeneric` false means the bank stands alone: Paris has its own food,
- * nightlife and anchors, and drafts exactly as it did before destinations had
- * ids. True means the bank is that city's anchors plus a short list of
- * landmarks, topped up with the localised generic bank minus `supersedes`, so
- * a long trip never runs dry and the pool stays at least twice the busiest
- * day, which is what lets adjacent days never share a stop.
+ * The hand-written bank of each curated destination (`Destination.guide`
+ * 'curated'). Each stands alone, anchors included: no generic stop is ever
+ * mixed in, so a London plan never offers "a walk in a city park" when Hyde
+ * Park is right there. Each holds far more than twice the busiest day's
+ * ordinary stops (see `planDay`), so adjacent days never share one.
  */
-interface LandmarkBank {
-  templates: readonly DraftTemplate[]
-  mixGeneric: boolean
-  /** Generic stops a landmark already does better, e.g. breakfast in London. */
-  supersedes: readonly string[]
+const CURATED_BANKS: Readonly<Partial<Record<string, readonly DraftTemplate[]>>> = {
+  paris: PARIS_TEMPLATES,
+  london: LONDON_TEMPLATES,
+  lagos: LAGOS_TEMPLATES,
 }
 
-const LANDMARK_BANKS: Readonly<Partial<Record<string, LandmarkBank>>> = {
-  paris: { templates: PARIS_TEMPLATES, mixGeneric: false, supersedes: [] },
-  london: {
-    templates: LONDON_TEMPLATES,
-    mixGeneric: true,
-    supersedes: ['gen_breakfast', 'gen_museum', 'gen_market', 'gen_night'],
-  },
-  lagos: {
-    templates: LAGOS_TEMPLATES,
-    mixGeneric: true,
-    supersedes: ['gen_breakfast', 'gen_old_town', 'gen_market', 'gen_night', 'gen_shops'],
-  },
-}
+/**
+ * Anchor titles from every bank, by role. Only used to recognise an arrival
+ * or departure saved before items carried a `role`, so a swap on one of those
+ * is refused too.
+ */
+const ANCHOR_ROLE_BY_TITLE: ReadonlyMap<string, AnchorRole> = new Map(
+  [...PARIS_TEMPLATES, ...LONDON_TEMPLATES, ...LAGOS_TEMPLATES, ...GENERIC_TEMPLATES]
+    .filter((template) => template.role !== undefined)
+    .map((template) => [template.title, template.role as AnchorRole]),
+)
 
 const PACE_TARGET: Record<TravelPace, number> = {
   relaxed: 2,
@@ -1041,11 +1438,19 @@ const PACE_TARGET: Record<TravelPace, number> = {
 const BUFFER_MINUTES = 15
 /** The latest minute a stop may end on: nothing runs past midnight. */
 const LAST_MINUTE = 23 * 60 + 59
+/** Nightlife is never offered for a slot that starts before this. */
+const EVENING_MINUTES = 17 * 60
 /**
  * How far an ordinary stop may be pushed past its natural start before it is
  * left out of the day instead. It is what keeps breakfast in the morning.
  */
 const MAX_DRIFT_MINUTES = 180
+/**
+ * The same for a meal, tighter: a sightseeing stop can move from ten to one,
+ * but a lunch pushed three hours is tea, and a breakfast at half eleven is not
+ * breakfast.
+ */
+const MAX_MEAL_DRIFT_MINUTES = 90
 
 function hashString(value: string): number {
   let hash = 2166136261
@@ -1082,6 +1487,27 @@ function isAnchor(template: DraftTemplate): boolean {
 }
 
 /**
+ * The travel role of a stop in a saved plan: its `role`, or, for an AI stop
+ * saved before roles were recorded, the role of the anchor template it was
+ * drafted from. Null for every ordinary stop, and for anything the traveller
+ * added, whatever they called it.
+ */
+function anchorRoleOf(item: ItineraryItem): AnchorRole | null {
+  if (item.role !== undefined) return item.role
+  if (item.source !== 'ai') return null
+  return ANCHOR_ROLE_BY_TITLE.get(item.title) ?? null
+}
+
+/**
+ * True for an arrival or departure (or the legacy transfer) in a saved plan:
+ * the stops `buildAlternativeItem` refuses to swap. Exported so the UI can
+ * withhold the swap action instead of offering one that is bound to fail.
+ */
+export function isTravelAnchor(item: ItineraryItem): boolean {
+  return anchorRoleOf(item) !== null
+}
+
+/**
  * A reference price (Paris euro level) as an illustrative local estimate:
  * scaled by the destination's price level and rounded to its step, so a yen
  * estimate is a whole ¥100 and a naira one a whole ₦500. Free stays free, and a
@@ -1113,9 +1539,8 @@ interface DraftBank {
  * on `trip.destinationId` only; the free text is never read, so a London trip
  * whose name or destination mentions Paris is still drafted as London.
  *
- * - A destination with a standalone bank (Paris): that bank, in its currency.
- * - A destination with a landmark bank (London, Lagos): its landmarks and
- *   anchors, topped up with the generic bank localised to it.
+ * - A curated destination (Paris, London, Lagos): its own bank, standalone,
+ *   in its currency.
  * - Any other catalogue destination: the generic bank localised to it.
  * - No catalogue destination: the generic bank as written, at reference
  *   prices labelled `DRAFT_PRICE_CURRENCY`. There is no city to name and no
@@ -1126,17 +1551,10 @@ function draftBankFor(trip: Trip): DraftBank {
   const destination = getDestination(trip.destinationId)
   if (destination === null) return { templates: GENERIC_TEMPLATES, currency: DRAFT_PRICE_CURRENCY }
 
-  const bank = LANDMARK_BANKS[destination.id]
-  const generic = GENERIC_TEMPLATES.map((template) => localiseGeneric(template, destination))
-  if (bank === undefined) return { templates: generic, currency: destination.currency }
-  if (!bank.mixGeneric) return { templates: bank.templates, currency: destination.currency }
+  const curated = CURATED_BANKS[destination.id]
+  if (curated !== undefined) return { templates: curated, currency: destination.currency }
   return {
-    templates: [
-      ...bank.templates,
-      // The bank brings its own arrival and departure; generic ones would be
-      // a second airport run.
-      ...generic.filter((template) => !isAnchor(template) && !bank.supersedes.includes(template.id)),
-    ],
+    templates: GENERIC_TEMPLATES.map((template) => localiseGeneric(template, destination)),
     currency: destination.currency,
   }
 }
@@ -1147,12 +1565,9 @@ function draftBankFor(trip: Trip): DraftBank {
  *
  * Preference: a stop that matches the traveller's interests and has not been
  * used on this trip yet, then any unused stop, then — once a long trip has
- * worked through the bank — the least recently used one. Within either unused
- * tier a landmark beats a generic stop, so a London draft leads with London
- * rather than "Old town walking loop"; a bank with no landmark flags (Paris,
- * generic) is unaffected. Ties go to the seeded `random()` over a
- * deterministically ordered array, so the same trip and variant always pick
- * the same stops.
+ * worked through the bank — the least recently used one. Ties go to the seeded
+ * `random()` over a deterministically ordered array, so the same trip and
+ * variant always pick the same stops.
  */
 function pickTemplate(
   candidates: readonly DraftTemplate[],
@@ -1161,16 +1576,12 @@ function pickTemplate(
   interests: readonly TravelInterest[],
 ): DraftTemplate | null {
   if (candidates.length === 0) return null
-  const landmarksFirst = (tier: readonly DraftTemplate[]): readonly DraftTemplate[] => {
-    const landmarks = tier.filter((template) => template.landmark === true)
-    return landmarks.length > 0 ? landmarks : tier
-  }
   const fresh = candidates.filter((template) => !lastUsed.has(template.id))
   const preferredFresh = fresh.filter(
     (template) => template.interest !== null && interests.includes(template.interest),
   )
-  if (preferredFresh.length > 0) return choose(landmarksFirst(preferredFresh), random)
-  if (fresh.length > 0) return choose(landmarksFirst(fresh), random)
+  if (preferredFresh.length > 0) return choose(preferredFresh, random)
+  if (fresh.length > 0) return choose(fresh, random)
 
   const usedOn = (template: DraftTemplate): number => lastUsed.get(template.id) ?? -1
   const oldest = Math.min(...candidates.map(usedOn))
@@ -1187,40 +1598,57 @@ interface Slot {
   end: number
 }
 
-/** Arrival first, departure last, every ordinary stop in between. */
-function placementRank(template: DraftTemplate): number {
-  if (template.role === 'arrival') return 0
-  return template.role === undefined ? 1 : 2
-}
-
 /**
  * Times one day's stops, or returns null when they cannot all fit.
  *
- * The arrival goes first and the departure last; every other stop is ordered by
- * its natural start. Walking that order, each stop starts at its natural time or
- * `BUFFER_MINUTES` after the previous one ends, whichever is later. So nothing
- * overlaps, and nothing starts earlier than it naturally would — which is what
- * keeps an evening stop in the evening. The day does not fit if a stop would end
- * after 23:59, or an ordinary stop would be pushed more than `MAX_DRIFT_MINUTES`
- * past its natural time. The departure is exempt from the drift limit: it goes
- * whenever the day's last stop is done.
+ * The arrival and departure are fixed points, placed exactly at their own
+ * start. The arrival opens the day. The ordinary stops follow in natural-time
+ * order, each at its natural time or `BUFFER_MINUTES` after the previous one
+ * ends, whichever is later, so nothing overlaps and nothing starts earlier than
+ * it naturally would, which keeps an evening stop in the evening. The departure
+ * closes the day.
+ *
+ * The day does not fit if any stop would end after 23:59, an ordinary stop
+ * would be pushed more than `MAX_DRIFT_MINUTES` (`MAX_MEAL_DRIFT_MINUTES` for a
+ * meal) past its natural time, or, with
+ * a departure, an ordinary stop would end less than `FINAL_DAY_BUFFER_MINUTES`
+ * before it. The departure is never pushed later to make room: that is how a
+ * final day once read "19:30 dinner, 21:45 check out".
  */
 function layOutDay(stops: readonly DraftTemplate[]): Slot[] | null {
-  const ordered = [...stops].sort(
-    (a, b) =>
-      placementRank(a) - placementRank(b) ||
-      timeToMinutes(a.startTime) - timeToMinutes(b.startTime),
-  )
+  const arrival = stops.find((template) => template.role === 'arrival')
+  const departure = stops.find((template) => template.role === 'departure')
+  const ordinary = stops
+    .filter((template) => !isAnchor(template))
+    .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime))
+
+  const departureStart = departure === undefined ? null : timeToMinutes(departure.startTime)
+  const latestOrdinaryEnd =
+    departureStart === null ? LAST_MINUTE : departureStart - FINAL_DAY_BUFFER_MINUTES
+
   const slots: Slot[] = []
   let earliest = 0
-  for (const template of ordered) {
+  if (arrival !== undefined) {
+    const start = timeToMinutes(arrival.startTime)
+    slots.push({ template: arrival, start, end: start + arrival.durationMinutes })
+    earliest = start + arrival.durationMinutes + BUFFER_MINUTES
+  }
+  for (const template of ordinary) {
     const natural = timeToMinutes(template.startTime)
     const start = Math.max(natural, earliest)
     const end = start + template.durationMinutes
-    if (end > LAST_MINUTE) return null
-    if (!isAnchor(template) && start - natural > MAX_DRIFT_MINUTES) return null
+    if (end > latestOrdinaryEnd) return null
+    const drift = template.meal === undefined ? MAX_DRIFT_MINUTES : MAX_MEAL_DRIFT_MINUTES
+    if (start - natural > drift) return null
     slots.push({ template, start, end })
     earliest = end + BUFFER_MINUTES
+  }
+  if (departure !== undefined && departureStart !== null) {
+    const end = departureStart + departure.durationMinutes
+    // Only an arrival can reach this far: an ordinary stop already ended a
+    // full final-day buffer before the departure.
+    if (departureStart < earliest || end > LAST_MINUTE) return null
+    slots.push({ template: departure, start: departureStart, end })
   }
   return slots
 }
@@ -1233,8 +1661,10 @@ function layOutDay(stops: readonly DraftTemplate[]): Slot[] | null {
  * never show the same stop twice. Yesterday's stops are excluded too whenever
  * the bank holds at least twice the day's count, which always leaves as many
  * candidates as the day asks for; with a smaller bank they are only avoided
- * while anything else remains. A draw that would not fit (see `layOutDay`) is dropped and another
- * is drawn, so a crowded day ends up shorter rather than stacked.
+ * while anything else remains. A draw that would not fit (see `layOutDay`) is
+ * dropped and another is drawn, as is a second breakfast, lunch or dinner, so a
+ * crowded day, or a final morning with little time before the departure, ends
+ * up shorter rather than stacked.
  */
 function planDay(
   anchors: readonly DraftTemplate[],
@@ -1245,7 +1675,11 @@ function planDay(
   interests: readonly TravelInterest[],
   random: () => number,
 ): Slot[] {
-  let slots = layOutDay(anchors) ?? []
+  const anchorSlots = layOutDay(anchors)
+  // The anchor times are constants chosen so this cannot happen; failing loudly
+  // beats silently dropping the traveller's arrival or departure.
+  if (anchorSlots === null) throw new Error('The arrival and departure do not fit on one day.')
+  let slots = anchorSlots
   const chosen = [...anchors]
   const daySeen = new Set(anchors.map((template) => template.id))
   const strictlyAvoidYesterday = bookable.length >= 2 * count
@@ -1263,6 +1697,7 @@ function planDay(
     if (pick === null) break
     daySeen.add(pick.id)
 
+    if (pick.meal !== undefined && chosen.some((template) => template.meal === pick.meal)) continue
     const next = layOutDay([...chosen, pick])
     if (next === null) continue
     chosen.push(pick)
@@ -1299,6 +1734,9 @@ function toItem(
     notes: '',
     createdAt: timestamp,
     updatedAt: timestamp,
+    // Only the arrival and departure carry a role; the key is left off every
+    // other stop rather than set to undefined, matching what storage reads back.
+    ...(template.role === 'arrival' || template.role === 'departure' ? { role: template.role } : {}),
     ...overrides,
   }
 }
@@ -1323,8 +1761,14 @@ export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().t
   return dates.map((date, dayIndex) => {
     const isFirst = dayIndex === 0
     const isLast = dayIndex === lastIndex
-    // A one-day trip is a travel day at both ends: arrival first, departure last.
-    const anchors = [isFirst ? arrival : undefined, isLast ? departure : undefined].filter(
+    // A one-day trip is a travel day at both ends: arrival first, departure
+    // last. Its arrival moves to the morning, since the afternoon one would
+    // come after the noon departure.
+    const opening =
+      isFirst && isLast && arrival !== undefined
+        ? { ...arrival, startTime: SAME_DAY_ARRIVAL_START }
+        : arrival
+    const anchors = [isFirst ? opening : undefined, isLast ? departure : undefined].filter(
       (template): template is DraftTemplate => template !== undefined,
     )
     // Travel days are lighter than full days.
@@ -1360,12 +1804,25 @@ export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().t
 /**
  * One targeted alternative for a single item: the same start, a different stop.
  *
- * Never an arrival, departure or transfer — an airport run is not an
- * alternative to anything — and never a stop already on that day. Among the
- * rest it prefers, in order: the same category and finished before the next
- * stop; the same category and finished by midnight; any category finished
- * before the next stop; any finished by midnight. The end time is recomputed
- * from the new stop's own duration.
+ * Refuses an arrival or departure (`isTravelAnchor`) by throwing an
+ * `AnchorSwapError`: an airport run has no sightseeing alternative, and
+ * returning one would quietly turn the traveller's way home into an attraction.
+ * The service passes the rejection on, so the caller shows its message and
+ * leaves the plan unchanged.
+ *
+ * Never offers an arrival, departure or transfer, a stop already on that day,
+ * a meal the rest of the day already has, or nightlife for a slot before 17:00
+ * (the last two only while anything else is left). Before a departure on the
+ * same day, the alternative must end `FINAL_DAY_BUFFER_MINUTES` before it, as a
+ * generated stop would; if nothing can, it throws an Error with
+ * `NO_ALTERNATIVE_BEFORE_DEPARTURE_MESSAGE` rather than suggest something that
+ * makes the traveller late. Among the rest it
+ * prefers, in order: the same category, at about its usual time of day and
+ * finished before the next stop; the same category finished before the next
+ * stop; the same category finished by midnight; any category at about its
+ * usual time and finished before the next stop; any finished before the next
+ * stop; any finished by midnight. The end time is recomputed from the new
+ * stop's own duration.
  *
  * Seeded on the slot's content rather than the item's generated id, so the same
  * day, item and variant give the same suggestion in any process.
@@ -1377,45 +1834,81 @@ export function buildAlternativeItem(
   variant = 0,
   timestamp = new Date().toISOString(),
 ): ItineraryItem {
+  if (isTravelAnchor(item)) throw new AnchorSwapError()
+
   // The same bank as the plan, so a swap on a London day is a London stop in
   // pounds, never a Paris one in euros.
   const { templates: pool, currency } = draftBankFor(trip)
   const random = mulberry32(
     hashString(`${trip.id}:alt:${day.id}:${item.title}:${item.startTime}:${variant}`),
   )
+  const timed = isValidTime(item.startTime)
   const start = timeToMinutes(item.startTime)
   const nextStart = day.items
     .map((other) => timeToMinutes(other.startTime))
     .filter((minutes) => minutes > start)
     .reduce((earliest, minutes) => Math.min(earliest, minutes), LAST_MINUTE + BUFFER_MINUTES)
+  const departure = day.items.find(
+    (other) => other !== item && anchorRoleOf(other) === 'departure' && isValidTime(other.startTime),
+  )
+  const departureStart = departure === undefined ? null : timeToMinutes(departure.startTime)
+  const beforeDeparture = timed && departureStart !== null && start < departureStart
 
   const onDay = new Set([item.title, ...day.items.map((other) => other.title)])
-  const offered = pool.filter((template) => !isAnchor(template))
-  const fresh = offered.filter((template) => !onDay.has(template.title))
+  const bookable = pool.filter((template) => !isAnchor(template))
+  const inTime = (template: DraftTemplate): boolean =>
+    !beforeDeparture ||
+    departureStart === null ||
+    start + template.durationMinutes <= departureStart - FINAL_DAY_BUFFER_MINUTES
+  const offered = bookable.filter(inTime)
+  if (offered.length === 0) throw new Error(NO_ALTERNATIVE_BEFORE_DEPARTURE_MESSAGE)
+  const daytimeSafe = offered.filter(
+    (template) => !timed || start >= EVENING_MINUTES || template.category !== 'nightlife',
+  )
+  // The meals the rest of the day already has, so a swap does not add a second lunch.
+  const mealsElsewhere = new Set(
+    day.items
+      .filter((other) => other !== item)
+      .map((other) => bookable.find((template) => template.title === other.title)?.meal)
+      .filter((meal) => meal !== undefined),
+  )
+  const fresh = (daytimeSafe.length > 0 ? daytimeSafe : offered).filter(
+    (template) =>
+      !onDay.has(template.title) && (template.meal === undefined || !mealsElsewhere.has(template.meal)),
+  )
 
   const sameCategory = (template: DraftTemplate): boolean => template.category === item.category
+  const usualTime = (template: DraftTemplate): boolean =>
+    !timed || Math.abs(timeToMinutes(template.startTime) - start) <= MAX_DRIFT_MINUTES
   const beforeNext = (template: DraftTemplate): boolean =>
     start + template.durationMinutes <= nextStart - BUFFER_MINUTES
   const beforeMidnight = (template: DraftTemplate): boolean =>
     start + template.durationMinutes <= LAST_MINUTE
   const tiers: Array<(template: DraftTemplate) => boolean> = [
+    (template) => sameCategory(template) && usualTime(template) && beforeNext(template),
     (template) => sameCategory(template) && beforeNext(template),
     (template) => sameCategory(template) && beforeMidnight(template),
+    (template) => usualTime(template) && beforeNext(template),
     beforeNext,
     beforeMidnight,
     () => true,
   ]
   const candidates =
     tiers.map((tier) => fresh.filter(tier)).find((tier) => tier.length > 0) ??
-    // Only reachable if the day already holds every stop in the bank.
+    // Only reachable if the day already holds every stop that fits.
     offered.filter((template) => template.title !== item.title)
+  if (candidates.length === 0) {
+    throw new Error(
+      beforeDeparture
+        ? NO_ALTERNATIVE_BEFORE_DEPARTURE_MESSAGE
+        : 'We could not find a different suggestion. Your plan is unchanged.',
+    )
+  }
   const chosen = choose(candidates, random)
 
   return toItem(trip, chosen, currency, timestamp, {
     startTime: item.startTime,
-    endTime: isValidTime(item.startTime)
-      ? minutesToTime(start + chosen.durationMinutes)
-      : item.endTime,
+    endTime: timed ? minutesToTime(start + chosen.durationMinutes) : item.endTime,
     source: 'ai',
   })
 }

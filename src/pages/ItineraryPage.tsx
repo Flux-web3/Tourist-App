@@ -11,7 +11,14 @@ import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
-import { formatDateRange, formatLongDate, formatShortDate, isValidTime, todayISO } from '@/domain/format'
+import {
+  formatDateRange,
+  formatLongDate,
+  formatShortDate,
+  formatTime,
+  isValidTime,
+  todayISO,
+} from '@/domain/format'
 import {
   countItems,
   estimateTotal,
@@ -24,7 +31,7 @@ import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { describePlan } from '@/services'
 import { useGeneration, useTourist, useTrip, useTripDays } from '@/state/useTourist'
 import type { CustomItemInput } from '@/state/touristContext'
-import type { CurrencyCode, ItineraryCategory, ItineraryItem } from '@/domain/types'
+import type { CurrencyCode, ItineraryCategory, ItineraryDay, ItineraryItem } from '@/domain/types'
 
 const CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = Object.entries(
   ITINERARY_CATEGORY_LABEL,
@@ -288,6 +295,22 @@ function ItineraryItemDialog({
   )
 }
 
+/**
+ * The stops on a day that start at or after its departure. The generator never
+ * plans anything after the departure, but the traveller can add or move a stop
+ * there, and a plan that has them sightseeing after their flight has left
+ * should say so rather than quietly list it. Days without a departure, and
+ * drafts saved before stops had roles, have none.
+ */
+function stopsAfterDeparture(day: ItineraryDay): { departure: ItineraryItem; late: ItineraryItem[] } | null {
+  const departure = day.items.find((item) => item.role === 'departure')
+  if (!departure) return null
+  const late = day.items.filter(
+    (item) => item.id !== departure.id && item.startTime >= departure.startTime,
+  )
+  return late.length > 0 ? { departure, late } : null
+}
+
 function TimelineSkeleton() {
   return (
     <div className="flex flex-col gap-6">
@@ -436,7 +459,7 @@ export default function ItineraryPage() {
                 </span>
               ) : null}
             </p>
-            <DraftProvenanceNote />
+            <DraftProvenanceNote trip={trip} />
           </div>
         }
         actions={
@@ -528,6 +551,8 @@ export default function ItineraryPage() {
           <ol className="flex list-none flex-col gap-8">
             {days.map((day, position) => {
               const dayTotal = estimateTotal([day], trip.currency)
+              const afterDeparture = stopsAfterDeparture(day)
+              const lateIds = new Set(afterDeparture?.late.map((item) => item.id) ?? [])
               return (
                 <li key={day.id} className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-line pb-2">
@@ -554,6 +579,23 @@ export default function ItineraryPage() {
                       </p>
                     ) : null}
                   </div>
+
+                  {afterDeparture ? (
+                    <Alert
+                      tone="warning"
+                      title={
+                        afterDeparture.late.length === 1
+                          ? 'This stop is after your departure'
+                          : `${afterDeparture.late.length} stops are after your departure`
+                      }
+                    >
+                      {`${afterDeparture.late.map((item) => item.title).join(', ')} ${
+                        afterDeparture.late.length === 1 ? 'starts' : 'start'
+                      } at or after ${
+                        formatTime(afterDeparture.departure.startTime) ?? afterDeparture.departure.startTime
+                      }, when you leave. Move ${afterDeparture.late.length === 1 ? 'it' : 'them'} earlier or to another day.`}
+                    </Alert>
+                  ) : null}
 
                   {day.items.length === 0 ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-dashed border-line-strong bg-surface-low px-4 py-3">
@@ -593,6 +635,7 @@ export default function ItineraryPage() {
                               setMoveItemId(null)
                             }}
                             onRemove={() => setRemoving(item)}
+                            afterDeparture={lateIds.has(item.id)}
                           />
                         </li>
                       ))}

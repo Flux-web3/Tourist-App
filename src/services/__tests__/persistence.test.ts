@@ -1703,3 +1703,39 @@ describe('createDemoState', () => {
     expect(state.trips[0]?.userId).toBe(user.id)
   })
 })
+
+describe('reading an itinerary stop role', () => {
+  function withRoles(roles: unknown[]): PersistedState | null {
+    const items = roles.map((role, index) => {
+      // Raw saved data: the role is whatever was stored, not a typed value.
+      const item: Record<string, unknown> = { ...makeItem(PARIS, `itm_${index}`, 'EUR') }
+      if (role !== undefined) item.role = role
+      return item
+    })
+    writeJson(
+      raw({
+        ...createEmptyState(createGuestUser({ id: USER_ID })),
+        trips: [makeTrip(PARIS, 'EUR', { destination: 'Paris, France' })],
+        daysByTrip: { [PARIS]: [makeDay(PARIS, 1, items as unknown as ItineraryItem[])] },
+      }),
+    )
+    return service.loadDetailed().state
+  }
+
+  it('keeps arrival and departure roles through a save and reload', () => {
+    const state = withRoles(['arrival', undefined, 'departure'])
+    const items = state?.daysByTrip[PARIS]?.[0]?.items ?? []
+
+    expect(items.map((item) => item.role)).toEqual(['arrival', undefined, 'departure'])
+    // An ordinary stop gains no role key at all, so older drafts stay byte-identical.
+    expect(items[1]).not.toHaveProperty('role')
+  })
+
+  it('drops an unknown role but keeps the stop', () => {
+    const state = withRoles(['layover', 42])
+    const items = state?.daysByTrip[PARIS]?.[0]?.items ?? []
+
+    expect(items).toHaveLength(2)
+    expect(items.every((item) => !('role' in item))).toBe(true)
+  })
+})

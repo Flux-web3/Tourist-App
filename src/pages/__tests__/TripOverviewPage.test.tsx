@@ -20,6 +20,9 @@ import {
   readStoredState,
 } from '@/pages/__tests__/tripFixture'
 import type { PersistedState } from '@/services/contracts'
+import { act } from 'react'
+import ExplorePage from '@/pages/ExplorePage'
+import { useTourist } from '@/state/useTourist'
 
 const START = FIXTURE_DAY_ONE_DATE
 const END = addDays(START, 1)
@@ -336,7 +339,7 @@ describe('TripOverviewPage', () => {
       await user.clear(within(dialog).getByLabelText(/Destination/))
       await user.type(within(dialog).getByLabelText(/Destination/), 'rome')
       await user.click(within(dialog).getByRole('option', { name: /Rome/ }))
-      await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+      await user.click(within(dialog).getByRole('button', { name: 'Change destination and re-draft' }))
 
       const [trip] = readStoredState().trips
       // Named after the city alone, not "Rome, Italy in May".
@@ -512,5 +515,165 @@ describe('TripOverviewPage', () => {
       ).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Back to trips' })).toHaveAttribute('href', '/trips')
     })
+  })
+})
+
+/**
+ * Moving a trip to another city from its overview leaves a plan for that city
+ * only, and the rest of the app follows the stored destination: another city's
+ * place is still refused, and Explore shows the new city's guide.
+ */
+describe('TripOverviewPage moving a trip to another city', () => {
+  const LONDON_TRIP = 'trip-moving'
+  const START = addDays(todayISO(), 30)
+
+  function londonState(): PersistedState {
+    const created = services.trips.create(
+      fixtureState(),
+      {
+        name: 'London long weekend',
+        origin: 'Lagos, Nigeria',
+        destination: 'London, United Kingdom',
+        destinationId: 'london',
+        startDate: START,
+        endDate: addDays(START, 2),
+        travelers: 2,
+        budget: 2000,
+        currency: 'GBP',
+        interests: ['culture'],
+        pace: 'balanced',
+        notes: '',
+      },
+      'user-fixture',
+    )
+    const tripId = created.trip?.id ?? ''
+    const days = (created.state.daysByTrip[tripId] ?? []).map((day, index) => ({
+      ...day,
+      tripId: LONDON_TRIP,
+      items: [
+        ...day.items.map((item) => ({ ...item, tripId: LONDON_TRIP })),
+        ...(index === 0
+          ? [
+              {
+                ...day.items[0],
+                id: 'itm_tower',
+                tripId: LONDON_TRIP,
+                title: 'Tower of London',
+                source: 'catalog' as const,
+                experienceId: 'exp_london_tower_of_london',
+                currency: 'GBP' as const,
+                role: undefined,
+              },
+              {
+                ...day.items[0],
+                id: 'itm_dinner',
+                tripId: LONDON_TRIP,
+                title: 'Dinner with Sam',
+                source: 'user' as const,
+                startTime: '19:30',
+                role: undefined,
+              },
+            ]
+          : []),
+      ],
+    }))
+    return {
+      ...created.state,
+      trips: created.state.trips.map((trip) => (trip.id === tripId ? { ...trip, id: LONDON_TRIP } : trip)),
+      daysByTrip: { ...created.state.daysByTrip, [LONDON_TRIP]: days },
+      expensesByTrip: { ...created.state.expensesByTrip, [LONDON_TRIP]: [] },
+    }
+  }
+
+  let actions: ReturnType<typeof useTourist>['actions'] | null = null
+  function ActionsProbe() {
+    actions = useTourist().actions
+    return null
+  }
+
+  it('re-drafts the plan for Paris, refuses a London place and scopes Explore to Paris', async () => {
+    const user = userEvent.setup()
+    const view = renderWithProviders(
+      <>
+        <ActionsProbe />
+        <Routes>
+          <Route path="/trips/:tripId" element={<TripOverviewPage />} />
+        </Routes>
+      </>,
+      { route: `/trips/${LONDON_TRIP}`, state: londonState() },
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Edit trip' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit trip' })
+    const destination = within(dialog).getByRole('combobox', { name: /Destination/ })
+    await user.clear(destination)
+    await user.type(destination, 'paris')
+    await user.click(within(dialog).getByRole('option', { name: 'Paris, France' }))
+    expect(within(dialog).getByText(/1 place from the London guide will be removed/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Change destination and re-draft' }))
+
+    const stored = readStoredState()
+    const trip = stored.trips.find((candidate) => candidate.id === LONDON_TRIP)
+    const items = (stored.daysByTrip[LONDON_TRIP] ?? []).flatMap((day) => day.items)
+    expect(trip).toMatchObject({ destinationId: 'paris', currency: 'GBP' })
+    expect(items.map((item) => item.id)).not.toContain('itm_tower')
+    expect(items.map((item) => item.id)).toContain('itm_dinner')
+    expect(items.filter((item) => item.source === 'ai').every((item) => item.currency === 'EUR')).toBe(true)
+    // The other trip in the state is not touched by the move.
+    expect(stored.daysByTrip[FIXTURE_TRIP_ID]).toEqual(fixtureState().daysByTrip[FIXTURE_TRIP_ID])
+
+    const dayId = stored.daysByTrip[LONDON_TRIP]?.[0]?.id ?? ''
+    let refused: unknown = 'not called'
+    let accepted: unknown = null
+    await act(async () => {
+      refused = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_london_tower_of_london', { dayId })
+      accepted = await actions?.addExperienceToTrip(LONDON_TRIP, 'exp_louvre_museum', { dayId })
+    })
+    expect(refused).toBeNull()
+    expect(accepted).toMatchObject({ experienceId: 'exp_louvre_museum', source: 'catalog' })
+
+    view.unmount()
+    renderWithProviders(
+      <Routes>
+        <Route path="/trips/:tripId/explore" element={<ExplorePage />} />
+      </Routes>,
+      { route: `/trips/${LONDON_TRIP}/explore`, state: readStoredState() },
+    )
+
+    expect(
+      await screen.findByText('Curated Paris places you can add to any day of London long weekend.'),
+    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 3, name: 'Louvre Museum' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Tower of London' })).not.toBeInTheDocument()
+  })
+})
+
+describe('TripOverviewPage guide coverage', () => {
+  it('tells a Tokyo trip there is no curated guide before it opens an empty Explore', async () => {
+    renderOverview(fixtureState({ trip: { destination: 'Tokyo, Japan', destinationId: 'tokyo', currency: 'JPY' } }))
+
+    const summary = await screen.findByRole('region', { name: 'Trip summary' })
+    expect(within(summary).getByText('No curated guide for Tokyo yet')).toBeInTheDocument()
+    expect(
+      within(summary).getByText(
+        'Explore has no places for Tokyo, and the itinerary draft uses general activity types, not local recommendations. Everything else, from budget to notes, works as usual.',
+      ),
+    ).toBeInTheDocument()
+    const guide = screen.getByText('Guide').closest('div')
+    expect(guide).toHaveTextContent('General suggestions only, no Explore places')
+  })
+
+  it('treats a destination outside the list the same way, by its typed name', async () => {
+    renderOverview(fixtureState({ trip: { destination: 'Lisbon', destinationId: null } }))
+
+    expect(await screen.findByText('No curated guide for Lisbon yet')).toBeInTheDocument()
+  })
+
+  it('says nothing is missing for a curated destination', async () => {
+    renderOverview(fixtureState({ trip: { destination: 'London, United Kingdom', destinationId: 'london', currency: 'GBP' } }))
+
+    await screen.findByRole('region', { name: 'Trip summary' })
+    expect(screen.queryByText(/No curated guide/)).not.toBeInTheDocument()
+    expect(screen.getByText('Guide').closest('div')).toHaveTextContent('Curated guide in Explore')
   })
 })

@@ -7,7 +7,12 @@ import { SelectField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { formatShortDate, formatTime } from '@/domain/format'
 import { formatPrice, toCents } from '@/domain/money'
-import { ITINERARY_CATEGORY_ICON, ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
+import {
+  ITINERARY_CATEGORY_ICON,
+  ITINERARY_CATEGORY_LABEL,
+  PROTOTYPE_LABEL,
+  TRAVEL_ROLE_LABEL,
+} from '@/lib/labels'
 import type { CurrencyCode, ItineraryDay, ItineraryItem } from '@/domain/types'
 
 interface ItineraryItemCardProps {
@@ -22,6 +27,8 @@ interface ItineraryItemCardProps {
   onReplace: () => void
   onMove: (dayId: string) => void
   onRemove: () => void
+  /** The stop starts at or after this day's departure, so it cannot happen as planned. */
+  afterDeparture?: boolean
 }
 
 /**
@@ -37,6 +44,12 @@ interface ItineraryItemCardProps {
  * The price keeps its estimate marking, but as a compact `≈ €24` figure rather
  * than an ESTIMATED PRICE caption above it, and a free stop reads `Free`
  * instead of `€0.00 EUR`, which looked like missing data.
+ *
+ * An arrival or departure is travel, not sightseeing, so it is marked as such
+ * and offers no Replace: swapping the way into or out of the city for a museum
+ * is never what the traveller meant. Edit, Move and Remove stay, because the
+ * real booking may differ from the draft. Stops from drafts saved before roles
+ * existed have no role and behave as any other stop.
  */
 export function ItineraryItemCard({
   item,
@@ -50,11 +63,13 @@ export function ItineraryItemCard({
   onReplace,
   onMove,
   onRemove,
+  afterDeparture = false,
 }: ItineraryItemCardProps) {
   const [targetDayId, setTargetDayId] = useState('')
   const titleId = useId()
   const movePanelRef = useRef<HTMLDivElement>(null)
 
+  const travelRole = item.role === 'arrival' || item.role === 'departure' ? item.role : null
   const pending = pendingItemId === item.id
   const swapBlocked = pendingItemId !== null && !pending
 
@@ -89,12 +104,16 @@ export function ItineraryItemCard({
 
   const actions: ActionMenuItem[] = [
     { label: 'Edit', icon: 'edit', onSelect: onEdit },
-    {
-      label: pending ? 'Swapping' : 'Replace',
-      icon: 'swap_horiz',
-      onSelect: onReplace,
-      disabled: pending || swapBlocked,
-    },
+    ...(travelRole
+      ? []
+      : [
+          {
+            label: pending ? 'Swapping' : 'Replace',
+            icon: 'swap_horiz',
+            onSelect: onReplace,
+            disabled: pending || swapBlocked,
+          },
+        ]),
     ...(moveOptions.length > 0
       ? [
           {
@@ -146,6 +165,19 @@ export function ItineraryItemCard({
           </h4>
 
           <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {travelRole ? (
+              <Badge
+                tone="planned"
+                icon={<Icon name={travelRole === 'arrival' ? 'flight_land' : 'flight_takeoff'} size={14} />}
+              >
+                {TRAVEL_ROLE_LABEL[travelRole]}
+              </Badge>
+            ) : null}
+            {afterDeparture ? (
+              <Badge tone="danger" icon={<Icon name="schedule" size={14} />}>
+                After your departure
+              </Badge>
+            ) : null}
             <Badge
               tone="neutral"
               icon={<Icon name={ITINERARY_CATEGORY_ICON[item.category]} size={14} />}
@@ -173,6 +205,12 @@ export function ItineraryItemCard({
               </Badge>
             ) : null}
           </div>
+
+          {travelRole ? (
+            <p className="mt-2 text-body-sm text-ink-subtle">
+              Travel stop, so it is never swapped for an activity. Edit it to match your booking.
+            </p>
+          ) : null}
 
           {item.location ? (
             <p className="mt-2 flex items-start gap-1.5 text-body-sm text-ink-muted">

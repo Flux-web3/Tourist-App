@@ -22,7 +22,14 @@ import {
 } from '@/domain/format'
 import { countItems, findDayForDate } from '@/domain/itinerary'
 import { CURRENCY_SYMBOLS, formatAmount } from '@/domain/money'
-import { INTEREST_LABEL, ITINERARY_CATEGORY_ICON, PACE_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
+import {
+  GUIDE_LABEL,
+  INTEREST_LABEL,
+  ITINERARY_CATEGORY_ICON,
+  PACE_LABEL,
+  PROTOTYPE_LABEL,
+  describeTripGuide,
+} from '@/lib/labels'
 import { DEMO_TRIP_ID } from '@/services/persistence'
 import { useGeneration, useTourist, useTrip, useTripBudget, useTripDays, useTripExpenses, useTripNotes } from '@/state/useTourist'
 
@@ -133,6 +140,7 @@ export default function TripOverviewPage() {
   const itemCount = countItems(days)
   const hasPlan = itemCount > 0
   const isSample = trip.id === DEMO_TRIP_ID
+  const tripGuide = describeTripGuide(trip)
   const percent = budget.tripBudget > 0 ? Math.round((budget.actualSpent / budget.tripBudget) * 100) : 0
   const regenerate = () => {
     void actions.generateItinerary(trip.id, { regenerate: true })
@@ -200,6 +208,21 @@ export default function TripOverviewPage() {
             </li>
           ))}
         </ul>
+
+        {/*
+          The Explore tab sits one tap away in the navigation for every trip,
+          so a city with no guide says so here, before the traveller opens an
+          empty Explore expecting a full one.
+        */}
+        {tripGuide.guide === 'general' ? (
+          <Disclosure
+            className="mt-4"
+            icon="info"
+            summary={`No curated guide for ${tripGuide.place} yet`}
+          >
+            {`Explore has no places for ${tripGuide.place}, and the itinerary draft uses general activity types, not local recommendations. Everything else, from budget to notes, works as usual.`}
+          </Disclosure>
+        ) : null}
 
         {isSample ? (
           <Disclosure
@@ -437,6 +460,11 @@ export default function TripOverviewPage() {
         <dl className="grid gap-x-6 sm:grid-cols-2">
           <DetailRow term="Travelling from">{trip.origin}</DetailRow>
           <DetailRow term="Destination">{trip.destination}</DetailRow>
+          <DetailRow term="Guide">
+            {tripGuide.guide === 'curated'
+              ? `${GUIDE_LABEL.curated} in Explore`
+              : `${GUIDE_LABEL.general} only, no Explore places`}
+          </DetailRow>
           <DetailRow term="Dates">
             {`${formatDateRange(trip.startDate, trip.endDate)} · ${countLabel(
               tripLengthInDays(trip.startDate, trip.endDate),

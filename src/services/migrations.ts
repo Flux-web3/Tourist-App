@@ -553,6 +553,9 @@ function readItem(
     notes: orEmpty(value.notes),
     createdAt: orNow(value.createdAt),
     updatedAt: orNow(value.updatedAt),
+    // Optional and additive, so no version bump: an unknown value is dropped
+    // rather than the stop, and an older draft simply has no roles.
+    ...(value.role === 'arrival' || value.role === 'departure' ? { role: value.role } : {}),
   }
 }
 

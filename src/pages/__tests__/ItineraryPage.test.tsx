@@ -727,3 +727,135 @@ describe('ItineraryPage', () => {
     })
   })
 })
+
+describe('ItineraryPage destination honesty', () => {
+  const GENERAL_NOTE = /these stops are general activity types/
+
+  it('says a Tokyo draft is general suggestions in local-currency estimates', async () => {
+    renderItinerary(
+      fixtureState({ trip: { destination: 'Tokyo, Japan', destinationId: 'tokyo', currency: 'JPY' } }),
+    )
+
+    const note = (await screen.findByText('General suggestions for Tokyo.')).closest('p')
+    expect(note).toHaveTextContent(
+      'General suggestions for Tokyo. Tourist has no curated guide for Tokyo yet, so these stops are general activity types named for the city, not local recommendations. Prices are rough estimates in JPY, the local currency, not quotes.',
+    )
+  })
+
+  it('says a trip outside the destination list gets general suggestions, named by what was typed', async () => {
+    renderItinerary(fixtureState({ trip: { destination: 'Lisbon', destinationId: null } }))
+
+    const note = (await screen.findByText('General suggestions for Lisbon.')).closest('p')
+    expect(note).toHaveTextContent(
+      "Lisbon is not one of Tourist's listed cities, so these stops are general activity types, not local recommendations. Prices are rough reference estimates in EUR, not local prices.",
+    )
+  })
+
+  it.each([
+    ['Paris, France', 'paris', 'EUR'],
+    ['London, United Kingdom', 'london', 'GBP'],
+    ['Lagos, Nigeria', 'lagos', 'NGN'],
+  ] as const)('adds no general-suggestions note for curated %s', async (destination, destinationId, currency) => {
+    renderItinerary(fixtureState({ trip: { destination, destinationId, currency } }))
+
+    await screen.findByRole('heading', { level: 1 })
+    expect(screen.queryByText(GENERAL_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^General suggestions for/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ItineraryPage travel stops', () => {
+  function withTravelStops(extraOnLastDay: ItineraryItem[] = []): ItineraryDay[] {
+    const [dayOne, dayTwo] = makeFixtureDays()
+    const base = dayOne.items[0]
+    const arrival: ItineraryItem = {
+      ...base,
+      id: 'item-arrival',
+      title: 'Arrive and settle in',
+      category: 'transit',
+      startTime: '08:00',
+      source: 'ai',
+      role: 'arrival',
+    }
+    const departure: ItineraryItem = {
+      ...base,
+      id: 'item-departure',
+      title: 'Head to the airport',
+      category: 'transit',
+      startTime: '12:00',
+      source: 'ai',
+      role: 'departure',
+    }
+    return [
+      { ...dayOne, items: [arrival, ...dayOne.items] },
+      { ...dayTwo, items: [...dayTwo.items, departure, ...extraOnLastDay] },
+    ]
+  }
+
+  function lateStop(startTime: string, title = 'Late gallery visit'): ItineraryItem {
+    const base = makeFixtureDays()[0].items[0]
+    return { ...base, id: `item-late-${startTime}`, title, startTime, source: 'user', role: undefined }
+  }
+
+  it('offers no Replace on the arrival or the departure, and keeps it on ordinary stops', async () => {
+    const user = userEvent.setup()
+    renderItinerary(fixtureState({ days: withTravelStops() }))
+
+    for (const [title, marker] of [
+      ['Arrive and settle in', 'Arrival'],
+      ['Head to the airport', 'Departure'],
+    ]) {
+      await screen.findByRole('heading', { level: 4, name: title })
+      expect(within(stopCard(title)).getByText(marker)).toBeInTheDocument()
+      await user.click(within(stopCard(title)).getByRole('button', { name: `Actions for ${title}` }))
+      const menu = within(stopCard(title)).getByRole('menu')
+      expect(within(menu).queryByRole('menuitem', { name: 'Replace' })).not.toBeInTheDocument()
+      expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+    }
+
+    const ordinary = FIXTURE_ITEM_TITLES[1]
+    await user.click(within(stopCard(ordinary)).getByRole('button', { name: `Actions for ${ordinary}` }))
+    expect(within(stopCard(ordinary)).getByRole('menuitem', { name: 'Replace' })).toBeInTheDocument()
+  })
+
+  it('warns on the day when a stop starts at or after the departure', async () => {
+    renderItinerary(fixtureState({ days: withTravelStops([lateStop('15:00'), lateStop('12:00', 'Farewell lunch')]) }))
+
+    await screen.findByRole('heading', { level: 4, name: 'Late gallery visit' })
+    const lastDay = daySection(1)
+    const notice = within(lastDay).getByText('2 stops are after your departure').closest('[role="status"]')
+    expect(notice).toHaveTextContent(
+      'Late gallery visit, Farewell lunch start at or after 12:00 PM, when you leave. Move them earlier or to another day.',
+    )
+    expect(within(stopCard('Late gallery visit')).getByText('After your departure')).toBeInTheDocument()
+    expect(within(stopCard('Farewell lunch')).getByText('After your departure')).toBeInTheDocument()
+    expect(within(stopCard(FIXTURE_ITEM_TITLES[4])).queryByText('After your departure')).not.toBeInTheDocument()
+    expect(within(daySection(0)).queryByText(/after your departure/)).not.toBeInTheDocument()
+  })
+
+  it('names a single late stop', async () => {
+    renderItinerary(fixtureState({ days: withTravelStops([lateStop('18:00')]) }))
+
+    await screen.findByRole('heading', { level: 4, name: 'Late gallery visit' })
+    expect(within(daySection(1)).getByText('This stop is after your departure')).toBeInTheDocument()
+    expect(
+      within(daySection(1)).getByText(
+        'Late gallery visit starts at or after 12:00 PM, when you leave. Move it earlier or to another day.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('stays quiet when everything is before the departure, or when a draft has no roles', async () => {
+    const { unmount } = renderItinerary(fixtureState({ days: withTravelStops() }))
+    await screen.findByRole('heading', { level: 4, name: 'Head to the airport' })
+    expect(screen.queryByText(/after your departure/i)).not.toBeInTheDocument()
+    unmount()
+
+    // An older draft: a late stop but no role anywhere, so nothing to compare against.
+    const [dayOne, dayTwo] = makeFixtureDays()
+    renderItinerary(fixtureState({ days: [dayOne, { ...dayTwo, items: [...dayTwo.items, lateStop('23:00')] }] }))
+    await screen.findByRole('heading', { level: 4, name: 'Late gallery visit' })
+    expect(screen.queryByText(/after your departure/i)).not.toBeInTheDocument()
+  })
+})

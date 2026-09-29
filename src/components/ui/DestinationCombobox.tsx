@@ -5,6 +5,7 @@ import {
   searchDestinations,
   type Destination,
 } from '@/data/destinations'
+import { GUIDE_LABEL, generalGuideHint } from '@/lib/labels'
 import { CONTROL_CLASS, FieldShell } from './Field'
 import { Icon } from './Icon'
 
@@ -28,6 +29,12 @@ export interface DestinationComboboxProps {
   className?: string
   /** Extra guidance under the input, read out with the field (e.g. a legacy-trip note). */
   note?: ReactNode
+  /**
+   * Whether a committed general destination says, under the field, that it has
+   * no curated guide. On by default so every place a destination is chosen is
+   * candid about it; turn off only where the same sentence is already shown.
+   */
+  guideHint?: boolean
 }
 
 /**
@@ -57,15 +64,18 @@ export function DestinationCombobox({
   placeholder = 'Search cities, e.g. London',
   className = '',
   note,
+  guideHint = true,
 }: DestinationComboboxProps) {
   const generated = useId()
   const fieldId = id ?? generated
   const listboxId = `${fieldId}-listbox`
   const noteId = `${fieldId}-note`
+  const guideId = `${fieldId}-guide`
   const inputRef = useRef<HTMLInputElement>(null)
 
   const committed = getDestination(value)
   const committedText = committed?.displayName ?? unlistedText ?? ''
+  const showGuideHint = guideHint && committed?.guide === 'general'
 
   /** What the traveller is typing; null while the input simply shows the committed choice. */
   const [query, setQuery] = useState<string | null>(null)
@@ -170,7 +180,12 @@ export function DestinationCombobox({
   }
 
   const describedBy =
-    [hint ? `${fieldId}-hint` : null, note ? noteId : null, error ? `${fieldId}-error` : null]
+    [
+      hint ? `${fieldId}-hint` : null,
+      showGuideHint ? guideId : null,
+      note ? noteId : null,
+      error ? `${fieldId}-error` : null,
+    ]
       .filter(Boolean)
       .join(' ') || undefined
 
@@ -226,6 +241,13 @@ export function DestinationCombobox({
             {options.map((destination, index) => {
               const highlighted = index === activeIndex
               const isCommitted = destination.id === committed?.id
+              const guideLabelId = `${optionId(destination)}-guide`
+              /*
+                The name stays the display name, the value the field commits;
+                the guide level is the option's description, so a screen
+                reader hears "Tokyo, Japan" then "General suggestions" and no
+                two options ever share a name.
+              */
               return (
                 <li
                   key={destination.id}
@@ -233,6 +255,7 @@ export function DestinationCombobox({
                   role="option"
                   aria-selected={highlighted}
                   aria-label={destination.displayName}
+                  aria-describedby={guideLabelId}
                   onClick={() => choose(destination)}
                   onMouseMove={() => {
                     if (!highlighted) setActiveIndex(index)
@@ -244,6 +267,19 @@ export function DestinationCombobox({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-label-lg font-semibold text-ink">{destination.city}</span>
                     <span className="block truncate text-body-sm text-ink-subtle">{destination.country}</span>
+                    <span
+                      id={guideLabelId}
+                      className={`mt-0.5 flex items-center gap-1 text-label-sm ${
+                        destination.guide === 'curated' ? 'text-catalog-ink' : 'text-ink-subtle'
+                      }`}
+                    >
+                      <Icon
+                        name={destination.guide === 'curated' ? 'menu_book' : 'lightbulb'}
+                        size={14}
+                        className="shrink-0"
+                      />
+                      {GUIDE_LABEL[destination.guide]}
+                    </span>
                   </span>
                   <span className="text-label-md text-ink-subtle">{destination.currency}</span>
                   <Icon
@@ -271,6 +307,12 @@ export function DestinationCombobox({
           ? `No destinations match "${trimmedQuery}". Tourist covers a fixed set of cities in this prototype.`
           : ''}
       </p>
+      {showGuideHint && committed ? (
+        <p id={guideId} className="flex items-start gap-1.5 text-body-sm text-ink-muted">
+          <Icon name="info" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+          <span className="min-w-0">{generalGuideHint(committed.city)}</span>
+        </p>
+      ) : null}
       {note ? (
         <div id={noteId} className="text-body-sm text-ink-muted">
           {note}

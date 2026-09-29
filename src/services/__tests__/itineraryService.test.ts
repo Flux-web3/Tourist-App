@@ -6,7 +6,12 @@ import {
   GENERATION_ERROR_MESSAGE,
   itineraryService,
 } from '@/services/itineraryService'
-import { buildItinerary } from '@/services/itineraryGenerator'
+import {
+  ANCHOR_SWAP_MESSAGE,
+  AnchorSwapError,
+  DEPARTURE_START_TIME,
+  buildItinerary,
+} from '@/services/itineraryGenerator'
 
 const FIXED_NOW = new Date('2026-03-15T09:30:00.000Z')
 const START = '2026-04-01'
@@ -207,10 +212,22 @@ describe('itineraryService.generate', () => {
     const last = lastDay?.items[lastDay.items.length - 1]
 
     expect(last?.category).toBe('transit')
+    expect(last?.role).toBe('departure')
     expect(last?.location).toMatch(/Charles de Gaulle/i)
+    // At the fixed noon, with every other stop over a full buffer before it.
+    expect(last?.startTime).toBe(DEPARTURE_START_TIME)
     for (const item of lastDay?.items.slice(0, -1) ?? []) {
-      expect(item.startTime <= (last?.startTime ?? '')).toBe(true)
+      expect((item.endTime ?? '') <= '10:30').toBe(true)
     }
+  })
+
+  it('marks the arrival and the departure with their role and nothing else', async () => {
+    const days = await generateNow(TRIP)
+    const items = days.flatMap((day) => day.items)
+
+    expect(items[0]?.role).toBe('arrival')
+    expect(items[items.length - 1]?.role).toBe('departure')
+    expect(items.slice(1, -1).filter((item) => 'role' in item)).toEqual([])
   })
 
   it('never reuses the arrival or departure template as a mid-trip filler', async () => {
@@ -349,13 +366,33 @@ describe('itineraryService.suggestAlternative', () => {
     expect(replacement.title.length).toBeGreaterThan(0)
   })
 
-  it('keeps the original time slot', async () => {
+  it('keeps the original start and ends when the new stop does', async () => {
+    // The end follows the replacement's own duration; it only used to match the
+    // old end when both stops happened to take equally long.
     const { day, item } = await seedAlternative()
 
     const replacement = await alternativeNow({ trip: TRIP, day, item })
 
     expect(replacement.startTime).toBe(item.startTime)
-    expect(replacement.endTime).toBe(item.endTime)
+    expect(replacement.endTime).not.toBeNull()
+    expect((replacement.endTime ?? '') > replacement.startTime).toBe(true)
+  })
+
+  it('rejects a swap of the arrival or the departure with a message that says why', async () => {
+    const days = await generateNow(TRIP)
+    const firstDay = days[0]
+    const lastDay = days[days.length - 1]
+    const anchors = [
+      { day: firstDay, item: firstDay.items[0] },
+      { day: lastDay, item: lastDay.items[lastDay.items.length - 1] },
+    ]
+
+    for (const { day, item } of anchors) {
+      const outcome = await alternativeNow({ trip: TRIP, day, item }).catch((reason: unknown) => reason)
+
+      expect(outcome).toBeInstanceOf(AnchorSwapError)
+      expect((outcome as Error).message).toBe(ANCHOR_SWAP_MESSAGE)
+    }
   })
 
   it('keeps the item on the same trip and in the same category', async () => {

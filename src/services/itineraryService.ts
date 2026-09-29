@@ -1,4 +1,4 @@
-import { buildAlternativeItem, buildItinerary } from './itineraryGenerator'
+import { AnchorSwapError, buildAlternativeItem, buildItinerary, isTravelAnchor } from './itineraryGenerator'
 import type { ItineraryDay, ItineraryItem, Trip } from '@/domain/types'
 import type { GenerateOptions, ItineraryService } from './contracts'
 
@@ -28,7 +28,16 @@ export const itineraryService: ItineraryService = {
     return buildItinerary(trip, options.variant ?? 0)
   },
 
+  /**
+   * Rejects with an `AnchorSwapError` (message `ANCHOR_SWAP_MESSAGE`) for an
+   * arrival or departure, and with an Error carrying
+   * `NO_ALTERNATIVE_BEFORE_DEPARTURE_MESSAGE` when nothing fits before the
+   * departure; both messages are written to be shown as they are. The anchor
+   * refusal comes straight away: there is nothing to "think" about, and making
+   * the traveller wait for a no would only look like a failure.
+   */
   async suggestAlternative({ trip, day, item, shouldFail, variant }) {
+    if (isTravelAnchor(item)) throw new AnchorSwapError()
     await delay(ALTERNATIVE_LATENCY_MS)
     if (shouldFail) {
       throw new Error(GENERATION_ERROR_MESSAGE)

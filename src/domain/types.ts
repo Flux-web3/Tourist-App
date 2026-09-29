@@ -112,7 +112,17 @@ export interface ItineraryItem {
   notes: string
   createdAt: string
   updatedAt: string
+  /**
+   * Set on the stop that gets the traveller into the city on day one and the
+   * one that gets them out on the last day. They are travel, not sightseeing:
+   * never swapped for an attraction, and nothing should be planned after the
+   * departure. Absent on every ordinary stop, and on drafts saved before roles
+   * were recorded.
+   */
+  role?: ItineraryItemRole
 }
+
+export type ItineraryItemRole = 'arrival' | 'departure'
 
 export interface ItineraryDay {
   id: string

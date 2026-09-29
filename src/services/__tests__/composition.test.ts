@@ -11,7 +11,7 @@ import type {
   TripService,
 } from '@/services/contracts'
 import { createDemoState, createEmptyState, createGuestUser } from '@/services/persistence'
-import { buildItinerary } from '@/services/itineraryGenerator'
+import { buildItinerary, isTravelAnchor } from '@/services/itineraryGenerator'
 import { expenseService } from '@/services/expenseService'
 import { itineraryService } from '@/services/itineraryService'
 import { placeService } from '@/services/placeService'
@@ -118,7 +118,8 @@ describe('the composition root shape', () => {
     expect(days.map((day) => day.date)).toEqual(eachDay(START, END))
 
     const day = days[0]
-    const item = day?.items[0]
+    // The first ordinary stop: day one opens with the arrival, which is travel and never swapped.
+    const item = day?.items.find((candidate) => !isTravelAnchor(candidate))
     if (!day || !item) throw new Error('the generated plan has no first item')
     const alternativePending = itinerary.suggestAlternative({ trip, day, item })
     await vi.advanceTimersByTimeAsync(GENERATION_WAIT_MS)

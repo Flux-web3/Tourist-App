@@ -5,6 +5,7 @@ import {
   matchDestination,
   searchDestinations,
 } from '@/data/destinations'
+import { destinationHasPlaces } from '@/data/experiences'
 import { CURRENCIES } from '@/domain/money'
 
 const cities = (query: string) => searchDestinations(query).map((destination) => destination.city)
@@ -25,6 +26,18 @@ describe('the destination catalogue', () => {
       expect(destination.priceLevel).toBeGreaterThan(0)
       expect(destination.priceStep).toBeGreaterThan(0)
     }
+  })
+
+  it('calls a destination curated exactly when it has Explore places', () => {
+    // The label the traveller sees must match what Tourist can actually show.
+    for (const destination of DESTINATIONS) {
+      expect(destination.guide === 'curated').toBe(destinationHasPlaces(destination.id))
+    }
+    expect(DESTINATIONS.filter((d) => d.guide === 'curated').map((d) => d.id)).toEqual([
+      'paris',
+      'london',
+      'lagos',
+    ])
   })
 
   it('knows nothing about an id it does not list', () => {

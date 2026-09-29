@@ -59,6 +59,7 @@ function renderCard({
   onReplace: () => void
   onMove: (dayId: string) => void
   onRemove: () => void
+  afterDeparture: boolean
 }> = {}) {
   const props = {
     item,
@@ -400,5 +401,49 @@ describe('ItineraryItemCard', () => {
       expect(onToggleMove).toHaveBeenCalledOnce()
       expect(onMove).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('ItineraryItemCard travel stops', () => {
+  const ARRIVAL = makeItem({ id: 'item-arrival', title: 'Arrive and check in', category: 'transit', role: 'arrival' })
+  const DEPARTURE = makeItem({ id: 'item-departure', title: 'Head to the airport', category: 'transit', role: 'departure' })
+
+  it.each([
+    ['Arrival', ARRIVAL],
+    ['Departure', DEPARTURE],
+  ])('marks the %s stop as travel and offers no Replace', async (marker, item) => {
+    const user = userEvent.setup()
+    renderCard({ item, day: makeDay('day-1', '2026-03-10', 0, [item]) })
+
+    const card = screen.getByRole('article', { name: item.title })
+    expect(within(card).getByText(marker)).toBeInTheDocument()
+    expect(
+      within(card).getByText('Travel stop, so it is never swapped for an activity. Edit it to match your booking.'),
+    ).toBeInTheDocument()
+
+    const menu = await openMenu(user, `Actions for ${item.title}`)
+    expect(within(menu).queryByRole('menuitem', { name: /Replace|Swapping/ })).not.toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'Move to another day' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'Remove' })).toBeInTheDocument()
+  })
+
+  it('still offers Replace on an ordinary stop and on one from a draft saved before roles', async () => {
+    const user = userEvent.setup()
+    renderCard()
+
+    expect(screen.queryByText('Arrival')).not.toBeInTheDocument()
+    expect(screen.queryByText('Departure')).not.toBeInTheDocument()
+    const menu = await openMenu(user)
+    expect(within(menu).getByRole('menuitem', { name: 'Replace' })).toBeInTheDocument()
+  })
+
+  it('flags a stop that starts after the departure only when told to', () => {
+    const { unmount } = renderCard({ afterDeparture: true })
+    expect(screen.getByText('After your departure')).toBeInTheDocument()
+    unmount()
+
+    renderCard()
+    expect(screen.queryByText('After your departure')).not.toBeInTheDocument()
   })
 })
