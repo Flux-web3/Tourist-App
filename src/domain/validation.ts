@@ -1,7 +1,7 @@
 import { getDestination } from '@/data/destinations'
-import { CURRENCIES } from './money'
+import { CURRENCIES, CURRENCY_MAGNITUDE } from './money'
 import { parseISODate, todayISO, tripLengthInDays } from './format'
-import type { TripDraft, TripDraftErrors } from './types'
+import type { CurrencyCode, TripDraft, TripDraftErrors } from './types'
 
 export const TRIP_LIMITS = {
   maxNameLength: 80,
@@ -11,6 +11,18 @@ export const TRIP_LIMITS = {
   minTravelers: 1,
   maxBudget: 1_000_000,
 } as const
+
+/** The budget ceiling in `currency`: `TRIP_LIMITS.maxBudget` euro-sized units, scaled. */
+export function maxBudgetFor(currency: CurrencyCode): number {
+  return TRIP_LIMITS.maxBudget * (CURRENCY_MAGNITUDE[currency] ?? 1)
+}
+
+/** The starting budget a new trip proposes in `currency`: 2,500 euro-sized units, scaled. */
+export function defaultBudgetFor(currency: CurrencyCode): number {
+  return DEFAULT_BUDGET * (CURRENCY_MAGNITUDE[currency] ?? 1)
+}
+
+const DEFAULT_BUDGET = 2500
 
 export const NOTE_LIMITS = {
   maxTitleLength: 80,
@@ -142,7 +154,7 @@ export function validateTripDraft(
 
   if (!Number.isFinite(draft.budget) || draft.budget <= 0) {
     errors.budget = 'Enter a budget greater than 0.'
-  } else if (draft.budget > TRIP_LIMITS.maxBudget) {
+  } else if (draft.budget > maxBudgetFor(draft.currency)) {
     errors.budget = 'That budget looks unrealistic. Enter a lower amount.'
   }
 
@@ -166,7 +178,7 @@ export function createEmptyDraft(): TripDraft {
     startDate: '',
     endDate: '',
     travelers: 2,
-    budget: 2500,
+    budget: DEFAULT_BUDGET,
     currency: 'EUR',
     interests: [],
     pace: 'balanced',

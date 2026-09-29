@@ -15,7 +15,7 @@ import { Icon } from '@/components/ui/Icon'
 import { getDestination, type Destination } from '@/data/destinations'
 import { formatDate, todayISO } from '@/domain/format'
 import { CURRENCIES, CURRENCY_SYMBOLS } from '@/domain/money'
-import { TRIP_LIMITS, TRAVEL_PACES, suggestTripName, validateTripDraft } from '@/domain/validation'
+import { TRIP_LIMITS, TRAVEL_PACES, maxBudgetFor, suggestTripName, validateTripDraft } from '@/domain/validation'
 import { INTEREST_LABEL } from '@/lib/labels'
 import { useTourist } from '@/state/useTourist'
 import type { TravelInterest, TravelPace, Trip, TripDraft, TripDraftErrors } from '@/domain/types'
@@ -277,7 +277,7 @@ export function EditTripDialog({
             label={`Trip budget (${draft.currency})`}
             required
             min={0}
-            max={TRIP_LIMITS.maxBudget}
+            max={maxBudgetFor(draft.currency)}
             step={50}
             value={draft.budget}
             prefix={CURRENCY_SYMBOLS[draft.currency]}

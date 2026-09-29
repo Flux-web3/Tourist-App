@@ -39,6 +39,24 @@ export const CURRENCY_MINOR_UNITS: Record<CurrencyCode, number> = {
 }
 
 /**
+ * Roughly how many units of each currency a typical trip amount takes, with
+ * the euro as 1. Used only to pick a sensible default budget and a sanity
+ * ceiling in the currency the traveller is actually typing in: a flat 2,500
+ * and 1,000,000 made a new Lagos trip default to ₦2,500 (about a dollar) and
+ * refused a realistic ₦2,500,000 budget as "unrealistic".
+ *
+ * This is not an exchange rate and nothing is ever converted with it.
+ */
+export const CURRENCY_MAGNITUDE: Record<CurrencyCode, number> = {
+  EUR: 1,
+  USD: 1,
+  GBP: 1,
+  AED: 4,
+  JPY: 150,
+  NGN: 1000,
+}
+
+/**
  * The scale used when no currency is named. Every existing caller of
  * `toCents`/`fromCents`/`sumAmounts` passed no currency and meant hundredths,
  * so omitting one keeps that exact behaviour.

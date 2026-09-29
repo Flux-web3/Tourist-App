@@ -5,6 +5,8 @@ import {
   TRIP_LIMITS,
   TRAVEL_PACES,
   createEmptyDraft,
+  defaultBudgetFor,
+  maxBudgetFor,
   suggestTripName,
   validateTripDraft,
 } from '@/domain/validation'
@@ -575,6 +577,30 @@ describe('validateTripDraft rejects budget', () => {
     expect(validateTripDraft(draftWith({ budget: 1_000_001 })).errors.budget).toBe(
       'That budget looks unrealistic. Enter a lower amount.',
     )
+  })
+
+  it('sizes the ceiling to the currency, so a realistic naira or yen budget is accepted', () => {
+    freezeClock()
+    // ₦2,500,000 is an ordinary trip budget; a flat 1,000,000 ceiling refused it.
+    expect(
+      validateTripDraft(draftWith({ currency: 'NGN', budget: 2_500_000 })).errors.budget,
+    ).toBeUndefined()
+    expect(
+      validateTripDraft(draftWith({ currency: 'JPY', budget: 1_500_000 })).errors.budget,
+    ).toBeUndefined()
+    expect(maxBudgetFor('EUR')).toBe(1_000_000)
+    expect(maxBudgetFor('NGN')).toBe(1_000_000_000)
+    expect(
+      validateTripDraft(draftWith({ currency: 'NGN', budget: 1_000_000_001 })).errors.budget,
+    ).toBe('That budget looks unrealistic. Enter a lower amount.')
+  })
+
+  it('proposes a default budget in the scale of each currency', () => {
+    expect(defaultBudgetFor('EUR')).toBe(2500)
+    expect(defaultBudgetFor('GBP')).toBe(2500)
+    expect(defaultBudgetFor('NGN')).toBe(2_500_000)
+    expect(defaultBudgetFor('JPY')).toBe(375_000)
+    expect(defaultBudgetFor('AED')).toBe(10_000)
   })
 })
 

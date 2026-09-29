@@ -22,6 +22,8 @@ import {
   TRIP_LIMITS,
   TRAVEL_PACES,
   createEmptyDraft,
+  defaultBudgetFor,
+  maxBudgetFor,
   suggestTripName,
   validateTripDraft,
 } from '@/domain/validation'
@@ -63,6 +65,16 @@ export default function CreateTripPage() {
    * whatever city they switch to.
    */
   const [currencyChosen, setCurrencyChosen] = useState(false)
+  /**
+   * Likewise the proposed budget follows the currency (€2,500, ₦2,500,000)
+   * until the traveller types a budget of their own. A fixed 2,500 read as
+   * about a dollar once a Lagos trip switched the currency to naira.
+   */
+  const [budgetChosen, setBudgetChosen] = useState(false)
+  const inCurrency = (currency: CurrencyCode): Partial<TripDraft> => ({
+    currency,
+    ...(budgetChosen ? {} : { budget: defaultBudgetFor(currency) }),
+  })
   const formId = useId()
   const summaryRef = useRef<HTMLDivElement>(null)
 
@@ -127,7 +139,7 @@ export default function CreateTripPage() {
     update({
       destinationId: destination?.id ?? null,
       destination: destination?.displayName ?? '',
-      ...(destination && !currencyChosen ? { currency: destination.currency } : {}),
+      ...(destination && !currencyChosen ? inCurrency(destination.currency) : {}),
     })
   }
 
@@ -342,7 +354,7 @@ export default function CreateTripPage() {
               error={errors.currency}
               onChange={(event) => {
                 setCurrencyChosen(true)
-                update({ currency: event.target.value as CurrencyCode })
+                update(inCurrency(event.target.value as CurrencyCode))
               }}
             />
           </div>
@@ -351,12 +363,15 @@ export default function CreateTripPage() {
             label={`Trip budget (${draft.currency})`}
             required
             min={0}
-            max={TRIP_LIMITS.maxBudget}
+            max={maxBudgetFor(draft.currency)}
             step={50}
             value={draft.budget}
             prefix={CURRENCY_SYMBOLS[draft.currency]}
             error={errors.budget}
-            onValueChange={(value) => update({ budget: value })}
+            onValueChange={(value) => {
+              setBudgetChosen(true)
+              update({ budget: value })
+            }}
           />
         </Card>
 

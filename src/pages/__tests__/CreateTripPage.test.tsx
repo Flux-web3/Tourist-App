@@ -544,6 +544,35 @@ describe('CreateTripPage', () => {
     expect(screen.getByLabelText(/Currency/)).toHaveValue('JPY')
   })
 
+  it('proposes a budget sized for the currency, never ₦2,500 for a Lagos trip', async () => {
+    renderCreate()
+    expect(screen.getByLabelText(/Trip budget \(EUR\)/)).toHaveValue(2500)
+
+    await chooseDestination('lagos', 'Lagos, Nigeria')
+    expect(screen.getByLabelText(/Trip budget \(NGN\)/)).toHaveValue(2_500_000)
+
+    await chooseDestination('tok', 'Tokyo, Japan')
+    expect(screen.getByLabelText(/Trip budget \(JPY\)/)).toHaveValue(375_000)
+
+    await chooseDestination('London', 'London, United Kingdom')
+    expect(screen.getByLabelText(/Trip budget \(GBP\)/)).toHaveValue(2500)
+  })
+
+  it('keeps a budget the traveller typed when the destination changes', async () => {
+    const user = userEvent.setup()
+    renderCreate()
+
+    await chooseDestination('London', 'London, United Kingdom')
+    const budget = screen.getByLabelText(/Trip budget/)
+    await user.clear(budget)
+    await user.type(budget, '1800')
+    await chooseDestination('lagos', 'Lagos, Nigeria')
+
+    // The currency still follows the city; the traveller's own figure is not rewritten.
+    expect(screen.getByLabelText(/Currency/)).toHaveValue('NGN')
+    expect(screen.getByLabelText(/Trip budget \(NGN\)/)).toHaveValue(1800)
+  })
+
   it('never overrides a currency the traveller chose', async () => {
     const user = userEvent.setup()
     renderCreate()
