@@ -149,10 +149,13 @@ function LandingMenu() {
         size="sm"
         aria-expanded={open}
         aria-controls="landing-menu"
-        icon={<Icon name={open ? 'close' : 'travel_explore'} size={18} />}
+        // A square 44px hamburger, the control phones have taught everyone to
+        // look for. The word stays for screen readers; aria-expanded says open.
+        className="w-11 px-0"
+        icon={<Icon name={open ? 'close' : 'menu'} size={22} />}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
-        Menu
+        <span className="sr-only">Menu</span>
       </Button>
 
       <div

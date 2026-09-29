@@ -184,6 +184,10 @@ describe('LandingPage', () => {
     renderLanding()
     const toggle = screen.getByRole('button', { name: 'Menu' })
 
+    // Three lines, not a globe and the word "Menu": the word is for screen readers only.
+    expect(toggle.querySelector('[aria-hidden="true"]')).toHaveTextContent('menu')
+    expect(within(toggle).getByText('Menu')).toHaveClass('sr-only')
+
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(toggle).toHaveAttribute('aria-controls', 'landing-menu')
     expect(document.getElementById('landing-menu')).not.toBeVisible()
