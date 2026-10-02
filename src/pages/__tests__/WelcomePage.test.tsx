@@ -186,4 +186,52 @@ describe('WelcomePage', () => {
     expect(container).toHaveTextContent(/day-by-day itinerary and prices every stop/)
     expect(container).toHaveTextContent(/draft never looks like a quote/)
   })
+
+  describe('the optional email', () => {
+    it.each(['abc', 'abc@', '@example.com', 'ada@example', 'ada@@example.com', 'ada@exa mple.com', 'ada@.com'])(
+      'refuses %s with a plain message and saves nothing',
+      async (value) => {
+        const user = userEvent.setup()
+        renderWelcome()
+
+        await user.type(screen.getByRole('textbox', { name: 'Email' }), value)
+        await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+
+        const email = screen.getByRole('textbox', { name: 'Email' })
+        expect(email).toHaveAttribute('aria-invalid', 'true')
+        expect(email).toHaveAccessibleDescription(/Enter an email address like ada@example.com, or leave this blank\./)
+        expect(email).toHaveFocus()
+        expect(screen.queryByText('Trips list')).not.toBeInTheDocument()
+        expect(readPersisted().user.isGuest).toBe(true)
+      },
+    )
+
+    it('clears the message once the address is put right, and saves', async () => {
+      const user = userEvent.setup()
+      renderWelcome()
+
+      const email = screen.getByRole('textbox', { name: 'Email' })
+      await user.type(email, 'abc')
+      await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+      expect(email).toHaveAttribute('aria-invalid', 'true')
+
+      await user.type(email, '@example.com')
+      expect(email).not.toHaveAttribute('aria-invalid')
+
+      await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+      await waitFor(() => expect(screen.getByText('Trips list')).toBeInTheDocument())
+      expect(readPersisted().user.email).toBe('abc@example.com')
+    })
+
+    it('still lets the email be left empty', async () => {
+      const user = userEvent.setup()
+      renderWelcome()
+
+      await user.type(screen.getByRole('textbox', { name: 'Your name' }), 'Ada')
+      await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+
+      await waitFor(() => expect(screen.getByText('Trips list')).toBeInTheDocument())
+      expect(readPersisted().user.email).toBeNull()
+    })
+  })
 })

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useAppState } from '@/state/useTourist'
 import { Brand } from './Brand'
+import { StorageAlert } from './StorageAlert'
 import { ThemeToggle } from './ThemeToggle'
 import { Icon } from './ui/Icon'
 
@@ -135,6 +136,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         tabIndex={-1}
         className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 focus:outline-none"
       >
+        {/* Above every screen: a save that is failing matters wherever you are. */}
+        <StorageAlert />
         {children}
       </main>
 

@@ -1,6 +1,8 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { renderToString } from 'react-dom/server'
+import { TouristProvider } from '@/state/TouristProvider'
 import { describe, expect, it, vi } from 'vitest'
 import { addDays, formatLongDate } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
@@ -25,6 +27,10 @@ import type { PersistedState } from '@/services/contracts'
 import type { ItineraryDay, ItineraryItem } from '@/domain/types'
 
 type User = ReturnType<typeof userEvent.setup>
+
+/** The fact the estimate must always state: it is one adult's price, not the party's. */
+const PER_PERSON_SENTENCE =
+  'Estimates are per person and are not multiplied by the number of travellers.'
 
 const DAY_ONE = FIXTURE_DAY_ONE_DATE
 const DAY_TWO = addDays(FIXTURE_DAY_ONE_DATE, 1)
@@ -426,6 +432,7 @@ describe('ItineraryPage', () => {
         screen.getByLabelText(`Move ${FIXTURE_ITEM_TITLES[0]} to another day`),
         'day-2',
       )
+      await user.click(screen.getByRole('button', { name: 'Move' }))
 
       const days = storedDays()
       expect(days[0].items.map((item) => item.title)).not.toContain(FIXTURE_ITEM_TITLES[0])
@@ -494,6 +501,7 @@ describe('ItineraryPage', () => {
         screen.getByLabelText(`Move ${FIXTURE_ITEM_TITLES[1]} to another day`),
         'day-2',
       )
+      await user.click(screen.getByRole('button', { name: 'Move' }))
       await waitFor(() => {
         expect(screen.getByRole('heading', { level: 3, name: formatLongDate(DAY_TWO) })).toHaveFocus()
       })
@@ -857,5 +865,99 @@ describe('ItineraryPage travel stops', () => {
     renderItinerary(fixtureState({ days: [dayOne, { ...dayTwo, items: [...dayTwo.items, lateStop('23:00')] }] }))
     await screen.findByRole('heading', { level: 4, name: 'Late gallery visit' })
     expect(screen.queryByText(/after your departure/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('ItineraryPage money', () => {
+  /** One day of stops in `currency`, one per cost, cloned from a fixture stop. */
+  function daysWithStops(currency: ItineraryItem['currency'], costs: number[]): ItineraryDay[] {
+    const [dayOne, dayTwo] = makeFixtureDays()
+    const items = costs.map((estimatedCost, index) => ({
+      ...dayOne.items[0],
+      id: `stop-${currency}-${index}`,
+      title: `Stop ${index + 1}`,
+      estimatedCost,
+      currency,
+    }))
+    return [{ ...dayOne, items }, { ...dayTwo, items: [] }]
+  }
+
+  it('counts only the priced stops left out of the estimate, not the free ones', async () => {
+    // A Paris plan in EUR, then the trip moved to NGN: 5 priced and 3 free EUR stops remain.
+    const days = daysWithStops('EUR', [10, 0, 20, 0, 30, 0, 40, 50])
+    renderItinerary(fixtureState({ trip: { currency: 'NGN', budget: 500_000 }, days }))
+
+    expect(await screen.findByText('5 stops in another currency not included')).toBeInTheDocument()
+    expect(screen.queryByText(/8 stops in another currency/)).not.toBeInTheDocument()
+  })
+
+  it('says nothing when the only stops in another currency are free', async () => {
+    const days = daysWithStops('EUR', [0, 0, 0])
+    renderItinerary(fixtureState({ trip: { currency: 'NGN', budget: 500_000 }, days }))
+
+    await screen.findByRole('heading', { level: 1, name: TRIP.name })
+    expect(screen.queryByText(/in another currency not included/)).not.toBeInTheDocument()
+  })
+
+  it('shows the AED estimate with the code once, not before and after', async () => {
+    const days = daysWithStops('AED', [1000, 234.5])
+    renderItinerary(
+      fixtureState({
+        trip: { destination: 'Dubai, United Arab Emirates', destinationId: 'dubai', currency: 'AED', budget: 10_000 },
+        days,
+      }),
+    )
+
+    const badge = (await screen.findByText(PROTOTYPE_LABEL.aiDraftEstimate)).closest('span') as HTMLElement
+    // Intl separates AED from the number with a no-break space; read it as a plain one.
+    const text = (badge.textContent ?? '').replace(/\s+/g, ' ')
+    expect(text).toContain('AED 1,234.50')
+    expect(text.match(/AED/g)).toHaveLength(1)
+  })
+
+  it('keeps the code after a euro estimate', async () => {
+    renderItinerary()
+
+    expect(await screen.findByText('€129 EUR')).toBeInTheDocument()
+  })
+
+  it('names the currency of the AED cost field once', async () => {
+    renderItinerary(
+      fixtureState({
+        trip: { destination: 'Dubai, United Arab Emirates', destinationId: 'dubai', currency: 'AED', budget: 10_000 },
+        days: daysWithStops('AED', [100]),
+      }),
+    )
+
+    await screen.findByRole('heading', { level: 1, name: TRIP.name })
+    const dialog = await openDialog('Add activity')
+    const field = within(dialog).getByLabelText(/^Estimated cost/).parentElement as HTMLElement
+    expect(field.textContent?.match(/AED/g)).toHaveLength(1)
+  })
+
+  it('says the estimate is per person, in the draft explanation', async () => {
+    renderItinerary()
+
+    const note = (await screen.findByText(/Not a live AI service\./)).closest('details') as HTMLElement
+    expect(note).toHaveTextContent(PER_PERSON_SENTENCE)
+  })
+})
+
+describe('ItineraryPage before saved trips have loaded', () => {
+  it('waits for the saved trips instead of opening on "could not find that trip"', () => {
+    // The first paint of a deep link or a refresh, before the provider has read storage.
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/trips/${FIXTURE_TRIP_ID}/itinerary`]}>
+        <TouristProvider>
+          <Routes>
+            <Route path="/trips/:tripId/itinerary" element={<ItineraryPage />} />
+          </Routes>
+        </TouristProvider>
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('Restoring this trip from your device.')
+    expect(html).not.toContain('We could not find that trip')
+    expect(html).not.toContain('Itinerary not found')
   })
 })

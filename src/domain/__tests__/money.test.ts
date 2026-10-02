@@ -10,6 +10,7 @@ import {
   fromCents,
   hasFractionalPart,
   minorUnits,
+  partitionByCurrency,
   sumAmounts,
   summariseBudget,
   toCents,
@@ -21,7 +22,8 @@ import type { CurrencyCode } from '@/domain/types'
  * `¥1,234.50` is not a JPY figure at all, and 1234.5 yen rounds to 1235.
  *
  * AED has no glyph, so Intl prints its code as the symbol, separated from the
- * number by a no-break space (U+00A0) rather than a plain one.
+ * number by a no-break space (U+00A0) rather than a plain one. That code already
+ * names the currency, so it is never appended a second time.
  */
 const WITH_CENTS: Record<CurrencyCode, string> = {
   EUR: '€1,234.50 EUR',
@@ -29,7 +31,7 @@ const WITH_CENTS: Record<CurrencyCode, string> = {
   GBP: '£1,234.50 GBP',
   NGN: '₦1,234.50 NGN',
   JPY: '¥1,235 JPY',
-  AED: 'AED 1,234.50 AED',
+  AED: 'AED 1,234.50',
 }
 
 const WITHOUT_CENTS: Record<CurrencyCode, string> = {
@@ -38,7 +40,7 @@ const WITHOUT_CENTS: Record<CurrencyCode, string> = {
   GBP: '£1,235 GBP',
   NGN: '₦1,235 NGN',
   JPY: '¥1,235 JPY',
-  AED: 'AED 1,235 AED',
+  AED: 'AED 1,235',
 }
 
 const SYMBOL_ONLY: Record<CurrencyCode, string> = {
@@ -56,7 +58,7 @@ const ZERO_WITH_CODE: Record<CurrencyCode, string> = {
   GBP: '£0.00 GBP',
   NGN: '₦0.00 NGN',
   JPY: '¥0 JPY',
-  AED: 'AED 0.00 AED',
+  AED: 'AED 0.00',
 }
 
 const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
@@ -65,7 +67,7 @@ const NEGATIVE_WITH_CODE: Record<CurrencyCode, string> = {
   GBP: '-£1,234.50 GBP',
   NGN: '-₦1,234.50 NGN',
   JPY: '-¥1,235 JPY',
-  AED: '-AED 1,234.50 AED',
+  AED: '-AED 1,234.50',
 }
 
 const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
@@ -74,7 +76,7 @@ const COMPACT_TWO_THOUSAND_FIVE_HUNDRED: Record<CurrencyCode, string> = {
   GBP: '£2,500 GBP',
   NGN: '₦2,500 NGN',
   JPY: '¥2,500 JPY',
-  AED: 'AED 2,500 AED',
+  AED: 'AED 2,500',
 }
 
 describe('CURRENCIES', () => {
@@ -386,6 +388,22 @@ describe('formatMoney', () => {
     })
   }
 
+  it('does not repeat the code when the symbol already is the code', () => {
+    expect(formatMoney(1234.5, 'AED')).toBe(SYMBOL_ONLY.AED)
+    expect(formatMoney(1234.5, 'AED', { showCode: true })).not.toMatch(/AED.*AED/)
+    expect(formatMoney(1234.5, 'AED', { showCents: false })).not.toMatch(/AED.*AED/)
+    expect(formatMoney(-1234.5, 'AED')).not.toMatch(/AED.*AED/)
+    expect(formatMoney(1234.5, 'AED')).toContain('1,234.50')
+  })
+
+  it('keeps the code suffix for every currency whose symbol is a glyph', () => {
+    expect(formatMoney(1234.5, 'EUR')).toBe('€1,234.50 EUR')
+    expect(formatMoney(1234.5, 'GBP')).toBe('£1,234.50 GBP')
+    expect(formatMoney(1234.5, 'NGN')).toBe('₦1,234.50 NGN')
+    expect(formatMoney(1234.5, 'JPY')).toBe('¥1,235 JPY')
+    expect(formatMoney(1234.5, 'USD')).toBe('$1,234.50 USD')
+  })
+
   it('appends the currency code as a space-separated suffix', () => {
     expect(formatMoney(1, 'USD')).toBe('$1.00 USD')
   })
@@ -459,6 +477,15 @@ describe('hasFractionalPart', () => {
 })
 
 describe('formatAmount', () => {
+  it('names the currency on request, without repeating a code the symbol already is', () => {
+    expect(formatAmount(129, 'EUR', { showCode: true })).toBe('€129 EUR')
+    expect(formatAmount(1234.5, 'GBP', { showCode: true })).toBe('£1,234.50 GBP')
+    expect(formatAmount(1235, 'JPY', { showCode: true })).toBe('¥1,235 JPY')
+    expect(formatAmount(1234.5, 'AED', { showCode: true })).toBe(SYMBOL_ONLY.AED)
+    expect(formatAmount(1234, 'AED', { showCode: true })).toBe('AED 1,234')
+    expect(formatAmount(1234.5, 'AED')).toBe(SYMBOL_ONLY.AED)
+  })
+
   it('shows cents only when they carry information', () => {
     expect(formatAmount(2500, 'EUR')).toBe('€2,500')
     expect(formatAmount(2500.5, 'EUR')).toBe('€2,500.50')
@@ -509,6 +536,11 @@ describe('formatMoneyCompact', () => {
         formatMoney(2500, currency, { showCents: false, showCode: true }),
       )
     }
+  })
+
+  it('does not repeat the code for AED', () => {
+    expect(formatMoneyCompact(1234.5, 'AED')).toBe(WITHOUT_CENTS.AED)
+    expect(formatMoneyCompact(1234.5, 'AED')).not.toMatch(/AED.*AED/)
   })
 
   it('rounds to whole currency units', () => {
@@ -856,6 +888,39 @@ describe('summariseBudget and a mixed-currency trip', () => {
 })
 
 describe('summariseBudget and a mixed-currency itinerary estimate', () => {
+  it('counts only the priced stops it leaves out, not the free ones', () => {
+    // After a destination change: 5 priced and 3 free stops are still in EUR.
+    const summary = summariseBudget({
+      tripBudget: 1_000_000,
+      itineraryEstimates: [10, 0, 20, 0, 30, 0, 40, 50],
+      itineraryEstimateCurrencies: ['EUR', 'EUR', 'EUR', 'EUR', 'EUR', 'EUR', 'EUR', 'EUR'],
+      expenseAmounts: [],
+      currency: 'NGN',
+    })
+    expect(summary.uncountedEstimateCount).toBe(5)
+    expect(summary.otherEstimateCurrencies).toEqual(['EUR'])
+  })
+
+  it('does not report a mix when the only stops in another currency are free', () => {
+    const summary = summariseBudget({
+      tripBudget: 1000,
+      itineraryEstimates: [0, 0, 45],
+      itineraryEstimateCurrencies: ['EUR', 'EUR', 'GBP'],
+      expenseAmounts: [],
+      currency: 'GBP',
+    })
+    expect(summary.mixedEstimateCurrency).toBe(false)
+    expect(summary.otherEstimateCurrencies).toEqual([])
+    expect(summary.uncountedEstimateCount).toBe(0)
+  })
+
+  it('shares one rule between the budget summary and partitionByCurrency', () => {
+    const amounts = [10, 0, 20, 0, 30, 0, 40, 50]
+    const codes: CurrencyCode[] = amounts.map(() => 'EUR')
+    expect(partitionByCurrency(amounts, codes, 'NGN').uncountedCount).toBe(5)
+    expect(partitionByCurrency(amounts, codes, 'EUR').uncountedCount).toBe(0)
+  })
+
   it('reports no mixing when the estimate currencies are not supplied at all', () => {
     const summary = summariseBudget({
       tripBudget: 1000,

@@ -2,6 +2,7 @@ import { createContext } from 'react'
 import type {
   CatalogQuery,
   PersistedState,
+  PersistenceLoadStatus,
 } from '@/services/contracts'
 import type {
   Expense,
@@ -68,7 +69,14 @@ export interface TouristActions {
   signIn(input: { name: string; email: string | null }): void
   signOut(): void
   loadDemoData(): void
+  /**
+   * Removes everything Tourist has stored in this browser: every trip and its
+   * records, the name and email, and the backup copy. Only the colour theme is
+   * kept.
+   */
   clearAllData(): void
+  /** Hides the one-off notice about how the saved data loaded. */
+  dismissStorageNotice(): void
 
   createTrip(draft: TripDraft): Trip
   updateTrip(tripId: string, patch: Partial<TripDraft>): void
@@ -105,10 +113,40 @@ export interface TouristActions {
   trackSearch(query: CatalogQuery): void
 }
 
+/**
+ * How this session stands with the browser's storage. The app keeps working in
+ * memory whatever happens here, which is exactly why it has to be said out
+ * loud: a save that fails looks no different on screen until the page reloads.
+ */
+export interface StorageStatus {
+  /** `failing` while the newest change in this tab did not reach storage. */
+  saving: 'ok' | 'failing'
+  /** How the saved data read, on mount or when another tab last changed it. */
+  load: PersistenceLoadStatus
+  /**
+   * Whether the payload that read came from was copied to the backup slot.
+   * False when no copy was needed, and false when one was needed but could
+   * not be written, so a notice never claims a backup that is not there.
+   */
+  backedUp: boolean
+  /**
+   * True while this session deliberately writes nothing: the stored payload
+   * could not be read and is the only copy of it, so it is left untouched.
+   */
+  readOnly: boolean
+  /** True when `load` describes a change made by another tab, not the page load. */
+  fromOtherTab: boolean
+  /** True once the traveller has dismissed the notice about `load`. */
+  noticeDismissed: boolean
+  /** True while the backup slot in this browser holds a copy of earlier data. */
+  hasBackup: boolean
+}
+
 export interface TouristContextValue {
   state: TouristState
   hydrated: boolean
   actions: TouristActions
+  storage: StorageStatus
   /** Item id currently being swapped, so one button can show progress. */
   pendingItemId: string | null
   /** Set when a single-item swap fails; the itinerary itself is untouched. */

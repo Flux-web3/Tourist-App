@@ -29,10 +29,15 @@ const STORAGE_KEY = 'tourist.state.v1'
 /**
  * Where a payload this build stops using is copied first.
  *
- * Nothing is destroyed without a copy: an unparseable write, a payload from a
- * newer build, a partial salvage and a deliberate `clear()` all land here before
- * the live key is replaced or removed. A later build - or a person with a
- * devtools console - can still get the traveller's data back.
+ * Nothing is destroyed by accident without a copy: an unparseable write, a
+ * payload from a newer build, a partial salvage, a migration and a `clear()`
+ * all land here before the live key is replaced or removed. A later build - or
+ * a person with a devtools console - can still get the traveller's data back.
+ *
+ * The one exception is the traveller asking for it. "Clear all data" promises
+ * to remove everything stored in this browser, and a copy of every trip,
+ * expense and note left behind here would make that false, so it calls
+ * `discardBackup()`.
  */
 const BACKUP_KEY = 'tourist.state.backup'
 
@@ -41,6 +46,14 @@ const GUEST_NAME = 'Adaeze N.'
 export const DEMO_TRIP_ID = 'trip_demo_paris'
 
 const READ_OPTIONS = { fallbackUserName: GUEST_NAME, demoTripId: DEMO_TRIP_ID } as const
+
+/**
+ * True for a guest record nobody has put anything into: no sign-in, no email
+ * and the placeholder name. Anything else holds something the traveller typed.
+ */
+export function isUntouchedGuest(user: User): boolean {
+  return user.isGuest && user.email === null && user.name === GUEST_NAME
+}
 
 export function createGuestUser(overrides: Partial<User> = {}): User {
   return {
@@ -382,11 +395,34 @@ export function createPersistenceService(): PersistenceService {
     }
   }
 
+  function hasBackup(): boolean {
+    const store = storage()
+    if (!store) return false
+    try {
+      return store.getItem(BACKUP_KEY) !== null
+    } catch (error) {
+      warn('could not look for a backup copy', error)
+      return false
+    }
+  }
+
+  function discardBackup(): void {
+    const store = storage()
+    if (!store) return
+    try {
+      store.removeItem(BACKUP_KEY)
+    } catch (error) {
+      warn('could not remove the backup copy', error)
+    }
+  }
+
   return {
     load: () => loadDetailed().state,
     loadDetailed,
     save,
     clear,
+    hasBackup,
+    discardBackup,
   }
 }
 

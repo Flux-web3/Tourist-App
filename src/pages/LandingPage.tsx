@@ -219,7 +219,7 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <main id="main-content" className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1 focus:outline-none">
         {/*
           The first screen is the photograph with the promise set on it. On a
           phone the picture is anchored to the foot of the hero and fades up
@@ -287,19 +287,21 @@ export default function LandingPage() {
                 Try the demo
               </Button>
             </div>
-            <p className="max-w-xs text-body-sm text-ink-subtle sm:max-w-md">
-              No account, no email. Drafts, prices and estimates are labelled as such throughout.
-            </p>
-            {returningTraveller ? (
-              <p className="text-body-sm text-ink-muted">
+            <div className="photo-note flex w-fit max-w-xs flex-col gap-1.5 sm:max-w-md">
+              <p className="text-body-sm text-ink-subtle">
+                No account, no email. Drafts, prices and estimates are labelled as such throughout.
+              </p>
+              {returningTraveller ? (
+                <p className="text-body-sm text-ink-muted">
                 You already have {state.trips.length === 1 ? 'a trip' : `${state.trips.length} trips`}{' '}
                 on this device.{' '}
                 <Link to="/trips" className="font-semibold underline underline-offset-2">
                   Open your trips
                 </Link>
                 .
-              </p>
-            ) : null}
+                </p>
+              ) : null}
+            </div>
           </section>
         </PhotoHero>
 

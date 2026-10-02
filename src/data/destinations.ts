@@ -86,7 +86,7 @@ export const DESTINATIONS: readonly Destination[] = [
     currency: 'USD',
     priceLevel: 1.2,
     priceStep: 1,
-    aliases: ['NYC', 'USA', 'US', 'America', 'Manhattan'],
+    aliases: ['NYC', 'USA', 'US', 'America', 'Manhattan', 'Big Apple'],
     guide: 'general',
   },
   {
@@ -144,24 +144,41 @@ export function getDestination(id: string | null | undefined): Destination | nul
   return DESTINATIONS_BY_ID.get(id) ?? null
 }
 
-function normalise(text: string): string {
+/**
+ * Text folded for matching: accents and ligatures flattened (`Cœur` is `coeur`),
+ * apostrophes dropped (`d’Orsay`, `d'Orsay` and `dOrsay` agree), lower case,
+ * every other run of punctuation or whitespace one space. Shared by the
+ * destination selector and Explore's text search so the two cannot disagree
+ * about what counts as the same word.
+ */
+export function normalise(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
+    .replace(/œ/g, 'oe')
+    .replace(/æ/g, 'ae')
+    .replace(/['‘’`]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }
 
+/** Words that dress a destination name without being part of it: "New York City", "the UK". */
+const FILLER_WORDS: ReadonlySet<string> = new Set(['of', 'the', 'city'])
+
 /**
  * Destinations where every word of `query` starts a word of the city, country
  * or an alias, case- and accent-insensitive; cities that start with the query
- * first. Word starts, not substrings: "lon" is London, not Barce-lon-a. An
- * empty query returns the whole list in catalogue order.
+ * first. Word starts, not substrings: "lon" is London, not Barce-lon-a. The
+ * filler words "of", "the" and "city" are ignored when other words are present,
+ * so "new york city", "the uk" and "united states of america" find their
+ * destination. An empty query returns the whole list in catalogue order.
  */
 export function searchDestinations(query: string): Destination[] {
-  const words = normalise(query).split(' ').filter(Boolean)
-  if (words.length === 0) return [...DESTINATIONS]
+  const typed = normalise(query).split(' ').filter(Boolean)
+  if (typed.length === 0) return [...DESTINATIONS]
+  const significant = typed.filter((word) => !FILLER_WORDS.has(word))
+  const words = significant.length > 0 ? significant : typed
   const needle = words.join(' ')
   return DESTINATIONS.filter((destination) => {
     const haystack = normalise(
@@ -177,18 +194,37 @@ export function searchDestinations(query: string): Destination[] {
 /**
  * The catalogue destination a free-text destination names, or null. Used only
  * to bring trips saved before the catalogue existed onto it: "Paris, France",
- * "paris" and "London, UK" resolve; "Lisbon" and "Paris, Texas" do not, and
- * stay unmatched rather than being guessed into the wrong city.
+ * "Paris France", "paris", "New York City" and "London, UK" resolve; "Lisbon",
+ * "Paris, Texas" and "London, Ukraine" do not, and stay unmatched rather than
+ * being guessed into the wrong city.
+ *
+ * The qualifier (whatever follows the city) has to contain the destination's
+ * country or one of its aliases as whole words. Without a comma, what follows
+ * the city must be exactly a country or alias: "Paris France", "London UK".
  */
 export function matchDestination(text: string): Destination | null {
-  const value = normalise(text)
-  if (!value) return null
   const [cityPart, ...rest] = text.split(',')
-  const city = normalise(cityPart)
-  const qualifier = normalise(rest.join(' '))
-  const byCity = DESTINATIONS.find((destination) => normalise(destination.city) === city)
-  if (!byCity) return null
-  if (!qualifier) return byCity
-  const accepted = [byCity.country, ...byCity.aliases].map(normalise)
-  return accepted.some((name) => qualifier === name || qualifier.includes(name)) ? byCity : null
+  const cityWords = normalise(cityPart).split(' ').filter(Boolean)
+  if (cityWords.length === 0) return null
+  const hasComma = rest.length > 0
+
+  for (const destination of DESTINATIONS) {
+    const nameWords = normalise(destination.city).split(' ')
+    if (!nameWords.every((word, index) => cityWords[index] === word)) continue
+    // The city may be followed by the filler word "city" ("New York City").
+    let tail = cityWords.slice(nameWords.length)
+    if (tail[0] === 'city') tail = tail.slice(1)
+
+    const accepted = [destination.country, ...destination.aliases].map(normalise)
+    if (hasComma) {
+      if (tail.length > 0) continue
+      const qualifier = normalise(rest.join(' '))
+      if (!qualifier) return destination
+      const padded = ` ${qualifier} `
+      return accepted.some((name) => padded.includes(` ${name} `)) ? destination : null
+    }
+    if (tail.length === 0) return destination
+    return accepted.includes(tail.join(' ')) ? destination : null
+  }
+  return null
 }

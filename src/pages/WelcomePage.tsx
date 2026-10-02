@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
@@ -15,6 +15,23 @@ const NEXT_STEPS = [
   'You reorder, rewrite or replace anything, then log what you really spend as you go.',
 ] as const
 
+const EMAIL_ERROR = 'Enter an email address like ada@example.com, or leave this blank.'
+
+/**
+ * Whether `value` could be an email address: exactly one `@`, something before
+ * it, and after it a domain of at least two dot-separated parts, with no
+ * spaces anywhere. Deliberately loose. The address is never sent anywhere, so
+ * this only catches a slip such as `abc`, not every malformed address.
+ */
+function isPlausibleEmail(value: string): boolean {
+  if (/\s/.test(value)) return false
+  const parts = value.split('@')
+  if (parts.length !== 2) return false
+  const [local, domain] = parts
+  const labels = domain.split('.')
+  return local.length > 0 && labels.length >= 2 && labels.every((label) => label.length > 0)
+}
+
 /**
  * This screen sits between the landing page and an app that now genuinely
  * starts empty, and the only thing it can actually do is put a name on the
@@ -28,12 +45,22 @@ export default function WelcomePage() {
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [emailError, setEmailError] = useState<string | undefined>(undefined)
+  const emailId = useId()
   const [isSaving, setIsSaving] = useState(false)
   const [isLoadingDemo, setIsLoadingDemo] = useState(false)
 
   function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isSaving) return
+    // The form is `noValidate`, so `type="email"` checks nothing by itself.
+    // Empty is fine: the field is optional.
+    const address = email.trim()
+    if (address !== '' && !isPlausibleEmail(address)) {
+      setEmailError(EMAIL_ERROR)
+      document.getElementById(emailId)?.focus()
+      return
+    }
     setIsSaving(true)
     actions.signIn({ name: name.trim(), email: email.trim() || null })
     navigate('/trips')
@@ -76,8 +103,18 @@ export default function WelcomePage() {
             autoComplete="email"
             hint="Optional. It is never sent anywhere, it only labels this device."
             placeholder="e.g. ada@example.com"
+            id={emailId}
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            error={emailError}
+            onChange={(event) => {
+              const next = event.target.value
+              setEmail(next)
+              // Once flagged, the message follows the typing and goes as soon as the address is right.
+              if (emailError) {
+                const address = next.trim()
+                setEmailError(address === '' || isPlausibleEmail(address) ? undefined : EMAIL_ERROR)
+              }
+            }}
           />
           <Button
             type="submit"

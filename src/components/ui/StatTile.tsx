@@ -72,7 +72,9 @@ export function ProgressBar({
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={safeMax}
-      aria-valuenow={Math.round(value)}
+      // Kept inside the range: over budget is said by the text beside the bar
+      // and by its colour, and a value above the maximum is not valid ARIA.
+      aria-valuenow={Math.round(Math.max(0, Math.min(safeMax, value)))}
       aria-label={label}
       className="h-2 w-full overflow-hidden rounded-pill bg-surface-high"
     >

@@ -36,13 +36,13 @@ export const itineraryService: ItineraryService = {
    * refusal comes straight away: there is nothing to "think" about, and making
    * the traveller wait for a no would only look like a failure.
    */
-  async suggestAlternative({ trip, day, item, shouldFail, variant }) {
+  async suggestAlternative({ trip, day, item, days, shouldFail, variant }) {
     if (isTravelAnchor(item)) throw new AnchorSwapError()
     await delay(ALTERNATIVE_LATENCY_MS)
     if (shouldFail) {
       throw new Error(GENERATION_ERROR_MESSAGE)
     }
-    return buildAlternativeItem(trip, day, item, variant ?? 0)
+    return buildAlternativeItem(trip, day, item, variant ?? 0, undefined, days ?? [])
   },
 }
 

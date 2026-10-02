@@ -11,13 +11,18 @@ import {
   FIXTURE_EXPENSE_DESCRIPTIONS,
   FIXTURE_TRIP_ID,
   fixtureState,
+  makeFixtureDays,
   makeFixtureTrip,
   readStoredState,
 } from '@/pages/__tests__/tripFixture'
 import { addDays } from '@/domain/format'
 import { formatAmount, fromCents, sumAmounts, toCents } from '@/domain/money'
-import type { Expense } from '@/domain/types'
+import type { Expense, ItineraryDay, ItineraryItem } from '@/domain/types'
 import type { PersistedState } from '@/services/contracts'
+
+/** The fact the estimate must always state: it is one adult's price, not the party's. */
+const PER_PERSON_SENTENCE =
+  'Estimates are per person and are not multiplied by the number of travellers.'
 
 function renderAt(tripId: string, state: PersistedState) {
   return renderWithProviders(
@@ -231,6 +236,13 @@ describe('BudgetPage', () => {
     ).toBeInTheDocument()
     expect(within(explainer).getByText(/never added to your actual spend/)).toBeInTheDocument()
     expect(within(explainer).getByText(/no currency conversion happens anywhere in Tourist/)).toBeInTheDocument()
+  })
+
+  it('says the estimate is per person and not multiplied by the travellers', () => {
+    renderBudget()
+
+    const explainer = screen.getByText('All amounts in EUR (€).').closest('details') as HTMLElement
+    expect(explainer).toHaveTextContent(PER_PERSON_SENTENCE)
   })
 
   it('breaks the spending down by category, largest share first', () => {
@@ -722,6 +734,49 @@ describe('BudgetPage', () => {
         "Set the trip's currency to one of those from Edit trip on the overview and the expenses logged in it count again.",
       )
       expect(within(breakdownCard()).getByText('Not counted here: 3 expenses in EUR, JPY.')).toBeInTheDocument()
+    })
+  })
+
+  describe('planned stops in another currency', () => {
+    /** One day of stops in EUR, one per cost, cloned from a fixture stop. */
+    function euroStops(costs: number[]): ItineraryDay[] {
+      const [dayOne, dayTwo] = makeFixtureDays()
+      const items: ItineraryItem[] = costs.map((estimatedCost, index) => ({
+        ...dayOne.items[0],
+        id: `stop-eur-${index}`,
+        title: `Stop ${index + 1}`,
+        estimatedCost,
+        currency: 'EUR',
+      }))
+      return [{ ...dayOne, items }, { ...dayTwo, items: [] }]
+    }
+
+    it('counts only the priced stops it leaves out, not the free ones', () => {
+      // 5 priced and 3 free EUR stops left behind by a switch to NGN.
+      renderBudget(
+        fixtureState({
+          trip: { currency: 'NGN', budget: NGN_BUDGET },
+          days: euroStops([10, 0, 20, 0, 30, 0, 40, 50]),
+          expenses: [],
+        }),
+      )
+
+      expect(
+        screen.getByText(`5 planned stops are not counted in the ${PROTOTYPE_LABEL.aiDraftEstimate}`),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/8 planned stops/)).not.toBeInTheDocument()
+    })
+
+    it('raises no warning when the stops in another currency are all free', () => {
+      renderBudget(
+        fixtureState({
+          trip: { currency: 'NGN', budget: NGN_BUDGET },
+          days: euroStops([0, 0, 0]),
+          expenses: [],
+        }),
+      )
+
+      expect(screen.queryByText(/planned stops? (is|are) not counted/)).not.toBeInTheDocument()
     })
   })
 

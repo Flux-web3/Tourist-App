@@ -63,6 +63,26 @@ describe('searchDestinations', () => {
     expect(cities('nyc')).toEqual(['New York'])
   })
 
+  it('ignores the filler words of and the, and a trailing city', () => {
+    expect(cities('new york city')).toEqual(['New York'])
+    expect(cities('United States of America')).toEqual(['New York'])
+    expect(cities('the uk')).toEqual(['London'])
+    expect(cities('the United Kingdom')).toEqual(['London'])
+    expect(cities('london city')).toEqual(['London'])
+  })
+
+  it('matches an alias written as a phrase', () => {
+    expect(cities('big apple')).toEqual(['New York'])
+    expect(cities('Big Apple')).toEqual(['New York'])
+    expect(cities('great britain')).toEqual(['London'])
+  })
+
+  it('still finds nothing for filler words alone or for a stray city word', () => {
+    expect(cities('of the')).toEqual([])
+    expect(cities('apple')).toEqual(['New York'])
+    expect(cities('paris city of lisbon')).toEqual([])
+  })
+
   it('ignores accents and punctuation', () => {
     expect(cities('  pàris, ')).toEqual(['Paris'])
   })
@@ -87,7 +107,35 @@ describe('matchDestination', () => {
     expect(matchDestination('Lagos, Nigeria')?.id).toBe('lagos')
   })
 
+  it('accepts the city and its country without a comma', () => {
+    expect(matchDestination('Paris France')?.id).toBe('paris')
+    expect(matchDestination('London UK')?.id).toBe('london')
+    expect(matchDestination('london united kingdom')?.id).toBe('london')
+    expect(matchDestination('Rome Italy')?.id).toBe('rome')
+    expect(matchDestination('New York City')?.id).toBe('new-york')
+    expect(matchDestination('New York USA')?.id).toBe('new-york')
+  })
+
+  it('accepts "City" after a catalogue city, with or without a country', () => {
+    expect(matchDestination('New York City, USA')?.id).toBe('new-york')
+    expect(matchDestination('New York City, United States')?.id).toBe('new-york')
+  })
+
+  it('compares the qualifier by whole words, not by a name hidden inside another', () => {
+    // "Ukraine" starts with the alias "UK", "Romania" with "Roma", "Brussels" ends with "us".
+    expect(matchDestination('London, Ukraine')).toBeNull()
+    expect(matchDestination('Rome, Romania')).toBeNull()
+    expect(matchDestination('New York, Brussels')).toBeNull()
+    expect(matchDestination('London Ukraine')).toBeNull()
+    expect(matchDestination('Rome Romania')).toBeNull()
+    // Still true when the real name is one word among several.
+    expect(matchDestination('London, Greater London, UK')?.id).toBe('london')
+    expect(matchDestination('New York, United States of America')?.id).toBe('new-york')
+  })
+
   it('leaves unknown or contradictory text unmatched instead of guessing', () => {
+    expect(matchDestination('Paris Texas')).toBeNull()
+    expect(matchDestination('London Ontario')).toBeNull()
     expect(matchDestination('Lisbon, Portugal')).toBeNull()
     expect(matchDestination('Paris, Texas')).toBeNull()
     expect(matchDestination('London, Ontario')).toBeNull()

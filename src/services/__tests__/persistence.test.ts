@@ -374,6 +374,7 @@ describe('a current (v3) snapshot', () => {
   it('keeps an empty bucket for a trip that has no days and no expenses', () => {
     const state: PersistedState = {
       ...createEmptyState(),
+      trips: [makeTrip('trip_without_days', 'EUR')],
       daysByTrip: { trip_without_days: [] },
       expensesByTrip: { trip_without_days: [] },
     }
@@ -383,7 +384,7 @@ describe('a current (v3) snapshot', () => {
 
     expect(loaded?.daysByTrip.trip_without_days).toEqual([])
     expect(loaded?.expensesByTrip.trip_without_days).toEqual([])
-    expect(loaded?.trips).toEqual([])
+    expect(loaded?.trips.map((trip) => trip.id)).toEqual(['trip_without_days'])
   })
 })
 
@@ -487,18 +488,22 @@ describe('migrating a v1 snapshot forward', () => {
 
     const loaded = service.load()
 
-    expect(itemCurrencies(loaded, 'stale_key')).toEqual(['JPY', 'JPY'])
+    // Priced by its real owner, and filed back under it where the app can reach it.
+    expect(itemCurrencies(loaded, TOKYO)).toEqual(['JPY', 'JPY'])
+    expect(loaded?.daysByTrip).not.toHaveProperty('stale_key')
   })
 
-  it('keeps an empty bucket with no owning trip, since there is nothing to price', () => {
+  it('does not count an empty bucket with no owning trip as a loss, since it held nothing', () => {
     const v1 = asV1(twoTripState())
     ;(v1.daysByTrip as RawRecord).trip_never_generated = []
     writeJson(v1)
 
     const detailed = service.loadDetailed()
 
-    expect(detailed.state?.daysByTrip.trip_never_generated).toEqual([])
+    // Nothing can reach a bucket without its trip, so it is not carried forward.
+    expect(detailed.state?.daysByTrip).not.toHaveProperty('trip_never_generated')
     expect(detailed.salvage.orphanedDayBuckets).toBe(0)
+    expect(detailed.salvage.orphanedBuckets).toBe(0)
   })
 
   it('keeps a copy of the v1 payload, and the next load after a save is clean', () => {
@@ -1737,5 +1742,128 @@ describe('reading an itinerary stop role', () => {
 
     expect(items).toHaveLength(2)
     expect(items.every((item) => !('role' in item))).toBe(true)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Buckets whose trip did not survive                                         */
+/* -------------------------------------------------------------------------- */
+
+describe('buckets whose trip did not survive', () => {
+  /** Tokyo's trip record names a currency this build does not know, so the trip is dropped. */
+  function withUnreadableTokyo(): RawRecord {
+    const snapshot = raw(twoTripState())
+    const trips = snapshot.trips as RawRecord[]
+    trips[1].currency = 'BTC'
+    return snapshot
+  }
+
+  it('prunes the days, expenses, notes and generation record of a dropped trip', () => {
+    writeJson(withUnreadableTokyo())
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('salvaged')
+    expect(detailed.salvage.trips).toBe(1)
+    expect(detailed.salvage.orphanedBuckets).toBe(3)
+    expect(detailed.state?.trips.map((trip) => trip.id)).toEqual([PARIS])
+    expect(Object.keys(detailed.state?.daysByTrip ?? {})).toEqual([PARIS])
+    expect(Object.keys(detailed.state?.expensesByTrip ?? {})).toEqual([PARIS])
+    expect(Object.keys(detailed.state?.notesByTrip ?? {})).toEqual([PARIS])
+    expect(Object.keys(detailed.state?.generation ?? {})).toEqual([PARIS])
+    // The surviving trip keeps everything.
+    expect(itemIds(detailed.state, PARIS)).toEqual(['itm_p1', 'itm_p2', 'itm_p3'])
+    expect(detailed.state?.expensesByTrip[PARIS]).toHaveLength(2)
+    expect(detailed.state?.notesByTrip?.[PARIS]).toHaveLength(1)
+  })
+
+  it('does not write the buckets of a dropped trip back, and keeps a copy of the original', () => {
+    const snapshot = withUnreadableTokyo()
+    writeJson(snapshot)
+
+    const detailed = service.loadDetailed()
+    if (!detailed.state) throw new Error('expected a salvaged state')
+    service.save(detailed.state)
+
+    expect(stored()).not.toContain(TOKYO)
+    expect(backup()).toBe(JSON.stringify(snapshot))
+    expect(service.loadDetailed().status).toBe('loaded')
+  })
+
+  it('reports records filed under a trip that is not there at all as a salvage', () => {
+    const snapshot = raw(twoTripState())
+    ;(snapshot.expensesByTrip as RawRecord).trip_gone = [raw(makeExpense('trip_gone', 'exp_orphan'))]
+    ;(snapshot.notesByTrip as RawRecord).trip_gone = [raw(makeNote('trip_gone', 'not_orphan'))]
+    writeJson(snapshot)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('salvaged')
+    expect(detailed.salvage.orphanedBuckets).toBe(2)
+    expect(detailed.state?.expensesByTrip).not.toHaveProperty('trip_gone')
+    expect(detailed.state?.notesByTrip).not.toHaveProperty('trip_gone')
+    expect(detailed.backupKey).toBe(BACKUP_KEY)
+  })
+
+  it('prunes an empty bucket and a generation record with no trip without calling it a loss', () => {
+    const snapshot = raw(twoTripState())
+    ;(snapshot.daysByTrip as RawRecord).trip_gone = []
+    ;(snapshot.expensesByTrip as RawRecord).trip_gone = []
+    ;(snapshot.generation as RawRecord).trip_gone = {
+      status: 'idle',
+      error: null,
+      startedAt: null,
+      completedAt: null,
+    }
+    writeJson(snapshot)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.status).toBe('loaded')
+    expect(detailed.salvage.orphanedBuckets).toBe(0)
+    expect(detailed.state?.daysByTrip).not.toHaveProperty('trip_gone')
+    expect(detailed.state?.expensesByTrip).not.toHaveProperty('trip_gone')
+    expect(detailed.state?.generation).not.toHaveProperty('trip_gone')
+  })
+
+  it('files a day bucket under its own trip when only the bucket key is stale', () => {
+    const snapshot = raw(twoTripState())
+    const days = snapshot.daysByTrip as RawRecord
+    days.stale_key = days[TOKYO]
+    delete days[TOKYO]
+    writeJson(snapshot)
+
+    const detailed = service.loadDetailed()
+
+    expect(detailed.state?.daysByTrip).not.toHaveProperty('stale_key')
+    expect(itemIds(detailed.state, TOKYO)).toEqual(['itm_t1', 'itm_t2'])
+    expect(detailed.salvage.orphanedBuckets).toBe(0)
+  })
+})
+
+describe('the backup slot', () => {
+  it('says whether a backup copy is there', () => {
+    expect(service.hasBackup()).toBe(false)
+    window.localStorage.setItem(BACKUP_KEY, 'anything')
+    expect(service.hasBackup()).toBe(true)
+  })
+
+  it('discards the backup and nothing else', () => {
+    service.save(twoTripState())
+    const live = stored()
+    window.localStorage.setItem(BACKUP_KEY, 'old copy')
+    window.localStorage.setItem('tourist.theme', 'dark')
+
+    service.discardBackup()
+
+    expect(backup()).toBeNull()
+    expect(service.hasBackup()).toBe(false)
+    expect(stored()).toBe(live)
+    expect(window.localStorage.getItem('tourist.theme')).toBe('dark')
+  })
+
+  it('is a safe no-op when there is no backup', () => {
+    expect(() => service.discardBackup()).not.toThrow()
+    expect(service.hasBackup()).toBe(false)
   })
 })

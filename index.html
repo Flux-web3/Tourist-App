@@ -19,8 +19,14 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
+    <!--
+      Only the icons the app uses. The whole variable icon font is 723 KB; this
+      subset is about 18 KB. `icon_names` must list every icon name in src,
+      sorted. An icon missing from it renders as its name in words, so
+      src/__tests__/iconFont.test.ts fails when one is: add the name here.
+    -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=block"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&icon_names=account_balance_wallet,add,add_card,add_circle,add_location_alt,arrow_back,arrow_forward,auto_awesome,auto_fix_high,auto_stories,calendar_month,check,close,contrast,currency_exchange,dark_mode,dashboard,delete_forever,delete_outline,delete_sweep,directions_subway,donut_large,drive_file_move_outline,edit,edit_note,error,event_available,expand_less,expand_more,explore,explore_off,filter_alt_off,flight_land,flight_takeoff,group,hotel,hourglass_bottom,image_not_supported,info,keep_off,landscape,light_mode,lightbulb,location_on,lock,lock_open,luggage,menu,menu_book,more_horiz,museum,nightlife,note_add,open_in_new,park,person,person_outline,pin_drop,place,push_pin,receipt_long,refresh,remove,restaurant,route,savings,schedule,science,search_off,sell,shopping_bag,smartphone,speed,sticky_note_2,storefront,swap_horiz,task_alt,travel_explore,tune,warning&display=block"
       rel="stylesheet"
     />
     <script>
@@ -39,14 +45,47 @@
         control already carries its own screen-reader label.
       */
       ;(function () {
+        var FAMILY = 'Material Symbols Outlined'
+        var FONT = '24px "' + FAMILY + '"'
+        var root = document.documentElement
         var reveal = function () {
-          document.documentElement.classList.add('symbols-ready')
+          root.classList.add('symbols-ready')
         }
-        try {
-          if (!document.fonts || !document.fonts.load) return reveal()
-          document.fonts.load('24px "Material Symbols Outlined"').then(reveal, reveal)
-        } catch (error) {
+        var fonts = document.fonts
+        // No Font Loading API: nothing can say when the font is ready, so show the icons.
+        if (!fonts || !fonts.load || !fonts.check || !fonts.forEach) return reveal()
+
+        /*
+          Usable means the font really loaded. A failed load must NOT reveal:
+          this used to run `load(...).then(reveal, reveal)`, which showed the
+          icons as words in exactly the case this script exists for.
+          `check()` is not enough by itself either. With the stylesheet blocked
+          there is no @font-face for the family at all, and browsers then
+          answer true, meaning "nothing to load". So a loaded face of this
+          family has to be present as well.
+        */
+        var usable = function () {
+          var loaded = false
+          fonts.forEach(function (face) {
+            if (face.status === 'loaded' && String(face.family).replace(/["']/g, '') === FAMILY) loaded = true
+          })
+          return loaded && fonts.check(FONT)
+        }
+        var settle = function () {
+          try {
+            if (!usable()) return
+          } catch (error) {
+            return
+          }
           reveal()
+          if (fonts.removeEventListener) fonts.removeEventListener('loadingdone', settle)
+        }
+        // A font that arrives late, after the first attempt settled, still reveals.
+        if (fonts.addEventListener) fonts.addEventListener('loadingdone', settle)
+        try {
+          fonts.load(FONT).then(settle, settle)
+        } catch (error) {
+          settle()
         }
       })()
     </script>

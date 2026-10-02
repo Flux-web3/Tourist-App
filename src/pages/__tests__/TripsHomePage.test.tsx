@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { formatDateRange } from '@/domain/format'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
-import { DEMO_TRIP_ID, createEmptyState } from '@/services/persistence'
+import {
+  BACKUP_KEY,
+  DEMO_TRIP_ID,
+  STORAGE_KEY,
+  createEmptyState,
+  createGuestUser,
+} from '@/services/persistence'
 import TripsHomePage from '@/pages/TripsHomePage'
 import { demoStateFor, renderWithProviders, TEST_TRIP_ID } from '@/test/renderWithProviders'
 
@@ -224,7 +230,7 @@ describe('TripsHomePage', () => {
       const dialog = await openClearConfirmation(user)
 
       expect(dialog).toHaveAccessibleDescription(
-        'This removes everything Tourist has stored in this browser. It cannot be undone.',
+        'This removes everything Tourist has stored in this browser, apart from your light or dark theme. It cannot be undone.',
       )
       expect(within(dialog).getByText(/Paris in the Spring/)).toBeInTheDocument()
 
@@ -259,6 +265,53 @@ describe('TripsHomePage', () => {
 
       expect(await screen.findByRole('heading', { name: 'Paris in the Spring' })).toBeInTheDocument()
       expect(screen.getByText('Sample trip')).toBeInTheDocument()
+    })
+
+    /**
+     * The item used to be disabled whenever there were no trips, so a traveller
+     * who had signed in and planned nothing could not remove their stored email.
+     */
+    it('is offered to a signed-in traveller with no trips, and removes their name and email', async () => {
+      const user = userEvent.setup()
+      const signedIn = createEmptyState(
+        createGuestUser({ name: 'Ada Lovelace', email: 'ada@example.com', isGuest: false }),
+      )
+      renderWithProviders(<TripsHomePage />, { route: '/trips', state: signedIn })
+
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
+      const item = screen.getByRole('menuitem', { name: 'Clear all data on this device' })
+      expect(item).toBeEnabled()
+
+      await user.click(item)
+      const dialog = screen.getByRole('dialog', { name: 'Clear all data?' })
+      expect(within(dialog).getByText(/Your name and email/)).toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+
+      const live = window.localStorage.getItem(STORAGE_KEY) ?? ''
+      expect(live).not.toContain('ada@example.com')
+      expect(live).not.toContain('Ada Lovelace')
+    })
+
+    it('is offered when the only thing stored is a backup copy, and removes it', async () => {
+      const user = userEvent.setup()
+      window.localStorage.setItem(BACKUP_KEY, JSON.stringify(demoStateFor()))
+      renderEmptyTripsHome()
+
+      const dialog = await openClearConfirmation(user)
+      await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+
+      expect(window.localStorage.getItem(BACKUP_KEY)).toBeNull()
+    })
+
+    it('is switched off again once everything has been cleared', async () => {
+      const user = userEvent.setup()
+      renderTripsHome()
+
+      const dialog = await openClearConfirmation(user)
+      await user.click(within(dialog).getByRole('button', { name: 'Clear all data' }))
+      await user.click(screen.getByRole('button', { name: MENU_LABEL }))
+
+      expect(screen.getByRole('menuitem', { name: 'Clear all data on this device' })).toBeDisabled()
     })
   })
 })

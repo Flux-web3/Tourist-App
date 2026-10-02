@@ -708,11 +708,14 @@ describe('nextEmptySlotStartTime', () => {
 })
 
 describe('mergeGeneratedDays', () => {
+  // Kept and drafted stops have their own titles and clear times here. A
+  // drafted stop that shares a kept stop's title or its time is left out of the
+  // merge (see itinerary.redraft.test.ts), which is not what these tests are about.
   const existing = [
     day({
       items: [
-        item({ id: 'user_breakfast', source: 'user', startTime: '08:00' }),
-        item({ id: 'catalog_museum', source: 'catalog', startTime: '10:00' }),
+        item({ id: 'user_breakfast', source: 'user', startTime: '08:00', endTime: '08:30' }),
+        item({ id: 'catalog_museum', source: 'catalog', startTime: '10:00', endTime: '11:00' }),
         item({ id: 'ai_unescorted', source: 'ai', editedByUser: false, startTime: '14:00' }),
       ],
     }),
@@ -725,12 +728,14 @@ describe('mergeGeneratedDays', () => {
   ]
 
   const generated = [
-    day({ items: [item({ id: 'fresh_one', source: 'ai', startTime: '09:00' })] }),
+    day({
+      items: [item({ id: 'fresh_one', title: 'Fresh draft stop', source: 'ai', startTime: '09:00', endTime: '09:45' })],
+    }),
     day({
       id: 'trip_1_d2',
       date: '2025-03-06',
       index: 2,
-      items: [item({ id: 'fresh_two', source: 'ai', startTime: '11:00' })] }),
+      items: [item({ id: 'fresh_two', title: 'Fresh draft stop', source: 'ai', startTime: '11:00' })] }),
   ]
 
   it('keeps a traveller-added item', () => {
@@ -1024,10 +1029,13 @@ function range(
   })
 }
 
-/** A fresh AI draft for the range, one priced stop per day. */
+/**
+ * A fresh AI draft for the range, one priced stop per day. It has its own
+ * title: a drafted stop named like a kept one is left out of the merge.
+ */
 function freshDraft(start: string, count: number): ItineraryDay[] {
   return range(start, count, (date) => [
-    item({ id: `fresh_${date}`, source: 'ai', startTime: '12:00', estimatedCost: 10 }),
+    item({ id: `fresh_${date}`, title: 'Fresh draft stop', source: 'ai', startTime: '12:00', estimatedCost: 10 }),
   ])
 }
 

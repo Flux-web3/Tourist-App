@@ -16,8 +16,8 @@ import {
 } from '@/domain/itinerary'
 import { applyTheme, readThemePreference } from '@/lib/theme'
 import { services } from '@/services'
-import type { CatalogQuery, PersistedState } from '@/services/contracts'
-import { createDemoState, createEmptyState } from '@/services/persistence'
+import type { CatalogQuery, PersistedState, PersistenceLoadStatus } from '@/services/contracts'
+import { BACKUP_KEY, STORAGE_KEY, createDemoState, createEmptyState } from '@/services/persistence'
 import type {
   GenerationState,
   ItineraryItem,
@@ -35,6 +35,7 @@ import {
   type NewExpenseInput,
   type NewNoteInput,
   type NotePatch,
+  type StorageStatus,
   type TouristActions,
   type TouristContextValue,
 } from './touristContext'
@@ -52,15 +53,25 @@ const IDLE_GENERATION: GenerationState = {
  * exactly the fields `tripService.update` re-flows the itinerary for, so a change
  * to any of them means a result produced before the change describes a trip that
  * no longer exists.
+ *
+ * The destination follows the same rule as `shouldReflow` there: a destination
+ * is an id, so when either trip has one the ids alone decide, and a change to
+ * the display text is not a change of place. Only two trips with no id at all
+ * (saved before destinations were listed) are compared by their trimmed text.
  */
 function sameItineraryShape(before: Trip, after: Trip | undefined): after is Trip {
+  if (after === undefined) return false
+  const beforeId = before.destinationId ?? null
+  const afterId = after.destinationId ?? null
+  const sameDestination =
+    beforeId !== null || afterId !== null
+      ? afterId === beforeId
+      : after.destination.trim() === before.destination.trim()
   return (
-    after !== undefined &&
     after.startDate === before.startDate &&
     after.endDate === before.endDate &&
     after.pace === before.pace &&
-    after.destination === before.destination &&
-    (after.destinationId ?? null) === (before.destinationId ?? null)
+    sameDestination
   )
 }
 
@@ -91,8 +102,47 @@ function settleInterruptedGenerations(
   )
 }
 
+const ABANDONED_GENERATION_MESSAGE =
+  'Drafting stopped because your trips were changed in another tab. Your plan was not changed. Try again.'
+
+const INITIAL_STORAGE: StorageStatus = {
+  saving: 'ok',
+  load: 'empty',
+  backedUp: false,
+  readOnly: false,
+  fromOtherTab: false,
+  noticeDismissed: false,
+  hasBackup: false,
+}
+
+/** A payload this build cannot use: not valid data, or written by a newer build. */
+function isUnusable(status: PersistenceLoadStatus): boolean {
+  return status === 'unreadable' || status === 'future'
+}
+
+/**
+ * True when `state` is, field for field, the very snapshot `synced` is. Every
+ * action replaces at least one top-level field with a new object, so identical
+ * references mean nothing has changed since `synced` was adopted.
+ */
+function isSameSnapshot(state: PersistedState, synced: PersistedState | null): boolean {
+  return (
+    synced !== null &&
+    state.version === synced.version &&
+    state.user === synced.user &&
+    state.trips === synced.trips &&
+    state.daysByTrip === synced.daysByTrip &&
+    state.expensesByTrip === synced.expensesByTrip &&
+    state.notesByTrip === synced.notesByTrip &&
+    state.generation === synced.generation &&
+    state.themePreference === synced.themePreference &&
+    state.hasDemoData === synced.hasDemoData
+  )
+}
+
 export function TouristProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(touristReducer, undefined, createInitialTouristState)
+  const [storage, setStorage] = useState<StorageStatus>(INITIAL_STORAGE)
   const [pendingItemId, setPendingItemId] = useState<string | null>(null)
   const [swapError, setSwapError] = useState<string | null>(null)
   const [swapTripId, setSwapTripId] = useState<string | null>(null)
@@ -127,33 +177,195 @@ export function TouristProvider({ children }: { children: ReactNode }) {
    * or raise an error over, a newer swap on another trip.
    */
   const swapRunRef = useRef(0)
+  /**
+   * The trips with a generation still out in this tab. Storage only says that
+   * a trip is `loading`, not which tab is doing the drafting, so this is how a
+   * tab knows a spinner is its own when another tab changes the data under it.
+   */
+  const activeGenerationsRef = useRef(new Set<string>())
+  /**
+   * True while this session must not write to storage at all: what is stored
+   * could not be read and is the only copy of it. Saving the fresh, empty state
+   * this session starts from would destroy the traveller's data for good.
+   */
+  const readOnlyRef = useRef(false)
+  /**
+   * The snapshot this tab adopted from another tab's write, while its state is
+   * still exactly that. Storage already holds it, so there is nothing to save,
+   * and saving anyway is how two tabs would start answering each other's
+   * writes for ever.
+   */
+  const syncedRef = useRef<PersistedState | null>(null)
 
   const commit = useCallback((next: PersistedState) => {
     stateRef.current = { ...next, hydrated: stateRef.current.hydrated }
     dispatch({ type: 'replace', state: next })
   }, [])
 
+  /**
+   * The one place a snapshot is written. The outcome is kept rather than
+   * dropped: a rejected write changes nothing on screen, so without it the
+   * traveller carries on and loses everything on the next reload.
+   */
+  const persist = useCallback((next: PersistedState) => {
+    if (readOnlyRef.current) return
+    const saving = services.persistence.save(next).status === 'saved' ? 'ok' : 'failing'
+    setStorage((current) => (current.saving === saving ? current : { ...current, saving }))
+  }, [])
+
+  const clearSwapState = useCallback(() => {
+    swapRunRef.current += 1
+    swapTripRef.current = null
+    setSwapTripId(null)
+    setPendingItemId(null)
+    setSwapError(null)
+  }, [])
+
   useEffect(() => {
-    const loaded = services.persistence.load()
+    const result = services.persistence.loadDetailed()
     /**
      * A first-time traveller starts empty. The demo trip is only ever added by
      * an explicit "Try the demo", never silently: sample data presented as the
      * traveller's own would be the one dishonest thing in the product.
      */
-    const base = loaded ?? createEmptyState()
+    const base = result.state ?? createEmptyState()
     const initial: PersistedState = {
       ...base,
       generation: settleInterruptedGenerations(base.generation),
       themePreference: readThemePreference(),
     }
+    /**
+     * Starting fresh is only safe once the payload this build could not use
+     * has been copied to the backup. When that copy could not be written, the
+     * live key is the only one there is, so nothing is saved over it for the
+     * rest of the session.
+     */
+    const readOnly = isUnusable(result.status) && result.backupKey === null
+    readOnlyRef.current = readOnly
+    syncedRef.current = null
+    setStorage({
+      saving: 'ok',
+      load: result.status,
+      backedUp: result.backupKey !== null,
+      readOnly,
+      fromOtherTab: false,
+      noticeDismissed: false,
+      hasBackup: services.persistence.hasBackup(),
+    })
+    // Not saved here: the save effect below writes it once it is the state,
+    // and writes nothing while the session is read-only.
     dispatch({ type: 'hydrate', state: initial })
-    if (!loaded) services.persistence.save(initial)
   }, [])
 
   useEffect(() => {
     if (!state.hydrated) return
-    services.persistence.save(toPersistedState(state))
-  }, [state])
+    const snapshot = toPersistedState(state)
+    if (isSameSnapshot(snapshot, syncedRef.current)) return
+    syncedRef.current = null
+    persist(snapshot)
+  }, [state, persist])
+
+  /**
+   * Another tab changed what is stored. This tab's copy of the whole state is
+   * now stale, and its next save would write that stale copy back: the other
+   * tab's new expense gone, its deleted trip returned. So this tab re-reads
+   * storage and carries on from there.
+   */
+  const syncFromStorage = useCallback(() => {
+    const result = services.persistence.loadDetailed()
+    const unusable = isUnusable(result.status)
+
+    /**
+     * Anything in flight here was started against the state being replaced.
+     * The run numbers are moved on rather than cleared: a cleared counter
+     * starts again at 1, which is the number an abandoned run may be holding.
+     */
+    const abandoned = [...activeGenerationsRef.current]
+    activeGenerationsRef.current.clear()
+    for (const tripId of Object.keys(generationRunRef.current)) {
+      generationRunRef.current[tripId] += 1
+    }
+    clearSwapState()
+
+    /**
+     * A key removed elsewhere means start empty. A payload this build cannot
+     * use (another tab is on a newer build, say), or storage that would not
+     * read at all, is different: emptying the screen would look like data
+     * loss, so this tab keeps what it was showing.
+     */
+    const keepCurrent = unusable || result.status === 'unavailable'
+    const base =
+      result.state ?? (keepCurrent ? toPersistedState(stateRef.current) : createEmptyState())
+
+    // A spinner this tab was responsible for has nothing behind it any more.
+    let generation = base.generation
+    let settled = false
+    for (const tripId of abandoned) {
+      const entry = generation[tripId]
+      if (entry?.status !== 'loading') continue
+      generation = {
+        ...generation,
+        [tripId]: { ...entry, status: 'error', error: ABANDONED_GENERATION_MESSAGE, completedAt: null },
+      }
+      settled = true
+    }
+
+    // The theme has its own key, shared by every tab, exactly as on first load.
+    const themePreference = readThemePreference()
+    const next: PersistedState = { ...base, generation, themePreference }
+
+    /**
+     * Unusable data is left exactly where it is, backed up or not: the tab that
+     * wrote it is still using it.
+     */
+    readOnlyRef.current = unusable
+    /**
+     * Adopting what storage holds must not be answered with a write, or two
+     * tabs would ping-pong. The only writes that follow a sync are the ones
+     * that carry something new: a draft this tab had to abandon, or a theme
+     * the payload disagrees with. Neither can repeat, since the next tab to
+     * read the result finds nothing left to settle and the same theme key.
+     */
+    const matchesStorage =
+      result.state === null || (!settled && themePreference === base.themePreference)
+    syncedRef.current = matchesStorage ? next : null
+
+    const hasBackup = services.persistence.hasBackup()
+    const noteworthy = unusable || result.status === 'salvaged'
+    setStorage((current) => ({
+      ...current,
+      readOnly: unusable,
+      hasBackup,
+      // A clean read from another tab says nothing new, so a notice from the
+      // page load stays until it is dismissed.
+      ...(noteworthy || current.readOnly
+        ? {
+            load: result.status,
+            backedUp: result.backupKey !== null,
+            fromOtherTab: true,
+            noticeDismissed: false,
+          }
+        : {}),
+    }))
+
+    stateRef.current = { ...next, hydrated: true }
+    dispatch({ type: 'hydrate', state: next })
+  }, [clearSwapState])
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === BACKUP_KEY) {
+        const hasBackup = services.persistence.hasBackup()
+        setStorage((current) => (current.hasBackup === hasBackup ? current : { ...current, hasBackup }))
+        return
+      }
+      // A null key is another tab clearing the whole of storage.
+      if (event.key !== null && event.key !== STORAGE_KEY) return
+      syncFromStorage()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [syncFromStorage])
 
   useEffect(() => {
     applyTheme(state.themePreference)
@@ -199,6 +411,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       const run = (generationRunRef.current[tripId] = (generationRunRef.current[tripId] ?? 0) + 1)
       const superseded = () => generationRunRef.current[tripId] !== run
 
+      activeGenerationsRef.current.add(tripId)
       setGeneration(tripId, { ...IDLE_GENERATION, status: 'loading', startedAt })
       services.analytics.track('itinerary_generation_started', { tripId, regenerate, variant })
 
@@ -225,8 +438,14 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           setGeneration(tripId, IDLE_GENERATION)
           return
         }
+        /**
+         * Always merged, the first draft included. `existing` is read after the
+         * await, so it holds whatever the traveller added while this was out;
+         * taking `generated` as it stands replaced the plan and lost those
+         * stops. With nothing to keep, the merge is exactly `generated`.
+         */
         const existing = after.daysByTrip[tripId] ?? []
-        const days = regenerate ? mergeGeneratedDays(existing, generated) : generated
+        const days = mergeGeneratedDays(existing, generated)
         const completedAt = timestamp()
 
         patch({
@@ -268,20 +487,15 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           },
         })
         services.analytics.track('itinerary_generation_failed', { tripId, message })
+      } finally {
+        // Still this trip's newest run, so the trip has nothing in flight now.
+        if (!superseded()) activeGenerationsRef.current.delete(tripId)
       }
     },
     [markItineraryReady, patch, setGeneration, trackSaved],
   )
 
   const actions = useMemo<TouristActions>(() => {
-    const clearSwapState = () => {
-      swapRunRef.current += 1
-      swapTripRef.current = null
-      setSwapTripId(null)
-      setPendingItemId(null)
-      setSwapError(null)
-    }
-
     const setThemePreference = (preference: ThemePreference) => {
       applyTheme(preference)
       commit({ ...stateRef.current, themePreference: preference })
@@ -319,29 +533,60 @@ export function TouristProvider({ children }: { children: ReactNode }) {
         generation: { ...current.generation, ...demo.generation },
         hasDemoData: true,
       }
-      services.persistence.save(fresh)
+      persist(fresh)
       commit(fresh)
     }
 
     const clearAllData = () => {
-      const current = stateRef.current
+      /**
+       * "Clear all data" has to mean all of it, because that is what the
+       * dialog promises. So the traveller's name and email go too: the state
+       * starts again from a brand new guest rather than carrying the old user
+       * record across. Only the colour theme is kept, which says nothing about
+       * the traveller or their trips.
+       */
       const fresh: PersistedState = {
-        ...createEmptyState(current.user),
-        themePreference: current.themePreference,
+        ...createEmptyState(),
+        themePreference: stateRef.current.themePreference,
       }
       /**
-       * "Clear all data" has to mean all of it. The analytics log is in memory
-       * only, but it still holds destinations and the traveller's raw search
-       * text, so leaving it behind would make the promise false.
+       * The analytics log is in memory only, but it still holds destinations
+       * and the traveller's raw search text, so leaving it behind would make
+       * the promise false.
        */
       services.analytics.clear()
       variantRef.current = {}
       simulateFailureRef.current = {}
       // Anything still in flight belongs to a trip that no longer exists.
       generationRunRef.current = {}
+      activeGenerationsRef.current.clear()
       clearSwapState()
-      services.persistence.save(fresh)
+      /**
+       * The backup slot can hold a full copy of every trip, expense and note
+       * (a migration, a salvage and an unreadable payload each leave one), so
+       * it is removed as well. A payload this session was leaving untouched
+       * because it could not be read is replaced too: the traveller has now
+       * asked for it to go.
+       */
+      services.persistence.discardBackup()
+      const hasBackup = services.persistence.hasBackup()
+      readOnlyRef.current = false
+      syncedRef.current = null
+      setStorage((current) => ({
+        ...current,
+        load: 'empty',
+        backedUp: false,
+        readOnly: false,
+        fromOtherTab: false,
+        noticeDismissed: false,
+        hasBackup,
+      }))
+      persist(fresh)
       commit(fresh)
+    }
+
+    const dismissStorageNotice = () => {
+      setStorage((current) => (current.noticeDismissed ? current : { ...current, noticeDismissed: true }))
     }
 
     const createTrip = (draft: TripDraft): Trip => {
@@ -383,6 +628,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       delete variantRef.current[tripId]
       delete simulateFailureRef.current[tripId]
       delete generationRunRef.current[tripId]
+      activeGenerationsRef.current.delete(tripId)
       if (swapTripRef.current === tripId) clearSwapState()
       patch({
         trips: next.trips,
@@ -449,6 +695,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
           trip,
           day: located.day,
           item: located.item,
+          days: stateRef.current.daysByTrip[tripId] ?? [],
           variant,
           shouldFail: simulateFailureRef.current[tripId] ?? false,
         })
@@ -716,6 +963,7 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       signOut,
       loadDemoData,
       clearAllData,
+      dismissStorageNotice,
       createTrip,
       updateTrip,
       deleteTrip,
@@ -741,11 +989,11 @@ export function TouristProvider({ children }: { children: ReactNode }) {
       getExperience,
       trackSearch,
     }
-  }, [commit, patch, runGeneration, setGeneration, trackSaved, markItineraryReady])
+  }, [clearSwapState, commit, patch, persist, runGeneration, setGeneration, trackSaved, markItineraryReady])
 
   const value = useMemo<TouristContextValue>(
-    () => ({ state, hydrated: state.hydrated, actions, pendingItemId, swapError, swapTripId }),
-    [actions, pendingItemId, state, swapError, swapTripId],
+    () => ({ state, hydrated: state.hydrated, actions, storage, pendingItemId, swapError, swapTripId }),
+    [actions, pendingItemId, state, storage, swapError, swapTripId],
   )
 
   return <TouristContext.Provider value={value}>{children}</TouristContext.Provider>

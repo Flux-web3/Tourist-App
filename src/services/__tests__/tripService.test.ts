@@ -121,10 +121,28 @@ describe('tripService.create', () => {
     }
   })
 
-  it('starts the trip in draft status', () => {
-    const { trip } = tripService.create(baseState(), validDraft(), 'usr_fixture')
+  // Creation drafts the plan there and then, so the trip is not a bare draft:
+  // the Trips list read "Itinerary not generated" beside "15 planned stops".
+  it('marks the trip itinerary-ready, because it is created with a drafted plan', () => {
+    const { state, trip } = tripService.create(baseState(), validDraft(), 'usr_fixture')
 
-    expect(trip?.status).toBe('draft')
+    expect(allItems(state, trip?.id ?? '').length).toBeGreaterThan(0)
+    expect(trip?.status).toBe('itinerary_ready')
+    expect(createdTrip(state).status).toBe('itinerary_ready')
+  })
+
+  it('marks every listed destination and trip length itinerary-ready on creation', () => {
+    for (const destinationId of ['paris', 'london', 'lagos', 'tokyo', 'dubai']) {
+      for (const endDate of [START, addDays(START, 2), addDays(START, 13)]) {
+        const { trip } = tripService.create(
+          baseState(),
+          validDraft({ destination: destinationId, destinationId, endDate }),
+          'usr_fixture',
+        )
+
+        expect(trip?.status, `${destinationId} to ${endDate}`).toBe('itinerary_ready')
+      }
+    }
   })
 
   it('issues a unique id per trip', () => {
@@ -986,7 +1004,9 @@ describe('tripService.update keeps each stop on its calendar date', () => {
   it('keeps an AI stop the traveller moved to another day through a reflow', () => {
     const { state, tripId } = plannedTrip()
     const days = daysOf(state, tripId)
-    const moving = days[0]?.items.find((item) => item.source === 'ai')
+    // An ordinary stop: the arrival is the one AI stop that always belongs to
+    // day one, and a re-draft puts it back there.
+    const moving = days[0]?.items.find((item) => item.source === 'ai' && item.role === undefined)
     const target = days[1]
     if (!moving || !target) throw new Error('fixture trip has no AI stop to move')
     const moved: PersistedState = {
@@ -1736,5 +1756,68 @@ describe('tripService.update keeps a suggested name in step with the trip', () =
     const renamedBudget = tripService.update(state, trip.id, { name: trip.name, budget: 4000 }).trip
 
     expect(renamedBudget?.name).toBe(trip.name)
+  })
+})
+
+/**
+ * A trip migrated from before the catalogue keeps the text it was typed with
+ * ("paris") next to the id it was resolved to. Picking the same city again in
+ * the edit dialog sends the catalogue's name, "Paris, France". The text differs,
+ * the city does not, and the plan was silently re-drafted from variant 0.
+ */
+describe('tripService.update and re-picking the city a trip already has', () => {
+  function migratedTrip(destination: string, destinationId: string | null) {
+    const created = tripService.create(baseState(), validDraft(), 'usr_fixture')
+    const tripId = created.trip?.id ?? ''
+    // Written directly: this is the shape the storage migration leaves behind.
+    const state: PersistedState = {
+      ...created.state,
+      trips: created.state.trips.map((trip) =>
+        trip.id === tripId ? { ...trip, destination, destinationId } : trip,
+      ),
+    }
+    return { state, tripId, trip: createdTrip(state) }
+  }
+
+  it('keeps the plan when the same city is chosen again under its catalogue name', () => {
+    const { state, tripId, trip } = migratedTrip('paris', 'paris')
+
+    const result = tripService.update(
+      state,
+      tripId,
+      wholeDraft(trip, { destination: 'Paris, France', destinationId: 'paris' }),
+    )
+
+    expect(result.trip?.destinationId).toBe('paris')
+    expect(result.trip?.destination).toBe('Paris, France')
+    expect(result.state.daysByTrip[tripId]).toBe(state.daysByTrip[tripId])
+    expect(itemIds(result.state, tripId)).toEqual(itemIds(state, tripId))
+  })
+
+  it('keeps the plan when only the spacing of an unlisted destination differs', () => {
+    const { state, tripId } = migratedTrip('Lisbon ', null)
+
+    const result = tripService.update(state, tripId, { notes: 'Pack light' })
+
+    expect(result.trip?.notes).toBe('Pack light')
+    expect(result.state.daysByTrip[tripId]).toBe(state.daysByTrip[tripId])
+  })
+
+  it('still re-drafts when the id changes, even if the text is left as it was', () => {
+    const { state, tripId } = migratedTrip('paris', 'paris')
+
+    const result = tripService.update(state, tripId, { destinationId: 'london' })
+
+    expect(result.trip?.destinationId).toBe('london')
+    expect(result.state.daysByTrip[tripId]).not.toBe(state.daysByTrip[tripId])
+  })
+
+  it('still re-drafts when an unlisted trip moves onto a listed city', () => {
+    const { state, tripId } = migratedTrip('Lisbon', null)
+
+    const result = tripService.update(state, tripId, { destination: 'Rome, Italy', destinationId: 'rome' })
+
+    expect(result.trip?.destinationId).toBe('rome')
+    expect(result.state.daysByTrip[tripId]).not.toBe(state.daysByTrip[tripId])
   })
 })

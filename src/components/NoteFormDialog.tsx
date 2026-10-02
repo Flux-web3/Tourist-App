@@ -11,14 +11,15 @@ function NoteForm({
   formId,
   draft,
   errors,
-  submitted,
+  failedSubmits,
   onPatch,
   onSubmit,
 }: {
   formId: string
   draft: { title: string; body: string }
   errors: NoteDraftErrors
-  submitted: boolean
+  /** How many submits have failed since the dialog opened. */
+  failedSubmits: number
   onPatch: (update: Partial<{ title: string; body: string }>) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
@@ -26,9 +27,15 @@ function NoteForm({
   const messages = Object.values(errors).filter((message): message is string => Boolean(message))
   const messageCount = messages.length
 
+  /*
+    Focus moves to the summary only because a submit just failed. Tying it to
+    the error list instead pulled focus out of a field every time typing
+    cleared one of its errors, and the rest of the word was lost. The counter
+    also changes on a second failed submit, so that one is announced too.
+  */
   useEffect(() => {
-    if (submitted && messageCount > 0) summaryRef.current?.focus()
-  }, [messageCount, submitted])
+    if (failedSubmits > 0) summaryRef.current?.focus()
+  }, [failedSubmits])
 
   /**
    * The counter only appears once it means something. Showing `2000 characters
@@ -90,6 +97,7 @@ function useNoteForm(open: boolean, seed?: TripNote | null) {
   const [draft, setDraft] = useState({ title: '', body: '' })
   const [errors, setErrors] = useState<NoteDraftErrors>({})
   const [submitted, setSubmitted] = useState(false)
+  const [failedSubmits, setFailedSubmits] = useState(0)
   const formId = useId()
 
   useEffect(() => {
@@ -97,6 +105,7 @@ function useNoteForm(open: boolean, seed?: TripNote | null) {
     setDraft(seed ? { title: seed.title, body: seed.body } : { title: '', body: '' })
     setErrors({})
     setSubmitted(false)
+    setFailedSubmits(0)
   }, [open, seed])
 
   const patch = useCallback(
@@ -108,7 +117,9 @@ function useNoteForm(open: boolean, seed?: TripNote | null) {
     [draft, submitted],
   )
 
-  return { draft, errors, submitted, formId, patch, setSubmitted, setErrors }
+  const noteSubmitFailed = useCallback(() => setFailedSubmits((count) => count + 1), [])
+
+  return { draft, errors, failedSubmits, formId, patch, setSubmitted, setErrors, noteSubmitFailed }
 }
 
 export function NoteFormDialog({
@@ -121,14 +132,18 @@ export function NoteFormDialog({
   onClose: () => void
 }) {
   const { actions } = useTourist()
-  const { draft, errors, submitted, formId, patch, setSubmitted, setErrors } = useNoteForm(open)
+  const { draft, errors, failedSubmits, formId, patch, setSubmitted, setErrors, noteSubmitFailed } =
+    useNoteForm(open)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
     const result = validateNoteDraft(draft)
     setErrors(result.errors)
-    if (!result.isValid) return
+    if (!result.isValid) {
+      noteSubmitFailed()
+      return
+    }
     actions.addNote({ tripId: trip.id, title: draft.title.trim(), body: draft.body.trim() })
     onClose()
   }
@@ -155,7 +170,7 @@ export function NoteFormDialog({
         formId={formId}
         draft={draft}
         errors={errors}
-        submitted={submitted}
+        failedSubmits={failedSubmits}
         onPatch={patch}
         onSubmit={handleSubmit}
       />
@@ -175,7 +190,8 @@ export function EditNoteDialog({
   onClose: () => void
 }) {
   const { actions } = useTourist()
-  const { draft, errors, submitted, formId, patch, setSubmitted, setErrors } = useNoteForm(open, note)
+  const { draft, errors, failedSubmits, formId, patch, setSubmitted, setErrors, noteSubmitFailed } =
+    useNoteForm(open, note)
 
   if (!note) return null
 
@@ -184,7 +200,10 @@ export function EditNoteDialog({
     setSubmitted(true)
     const result = validateNoteDraft(draft)
     setErrors(result.errors)
-    if (!result.isValid) return
+    if (!result.isValid) {
+      noteSubmitFailed()
+      return
+    }
     actions.updateNote(trip.id, note.id, { title: draft.title.trim(), body: draft.body.trim() })
     onClose()
   }
@@ -211,7 +230,7 @@ export function EditNoteDialog({
         formId={formId}
         draft={draft}
         errors={errors}
-        submitted={submitted}
+        failedSubmits={failedSubmits}
         onPatch={patch}
         onSubmit={handleSubmit}
       />

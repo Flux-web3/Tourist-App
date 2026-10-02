@@ -55,9 +55,24 @@ Pushing `main` deploys to production on Vercel.
   `version` field (currently 3; v3 added `destinationId`, resolved from the
   typed destination, which is kept as typed). `src/services/migrations.ts` migrates older
   versions forward, salvages valid records from damaged data rather than
-  wiping it, and keeps the previous copy in `tourist.state.backup`. Data from a
-  newer version, which this build cannot read, is copied to that backup before
-  the app starts fresh.
+  wiping it, and keeps the previous copy in `tourist.state.backup`. Records
+  filed under a trip that could not be read are left out with it (they stay in
+  that backup copy). Data from a newer version, or data that cannot be read at
+  all, is copied to the backup before the app starts fresh. If that copy cannot
+  be written, the original is left untouched and nothing is saved for the rest
+  of the session.
+- **Storage problems are said out loud.** A banner at the top of every screen
+  inside the app says when changes are not being saved (storage full or
+  blocked) and clears once a save succeeds. A one-off notice says when saved
+  data was partly unreadable, unreadable, or from a newer version, and whether
+  a backup copy was actually kept. The landing page (`/`) does not show them.
+- **Open tabs follow each other.** When another tab changes the saved data,
+  this tab re-reads it instead of writing its own older copy back, so a second
+  tab cannot undo an expense, a note or a deleted trip. A draft or a swap still
+  in flight in the tab that was overtaken is dropped and can be retried.
+- **"Clear all data" clears all of it.** Every trip with its itinerary,
+  expenses and notes, the name and email, and the backup copy are removed. No
+  copy is kept. Only the light or dark theme choice stays.
 
 ## Design system
 
@@ -76,10 +91,14 @@ there is no page-specific styling.
   stop's currency. An AI stop whose price you edited cannot be told apart from
   a swapped alternative, so it migrates as EUR. On a non-EUR trip it is shown
   in EUR and left out of the total rather than mis-added.
-- **One backup slot.** A migration, a salvage, an unreadable or newer-version
-  payload and "Clear all data" each copy the old data to `tourist.state.backup`
-  first, but there is only one slot, so the next such event replaces it. Nothing
-  in the app restores from it yet; it is there for manual recovery.
+- **One backup slot.** A migration, a salvage and an unreadable or
+  newer-version payload each copy the old data to `tourist.state.backup` first,
+  but there is only one slot, so the next such event replaces it. "Clear all
+  data" does not write to it; it deletes it. Nothing in the app restores from
+  the backup yet; it is there for manual recovery.
+- **Two tabs acting in the same instant.** A tab follows another tab's change
+  as soon as the browser reports it. If both tabs save within that moment, the
+  later save still wins whole.
 - **Swapped alternatives can crowd the next stop.** A swap prefers a stop of a
   similar kind over one that fits the gap exactly, so about 6% of swaps overlap
   the following stop's start time.
@@ -95,3 +114,12 @@ there is no page-specific styling.
   else. All photographs are served from `public/images/`.
 - **Estimates are illustrative.** Prices and places are sample data, not live
   quotes.
+- **Estimates are per person.** Catalogue and draft prices are for one adult,
+  and no total multiplies them by the number of travellers on the trip. The
+  Budget and Itinerary pages say so; the trip budget you set is for the whole
+  party, so compare the estimate with it accordingly.
+- **Drafted days can ignore opening hours.** A drafted day can place a named
+  place slightly outside the hours Explore lists for it, or on its listed closed
+  day (for example the Louvre on a Tuesday), because draft templates carry no
+  opening hours. The hours shown in Explore and in the add-a-place dialog are
+  the ones to trust.

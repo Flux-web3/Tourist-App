@@ -118,8 +118,10 @@ describe('TripOverviewPage', () => {
     expect(screen.getByText('-€385')).toBeInTheDocument()
     expect(screen.getByText('139% of €1,000')).toBeInTheDocument()
     expect(screen.queryByText(/still available/)).not.toBeInTheDocument()
+    // The overspend is in the text above. The bar itself stays a valid range:
+    // full, never a value beyond its own maximum.
     const bar = screen.getByRole('progressbar', { name: 'Trip budget used' })
-    expect(bar).toHaveAttribute('aria-valuenow', '1385')
+    expect(bar).toHaveAttribute('aria-valuenow', '1000')
     expect(bar).toHaveAttribute('aria-valuemax', '1000')
   })
 
@@ -127,10 +129,10 @@ describe('TripOverviewPage', () => {
     renderOverview(fixtureState({ trip: { budget: 0 } }))
 
     expect(screen.getByText('No trip budget set yet')).toBeInTheDocument()
-    expect(screen.getByRole('progressbar', { name: 'Trip budget used' })).toHaveAttribute(
-      'aria-valuenow',
-      '1385',
-    )
+    // With no budget the bar measures against 1, and stays inside that range.
+    const bar = screen.getByRole('progressbar', { name: 'Trip budget used' })
+    expect(bar).toHaveAttribute('aria-valuemax', '1')
+    expect(bar).toHaveAttribute('aria-valuenow', '1')
   })
 
   it('previews the first three stops of the first planned day', () => {
@@ -676,5 +678,13 @@ describe('TripOverviewPage guide coverage', () => {
     await screen.findByRole('region', { name: 'Trip summary' })
     expect(screen.queryByText(/No curated guide/)).not.toBeInTheDocument()
     expect(screen.getByText('Guide').closest('div')).toHaveTextContent('Curated guide in Explore')
+  })
+
+  it('gives the trip-not-found screen a real page heading', () => {
+    renderAt('no-such-trip', fixtureState())
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'We could not find that trip' }),
+    ).toBeInTheDocument()
   })
 })

@@ -10,6 +10,7 @@ Tokens live in `src/styles/index.css`; nothing below is page-specific.
 |---|---|
 | `canvas`, `surface`, `surface-low`, `surface-high` | Page, cards, quiet fills, pressed/selected fills |
 | `line`, `line-strong` | Hairlines; the stronger one draws containers in dark mode |
+| `field` | The edge of inputs, selects and unselected chips. 3:1 against its surface |
 | `ink`, `ink-muted`, `ink-subtle` | Text, in falling order of weight. All pass AA on every surface |
 | `navy` / `btn-primary` | The product colour: primary buttons, icon tiles, selected states |
 | `gold`, `gold-ink`, `gold-bg`, `gold-border` | The brand note. `gold` is decoration only; text uses `gold-ink` |

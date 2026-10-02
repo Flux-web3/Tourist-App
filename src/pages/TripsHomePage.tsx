@@ -13,7 +13,7 @@ import { destinationPhoto } from '@/data/destinationPhotos'
 import { formatDateRange, tripLengthInDays } from '@/domain/format'
 import { formatAmount } from '@/domain/money'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
-import { DEMO_TRIP_ID } from '@/services/persistence'
+import { DEMO_TRIP_ID, isUntouchedGuest } from '@/services/persistence'
 import { selectTripSummary } from '@/state/selectors'
 import { useTourist, useTrips } from '@/state/useTourist'
 import type { Trip } from '@/domain/types'
@@ -223,7 +223,7 @@ function TripCardSkeleton() {
 }
 
 export default function TripsHomePage() {
-  const { state, hydrated, actions } = useTourist()
+  const { state, hydrated, actions, storage } = useTourist()
   const trips = useTrips()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [status, setStatus] = useState('')
@@ -243,6 +243,12 @@ export default function TripsHomePage() {
 
   const hasSampleTrip = trips.some(isSampleTrip)
   const isEmpty = hydrated && trips.length === 0
+  /**
+   * There is something to clear whenever anything of the traveller's is stored,
+   * not only when there are trips: a name or email from signing in, or a backup
+   * copy of earlier data, must be removable too.
+   */
+  const hasStoredData = trips.length > 0 || !isUntouchedGuest(state.user) || storage.hasBackup
 
   return (
     <div className="flex flex-col gap-6">
@@ -277,7 +283,7 @@ export default function TripsHomePage() {
                   label: 'Clear all data on this device',
                   icon: 'delete_sweep',
                   destructive: true,
-                  disabled: trips.length === 0,
+                  disabled: !hasStoredData,
                   onSelect: () => setConfirmOpen(true),
                 },
               ]}
@@ -341,7 +347,7 @@ export default function TripsHomePage() {
         open={confirmOpen}
         onClose={closeConfirm}
         title="Clear all data?"
-        description="This removes everything Tourist has stored in this browser. It cannot be undone."
+        description="This removes everything Tourist has stored in this browser, apart from your light or dark theme. It cannot be undone."
         footer={
           <>
             <Button variant="ghost" onClick={closeConfirm}>
@@ -353,11 +359,11 @@ export default function TripsHomePage() {
           </>
         }
       >
-        <p className="text-body-md text-ink-muted">
-          {trips.length > 0
-            ? 'These trips, their itinerary drafts and every expense logged against them will be lost:'
-            : 'Any trips, itinerary drafts and expenses saved in this browser will be lost:'}
-        </p>
+        {trips.length > 0 ? (
+          <p className="text-body-md text-ink-muted">
+            These trips, their itinerary drafts, notes and every expense logged against them will be lost:
+          </p>
+        ) : null}
         {trips.length > 0 ? (
           <ul className="mt-3 flex list-none flex-col gap-2">
             {trips.map((trip) => (
@@ -371,6 +377,11 @@ export default function TripsHomePage() {
             ))}
           </ul>
         ) : null}
+        {/* The parts of the wipe a list of trips does not show. */}
+        <p className={`text-body-md text-ink-muted ${trips.length > 0 ? 'mt-3' : ''}`}>
+          Your name and email, if you signed in, and any backup copy of earlier data that Tourist
+          kept in this browser will be removed as well.
+        </p>
       </Dialog>
     </div>
   )

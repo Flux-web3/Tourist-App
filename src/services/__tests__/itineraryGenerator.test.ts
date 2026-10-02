@@ -1292,3 +1292,165 @@ describe('drafting by destination id', () => {
     }
   })
 })
+
+/**
+ * The meals of every bank and the time each is naturally eaten. A swap used to
+ * fall back to "same category" with the time-of-day test dropped, which for a
+ * food stop meant supper offered for a breakfast slot and breakfast for supper.
+ */
+const MEAL_TIMES: ReadonlyMap<string, string> = new Map([
+  ['Café crème and a croissant on a Saint-Germain terrace', '08:30'],
+  ['Market breakfast and produce run', '08:00'],
+  ['Long lunch at a classic bistro', '13:00'],
+  ['Picnic lunch at the Square du Vert-Galant', '12:30'],
+  ['Beigels on Brick Lane', '08:30'],
+  ['Lunch at Borough Market', '12:30'],
+  ['Dim sum in Chinatown', '12:30'],
+  ['Curry on Brick Lane', '19:00'],
+  ['Akara and pap breakfast', '08:00'],
+  ['Amala and ewedu at a local buka', '13:00'],
+  ['Ofada rice and ayamase for lunch', '12:30'],
+  ['Suya supper on Victoria Island', '19:30'],
+  ['Café breakfast near where you are staying', '08:30'],
+  ['A neighbourhood food market for lunch', '12:30'],
+  ['Dinner at a neighbourhood restaurant', '19:30'],
+])
+/** The generator's MAX_DRIFT_MINUTES: how far from its usual time a swap may sit. */
+const USUAL_TIME_MINUTES = 180
+
+describe('buildAlternativeItem and the time of day of a meal', () => {
+  it('never offers a meal for a slot far from when that meal is eaten', () => {
+    const wrong: string[] = []
+    let meals = 0
+    for (const plan of PLANS) {
+      for (const day of plan.days) {
+        for (const item of day.items) {
+          if (isTravelAnchor(item)) continue
+          for (const variant of [plan.variant, plan.variant + 1]) {
+            const alternative = buildAlternativeItem(plan.trip, day, item, variant, TIMESTAMP)
+            const usual = MEAL_TIMES.get(alternative.title)
+            if (usual === undefined) continue
+            meals += 1
+            if (Math.abs(timeToMinutes(usual) - startOf(alternative)) > USUAL_TIME_MINUTES) {
+              wrong.push(`${plan.label}: ${item.startTime} ${item.title} -> ${alternative.title}`)
+            }
+          }
+        }
+      }
+    }
+
+    expect(meals).toBeGreaterThan(100)
+    expect(wrong.slice(0, 5)).toEqual([])
+  })
+
+  it('does not turn a Lagos breakfast into supper, or supper into breakfast', () => {
+    const lagos = PLANS.filter((plan) => plan.place.destinationId === 'lagos')
+    const swaps = lagos.flatMap((plan) =>
+      plan.days.flatMap((day) =>
+        day.items
+          .filter((item) => MEAL_TIMES.has(item.title))
+          .flatMap((item) =>
+            [0, 1, 2, 3].map((variant) => ({
+              from: item,
+              to: buildAlternativeItem(plan.trip, day, item, variant, TIMESTAMP),
+            })),
+          ),
+      ),
+    )
+    const morningSupper = swaps.filter(
+      ({ from, to }) => startOf(from) < 11 * 60 && to.title === 'Suya supper on Victoria Island',
+    )
+    const eveningBreakfast = swaps.filter(
+      ({ from, to }) => startOf(from) >= EVENING && to.title === 'Akara and pap breakfast',
+    )
+
+    expect(swaps.length).toBeGreaterThan(100)
+    expect(morningSupper.map(({ from }) => `${from.startTime} ${from.title}`).slice(0, 5)).toEqual([])
+    expect(eveningBreakfast.map(({ from }) => `${from.startTime} ${from.title}`).slice(0, 5)).toEqual([])
+  })
+})
+
+/**
+ * A swap only ever saw the one day, so on a short curated trip about one swap
+ * in five offered a stop the traveller already had on another day. Given the
+ * whole trip's days, it offers something new while anything new is left.
+ */
+describe('buildAlternativeItem and stops planned on other days', () => {
+  const curated = PLANS.filter((plan) => plan.place.curated && (plan.length === 2 || plan.length === 3))
+
+  function repeats(withTripDays: boolean): string[] {
+    const found: string[] = []
+    for (const plan of curated) {
+      // The last morning has only a handful of stops short enough to fit
+      // before the departure, so it can run out of new ones; every other day
+      // has most of the bank still unused.
+      for (const day of plan.days.slice(0, -1)) {
+        const elsewhere = new Set(
+          plan.days.filter((other) => other !== day).flatMap((other) => other.items.map((entry) => entry.title)),
+        )
+        for (const item of day.items) {
+          if (isTravelAnchor(item)) continue
+          const alternative = withTripDays
+            ? buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP, plan.days)
+            : buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP)
+          if (elsewhere.has(alternative.title)) {
+            found.push(`${plan.label} day ${String(day.index)}: ${item.title} -> ${alternative.title}`)
+          }
+        }
+      }
+    }
+    return found
+  }
+
+  it('offers a stop that is on no other day when given the trip’s days', () => {
+    // Without the days the swap cannot know, and does repeat: the bug as reported.
+    expect(repeats(false).length).toBeGreaterThan(0)
+    expect(repeats(true).slice(0, 5)).toEqual([])
+  })
+
+  it('still never offers a stop already on the same day', () => {
+    for (const plan of curated) {
+      for (const day of plan.days) {
+        for (const item of day.items.filter((entry) => !isTravelAnchor(entry))) {
+          const alternative = buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP, plan.days)
+          expect(day.items.map((entry) => entry.title), plan.label).not.toContain(alternative.title)
+        }
+      }
+    }
+  })
+
+  it('repeats a stop rather than fail once every stop in the bank is planned', () => {
+    const plan = PLANS.find((entry) => entry.place.curated && entry.length === 30 && entry.trip.pace === 'packed')
+    if (!plan) throw new Error('the table has no 30-day packed curated plan')
+    const day = plan.days[10]
+    const item = day.items[0]
+
+    const alternative = buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP, plan.days)
+
+    expect(alternative.title).not.toBe(item.title)
+    expect(day.items.map((entry) => entry.title)).not.toContain(alternative.title)
+  })
+
+  it('gives the same suggestion as before when the days are left out or hold only that day', () => {
+    for (const plan of curated.slice(0, 12)) {
+      for (const day of plan.days) {
+        for (const item of day.items.filter((entry) => !isTravelAnchor(entry))) {
+          const without = buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP)
+          const alone = buildAlternativeItem(plan.trip, day, item, plan.variant, TIMESTAMP, [day])
+          expect(alone.title, plan.label).toBe(without.title)
+          expect(alone.endTime, plan.label).toBe(without.endTime)
+        }
+      }
+    }
+  })
+
+  it('still refuses to swap an arrival or departure', () => {
+    const plan = curated[0]
+    const arrival = plan.days[0].items.find((entry) => entry.role === 'arrival')
+    if (!arrival) throw new Error('the plan has no arrival')
+
+    expect(() => buildAlternativeItem(plan.trip, plan.days[0], arrival, 0, TIMESTAMP, plan.days)).toThrow(
+      AnchorSwapError,
+    )
+  })
+})

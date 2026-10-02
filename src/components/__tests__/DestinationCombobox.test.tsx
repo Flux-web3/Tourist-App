@@ -385,6 +385,29 @@ describe('DestinationCombobox support level', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'No destinations match "lisbon". Tourist covers a fixed set of cities in this prototype.',
     )
-    expect(screen.getByRole('listbox', { hidden: true })).toHaveAccessibleName('Cities')
+    // The empty list itself is not rendered: see the next test.
+    expect(screen.queryByRole('listbox', { hidden: true })).not.toBeInTheDocument()
+  })
+
+  it('shows no empty listbox when nothing matches, and says so truthfully', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(combobox(), 'lisbon')
+
+    // A listbox with no options is announced as a list of nothing.
+    expect(screen.queryByRole('listbox', { hidden: true })).not.toBeInTheDocument()
+    expect(combobox()).toHaveAttribute('aria-expanded', 'false')
+    expect(combobox()).not.toHaveAttribute('aria-controls')
+    expect(screen.getByText('No destinations match "lisbon"')).toBeVisible()
+
+    // A query that matches again brings the list, and the wiring, back.
+    await user.clear(combobox())
+    await user.type(combobox(), 'lon')
+
+    expect(combobox()).toHaveAttribute('aria-expanded', 'true')
+    const listboxId = combobox().getAttribute('aria-controls')
+    expect(document.getElementById(listboxId ?? '')).toBe(screen.getByRole('listbox'))
+    expect(optionNames()).toEqual(['London, United Kingdom'])
   })
 })

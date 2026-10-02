@@ -16,10 +16,30 @@ export interface DialogProps {
 }
 
 /**
+ * Makes everything on the page except `overlay` inert, and returns the undo.
+ *
+ * The dialog is portalled to `<body>`, so the page behind it is the overlay's
+ * siblings there (`#root` in the app). `aria-modal` alone is only a hint: the
+ * page stayed reachable by Tab, by a screen reader's browse mode and by a click
+ * that slipped past the scrim. Anything already inert is left alone, so it is
+ * still inert afterwards.
+ */
+function makeBackgroundInert(overlay: HTMLElement | null): () => void {
+  if (!overlay?.parentElement) return () => undefined
+  const silenced = [...overlay.parentElement.children].filter(
+    (element) => element !== overlay && !element.hasAttribute('inert'),
+  )
+  silenced.forEach((element) => element.setAttribute('inert', ''))
+  return () => silenced.forEach((element) => element.removeAttribute('inert'))
+}
+
+/**
  * Accessible modal: labelled, Escape to close, focus moved in on open and
- * restored on close, and Tab kept inside the dialog.
+ * restored on close, Tab kept inside the dialog, and the page behind it inert
+ * for as long as it is open.
  */
 export function Dialog({ open, onClose, title, description, children, footer, size = 'md' }: DialogProps) {
+  const overlayRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const restoreRef = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
@@ -50,8 +70,16 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         return
       }
       if (event.key !== 'Tab' || !panel) return
+      /*
+       * Hidden controls (a closed disclosure, say) are not tab stops. A browser
+       * says so through `offsetParent`; an environment with no layout at all
+       * reports null for everything, the panel included, and there nothing is
+       * filtered out.
+       */
+      const hasLayout = panel.offsetParent !== null
+      const active = document.activeElement
       const focusable = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-        (element) => element.offsetParent !== null || element === document.activeElement,
+        (element) => !hasLayout || element.offsetParent !== null || element === active,
       )
       if (focusable.length === 0) {
         event.preventDefault()
@@ -60,10 +88,17 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       }
       const firstElement = focusable[0]
       const lastElement = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === firstElement) {
+      /*
+       * Focus can sit on the panel itself (it takes focus when its text is
+       * clicked, and it is not a tab stop) or, should anything ever put it
+       * there, outside the dialog. From either place the browser's own Tab
+       * order leads out to the page behind, so Tab is answered here.
+       */
+      const isAdrift = active === panel || !panel.contains(active)
+      if (event.shiftKey && (isAdrift || active === firstElement)) {
         event.preventDefault()
         lastElement.focus()
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
+      } else if (!event.shiftKey && (isAdrift || active === lastElement)) {
         event.preventDefault()
         firstElement.focus()
       }
@@ -72,10 +107,13 @@ export function Dialog({ open, onClose, title, description, children, footer, si
     document.addEventListener('keydown', onKeyDown, true)
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    const restoreBackground = makeBackgroundInert(overlayRef.current)
 
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
       document.body.style.overflow = previousOverflow
+      // Before focus goes back: an inert opener cannot take it.
+      restoreBackground()
       /*
        * Deleting a record from its own menu removes the control that opened the
        * dialog, and focusing a detached node silently drops focus to <body>,
@@ -91,7 +129,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+    <div ref={overlayRef} className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
       <div
         className="absolute inset-0 bg-scrim"
         onClick={() => onCloseRef.current()}

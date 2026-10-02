@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { EditNoteDialog, NoteFormDialog } from '@/components/NoteFormDialog'
 import { ActionMenu } from '@/components/ui/ActionMenu'
@@ -20,6 +20,10 @@ function displayTitle(note: TripNote): string {
   if (trimmed) return trimmed
   const firstLine = note.body.trim().split('\n').find((line) => line.trim().length > 0)
   return firstLine ? firstLine.trim() : 'Untitled note'
+}
+
+function noteElementId(noteId: string): string {
+  return `note-${noteId}`
 }
 
 function countLabel(count: number, singular: string, plural: string): string {
@@ -93,6 +97,23 @@ export default function NotesPage() {
       { key: 'pinned', title: 'Pinned', notes: pinned },
       { key: 'rest', title: 'Everything else', notes: rest },
     ].filter((group) => group.notes.length > 0)
+  }, [notes])
+
+  /*
+    Pinning or unpinning moves a note into another group. React mounts it there
+    afresh, so the menu button that had focus no longer exists and focus fell
+    to <body>. The note that was toggled is remembered here and its new menu
+    button takes focus once the list has been redrawn.
+  */
+  const pinToggledNoteId = useRef<string | null>(null)
+  useEffect(() => {
+    const noteId = pinToggledNoteId.current
+    if (noteId === null) return
+    pinToggledNoteId.current = null
+    document
+      .getElementById(noteElementId(noteId))
+      ?.querySelector<HTMLElement>('button[aria-haspopup="menu"]')
+      ?.focus()
   }, [notes])
 
   if (!hydrated) {
@@ -207,7 +228,7 @@ export default function NotesPage() {
                   const updated =
                     note.updatedAt === note.createdAt ? null : naturalTime(note.updatedAt)
                   return (
-                    <li key={note.id}>
+                    <li key={note.id} id={noteElementId(note.id)}>
                       <Card
                         as="article"
                         className={`flex flex-col gap-3 ${
@@ -237,7 +258,10 @@ export default function NotesPage() {
                               {
                                 label: note.pinned ? 'Unpin' : 'Pin',
                                 icon: note.pinned ? 'keep_off' : 'push_pin',
-                                onSelect: () => actions.toggleNotePin(trip.id, note.id),
+                                onSelect: () => {
+                                  pinToggledNoteId.current = note.id
+                                  actions.toggleNotePin(trip.id, note.id)
+                                },
                               },
                               { label: 'Edit', icon: 'edit', onSelect: () => setEditing(note) },
                               {

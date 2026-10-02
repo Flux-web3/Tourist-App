@@ -87,6 +87,12 @@ export function DestinationCombobox({
   const optionId = (destination: Destination) => `${fieldId}-option-${destination.id}`
   const trimmedQuery = (query ?? '').trim()
   const noMatches = open && options.length === 0
+  /*
+    With nothing to offer there is no listbox at all: an empty one is announced
+    as a list of nothing. The no-match message takes its place, and the input
+    stops claiming an expanded popup or pointing at an id that is not there.
+  */
+  const hasOptions = options.length > 0
 
   const close = () => {
     setQuery(null)
@@ -198,8 +204,8 @@ export function DestinationCombobox({
           type="text"
           role="combobox"
           aria-autocomplete="list"
-          aria-expanded={open}
-          aria-controls={listboxId}
+          aria-expanded={open && hasOptions}
+          aria-controls={hasOptions ? listboxId : undefined}
           aria-activedescendant={active ? optionId(active) : undefined}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
@@ -237,6 +243,7 @@ export function DestinationCombobox({
           onMouseDown={(event) => event.preventDefault()}
           className="surface-raised absolute inset-x-0 top-full z-40 mt-1 max-h-72 rounded-control overflow-y-auto overscroll-contain p-1"
         >
+          {hasOptions ? (
           <ul id={listboxId} role="listbox" aria-label="Cities">
             {options.map((destination, index) => {
               const highlighted = index === activeIndex
@@ -261,7 +268,7 @@ export function DestinationCombobox({
                     if (!highlighted) setActiveIndex(index)
                   }}
                   className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-control px-3 py-2 ${
-                    highlighted ? 'bg-surface-high' : ''
+                    highlighted ? 'bg-surface-high shadow-[inset_3px_0_0_var(--navy)]' : ''
                   }`}
                 >
                   <span className="min-w-0 flex-1">
@@ -291,6 +298,7 @@ export function DestinationCombobox({
               )
             })}
           </ul>
+          ) : null}
           {noMatches ? (
             <div aria-hidden="true" className="px-3 py-2">
               <p className="text-label-lg text-ink">{`No destinations match "${trimmedQuery}"`}</p>

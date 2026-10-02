@@ -1,28 +1,34 @@
+import { normalise } from '@/data/destinations'
 import { EXPERIENCES, EXPERIENCES_BY_ID } from '@/data/experiences'
 import type { Experience } from '@/domain/types'
 import type { PlaceService } from './contracts'
 
-function matchesText(experience: Experience, needle: string): boolean {
-  if (!needle) return true
-  const haystack = [
-    experience.name,
-    experience.summary,
-    experience.neighborhood,
-    experience.city,
-    experience.category,
-    ...experience.tags,
-  ]
-    .join(' ')
-    .toLowerCase()
-  return haystack.includes(needle)
+/**
+ * Every word of the query has to appear somewhere in the place's text, in any
+ * order, with accents, apostrophes, case and spacing ignored on both sides:
+ * `sacre coeur`, `d'orsay` and `tower london` all find their place.
+ */
+function matchesText(experience: Experience, words: readonly string[]): boolean {
+  if (words.length === 0) return true
+  const haystack = normalise(
+    [
+      experience.name,
+      experience.summary,
+      experience.neighborhood,
+      experience.city,
+      experience.category,
+      ...experience.tags,
+    ].join(' '),
+  )
+  return words.every((word) => haystack.includes(word))
 }
 
 function score(experience: Experience, needle: string): number {
   if (!needle) return 0
-  const name = experience.name.toLowerCase()
+  const name = normalise(experience.name)
   if (name.startsWith(needle)) return 3
   if (name.includes(needle)) return 2
-  if (experience.tags.some((tag) => tag.toLowerCase().includes(needle))) return 1
+  if (experience.tags.some((tag) => normalise(tag).includes(needle))) return 1
   return 0
 }
 
@@ -33,7 +39,8 @@ function score(experience: Experience, needle: string): number {
  */
 export const placeService: PlaceService = {
   async search(query) {
-    const needle = query.text.trim().toLowerCase()
+    const words = normalise(query.text).split(' ').filter(Boolean)
+    const needle = words.join(' ')
     const maxPrice = query.maxPrice
     const destinationId = query.destinationId
 
@@ -44,7 +51,7 @@ export const placeService: PlaceService = {
       if (destinationId !== null && experience.destinationId !== destinationId) return false
       if (query.category !== 'all' && experience.category !== query.category) return false
       if (maxPrice !== null && maxPrice !== undefined && experience.priceFrom > maxPrice) return false
-      return matchesText(experience, needle)
+      return matchesText(experience, words)
     }).sort((a, b) => {
       const byScore = score(b, needle) - score(a, needle)
       if (byScore !== 0) return byScore

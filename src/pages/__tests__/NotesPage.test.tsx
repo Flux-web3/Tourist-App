@@ -394,4 +394,30 @@ describe('NotesPage', () => {
       expect(screen.queryByRole('heading', { level: 3, name: 'Flight reference' })).not.toBeInTheDocument()
     })
   })
+
+  /*
+    Pinning moves a note into another group, which React mounts afresh, so the
+    menu button that had focus is gone and focus used to fall to <body>.
+  */
+  describe('focus after pinning', () => {
+    it('stays on the note that was pinned', async () => {
+      const user = userEvent.setup()
+      renderNotes()
+
+      await chooseNoteAction(user, 'Dinner booking', 'Pin')
+
+      expect(within(screen.getByRole('region', { name: 'Pinned' })).getByText('Dinner booking')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Actions for Dinner booking' })).toHaveFocus()
+    })
+
+    it('stays on the note that was unpinned', async () => {
+      const user = userEvent.setup()
+      renderNotes()
+
+      await chooseNoteAction(user, 'Flight reference', 'Unpin')
+
+      expect(screen.queryByRole('region', { name: 'Pinned' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Actions for Flight reference' })).toHaveFocus()
+    })
+  })
 })

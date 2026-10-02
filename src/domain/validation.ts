@@ -1,5 +1,5 @@
 import { getDestination } from '@/data/destinations'
-import { CURRENCIES, CURRENCY_MAGNITUDE } from './money'
+import { CURRENCIES, CURRENCY_MAGNITUDE, toCents } from './money'
 import { parseISODate, todayISO, tripLengthInDays } from './format'
 import type { CurrencyCode, TripDraft, TripDraftErrors } from './types'
 
@@ -152,7 +152,9 @@ export function validateTripDraft(
     errors.travelers = `Up to ${TRIP_LIMITS.maxTravelers} travellers.`
   }
 
-  if (!Number.isFinite(draft.budget) || draft.budget <= 0) {
+  // Judged in whole minor units, the scale the budget is stored and totalled
+  // on: 0.001 EUR or 0.4 JPY is positive as typed but rounds to no budget at all.
+  if (!Number.isFinite(draft.budget) || toCents(draft.budget, draft.currency) <= 0) {
     errors.budget = 'Enter a budget greater than 0.'
   } else if (draft.budget > maxBudgetFor(draft.currency)) {
     errors.budget = 'That budget looks unrealistic. Enter a lower amount.'

@@ -1824,6 +1824,16 @@ export function buildItinerary(trip: Trip, variant = 0, timestamp = new Date().t
  * stop; any finished by midnight. The end time is recomputed from the new
  * stop's own duration.
  *
+ * A meal is only ever offered at about its usual time. The later preferences
+ * give up on the time of day, which is fine for a walk or a gallery, but for a
+ * food stop it offered supper for a 09:15 breakfast slot and breakfast for a
+ * 19:30 supper.
+ *
+ * `tripDays` is the whole trip's days, when the caller has them. A stop already
+ * planned on another day is then offered only once nothing new is left: with
+ * the one day to go on, about one swap in five on a short trip repeated a stop
+ * from elsewhere in the plan. Left out, the swap behaves as it always did.
+ *
  * Seeded on the slot's content rather than the item's generated id, so the same
  * day, item and variant give the same suggestion in any process.
  */
@@ -1833,6 +1843,7 @@ export function buildAlternativeItem(
   item: ItineraryItem,
   variant = 0,
   timestamp = new Date().toISOString(),
+  tripDays: readonly ItineraryDay[] = [],
 ): ItineraryItem {
   if (isTravelAnchor(item)) throw new AnchorSwapError()
 
@@ -1872,14 +1883,23 @@ export function buildAlternativeItem(
       .map((other) => bookable.find((template) => template.title === other.title)?.meal)
       .filter((meal) => meal !== undefined),
   )
-  const fresh = (daytimeSafe.length > 0 ? daytimeSafe : offered).filter(
-    (template) =>
-      !onDay.has(template.title) && (template.meal === undefined || !mealsElsewhere.has(template.meal)),
-  )
-
-  const sameCategory = (template: DraftTemplate): boolean => template.category === item.category
   const usualTime = (template: DraftTemplate): boolean =>
     !timed || Math.abs(timeToMinutes(template.startTime) - start) <= MAX_DRIFT_MINUTES
+  // Held to on every path below, the last resort included.
+  const mealAtMealTime = (template: DraftTemplate): boolean =>
+    template.meal === undefined || usualTime(template)
+  const fresh = (daytimeSafe.length > 0 ? daytimeSafe : offered).filter(
+    (template) =>
+      !onDay.has(template.title) &&
+      mealAtMealTime(template) &&
+      (template.meal === undefined || !mealsElsewhere.has(template.meal)),
+  )
+  const onOtherDays = new Set(
+    tripDays.filter((other) => other.id !== day.id).flatMap((other) => other.items.map((entry) => entry.title)),
+  )
+  const unplanned = fresh.filter((template) => !onOtherDays.has(template.title))
+
+  const sameCategory = (template: DraftTemplate): boolean => template.category === item.category
   const beforeNext = (template: DraftTemplate): boolean =>
     start + template.durationMinutes <= nextStart - BUFFER_MINUTES
   const beforeMidnight = (template: DraftTemplate): boolean =>
@@ -1893,10 +1913,13 @@ export function buildAlternativeItem(
     beforeMidnight,
     () => true,
   ]
+  const firstTier = (templates: readonly DraftTemplate[]): DraftTemplate[] | undefined =>
+    tiers.map((tier) => templates.filter(tier)).find((tier) => tier.length > 0)
   const candidates =
-    tiers.map((tier) => fresh.filter(tier)).find((tier) => tier.length > 0) ??
+    firstTier(unplanned) ??
+    firstTier(fresh) ??
     // Only reachable if the day already holds every stop that fits.
-    offered.filter((template) => template.title !== item.title)
+    offered.filter((template) => template.title !== item.title && mealAtMealTime(template))
   if (candidates.length === 0) {
     throw new Error(
       beforeDeparture

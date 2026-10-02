@@ -239,7 +239,8 @@ describe('CreateTripPage', () => {
       interests: ['culture'],
       pace: 'packed',
       notes: 'Vegetarian, no museums before 11am.',
-      status: 'draft',
+      // The plan is drafted as the trip is created, so it is not a bare draft.
+      status: 'itinerary_ready',
     })
   })
 

@@ -37,6 +37,12 @@ export function demoStateFor(tripId: string = TEST_TRIP_ID, user?: User): Persis
     expensesByTrip: {
       [tripId]: expenses.map((expense) => ({ ...expense, tripId })),
     },
+    /**
+     * The demo's notes are filed under the demo trip's own id, which this state
+     * no longer has. They were never reachable from the re-keyed trip, and a
+     * bucket with no trip now reads as damaged data, so they are left out.
+     */
+    notesByTrip: {},
     generation: generation ? { [tripId]: generation } : {},
   }
 }

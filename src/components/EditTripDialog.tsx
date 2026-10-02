@@ -107,6 +107,7 @@ export function EditTripDialog({
   const [draft, setDraft] = useState<TripDraft>(() => toDraft(trip))
   const [errors, setErrors] = useState<TripDraftErrors>({})
   const [submitted, setSubmitted] = useState(false)
+  const [failedSubmits, setFailedSubmits] = useState(0)
   const formId = useId()
   const changeSummaryId = useId()
   const summaryRef = useRef<HTMLDivElement>(null)
@@ -116,13 +117,18 @@ export function EditTripDialog({
     setDraft(toDraft(trip))
     setErrors({})
     setSubmitted(false)
+    setFailedSubmits(0)
   }, [open, trip])
 
+  /*
+    Focus moves to the summary only because a submit just failed. Tying it to
+    the error list instead pulled focus out of a field every time typing
+    cleared one of its errors, and the rest of the word was lost. The counter
+    also changes on a second failed submit, so that one is announced too.
+  */
   useEffect(() => {
-    if (open && submitted && Object.keys(errors).length > 0) {
-      summaryRef.current?.focus()
-    }
-  }, [errors, open, submitted])
+    if (failedSubmits > 0) summaryRef.current?.focus()
+  }, [failedSubmits])
 
   /**
    * Editing an existing trip is not creating one: a start date that has already
@@ -153,7 +159,10 @@ export function EditTripDialog({
     setSubmitted(true)
     const result = validateTripDraft(draft, validationContext)
     setErrors(result.errors)
-    if (!result.isValid) return
+    if (!result.isValid) {
+      setFailedSubmits((count) => count + 1)
+      return
+    }
     actions.updateTrip(trip.id, {
       ...draft,
       name: draft.name.trim() || suggestTripName(draft.destination, draft.startDate, draft.destinationId),

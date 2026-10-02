@@ -128,6 +128,7 @@ export default function TripOverviewPage() {
     return (
       <EmptyState
         icon="search_off"
+        headingLevel={1}
         title="We could not find that trip"
         description="It may have been deleted, or the link is out of date. Your other trips are still saved on this device."
         action={

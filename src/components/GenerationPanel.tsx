@@ -3,7 +3,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button, Spinner } from '@/components/ui/Button'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { Icon } from '@/components/ui/Icon'
-import { formatAmount } from '@/domain/money'
+import { ESTIMATE_PER_PERSON_NOTE, formatAmount } from '@/domain/money'
 import { DRAFT_PRICE_CURRENCY } from '@/services/itineraryGenerator'
 import { PROTOTYPE_LABEL, describeTripGuide } from '@/lib/labels'
 import { summariseDraft } from '@/services'
@@ -137,6 +137,7 @@ export function DraftProvenanceNote({ trip }: { trip: Pick<Trip, 'destinationId'
               : `the ${PROTOTYPE_LABEL.curatedGuide.toLowerCase()} demo catalogue for ${place}`
           }, so nothing leaves this device and the same trip always produces the same draft. Every price is an estimate: ${PROTOTYPE_LABEL.informationMayChange.toLowerCase()}.`}
         </p>
+        <p className="mt-2">{ESTIMATE_PER_PERSON_NOTE}</p>
         <p className="mt-2">
           <strong className="font-semibold">Regenerating never takes your own work away.</strong> It
           replaces {PROTOTYPE_LABEL.aiDraft} suggestions, but it always keeps the activities you added

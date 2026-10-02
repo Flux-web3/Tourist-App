@@ -19,8 +19,17 @@ export function toISODate(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
+/**
+ * The traveller's own calendar date, from the local clock. Not `toISODate(new
+ * Date())`: that is the UTC date, which is already tomorrow every evening in
+ * New York and still yesterday just after midnight in Lagos or Tokyo.
+ */
 export function todayISO(): string {
-  return toISODate(new Date())
+  const now = new Date()
+  const year = String(now.getFullYear()).padStart(4, '0')
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 export function addDays(iso: string, days: number): string {

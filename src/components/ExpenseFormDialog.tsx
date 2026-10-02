@@ -7,6 +7,7 @@ import { parseISODate, todayISO } from '@/domain/format'
 import { CURRENCY_SYMBOLS, formatAmount, fromCents, toCents } from '@/domain/money'
 import { EXPENSE_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist } from '@/state/useTourist'
+import { maxBudgetFor } from '@/domain/validation'
 import type { CurrencyCode, Expense, ExpenseCategory, Trip } from '@/domain/types'
 
 const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = [
@@ -67,6 +68,10 @@ function validateExpense(draft: ExpenseDraft, currency: CurrencyCode): ExpenseEr
     // Positive, but below the currency's smallest unit, so it would be stored
     // as nothing. Said here rather than left for the domain to reject.
     errors.amount = `Enter at least ${formatAmount(fromCents(1, currency), currency)}.`
+  } else if (draft.amount > maxBudgetFor(currency)) {
+    // No single expense can be more than the largest budget a trip may have in
+    // this currency. Without a ceiling `1e21` was accepted and stored.
+    errors.amount = 'That amount looks unrealistic. Enter a lower amount.'
   }
   if (!parseISODate(draft.date)) {
     errors.date = 'Choose the date you paid.'
@@ -78,7 +83,7 @@ function ExpenseForm({
   formId,
   draft,
   errors,
-  submitted,
+  failedSubmits,
   currency,
   tripCurrency,
   onPatch,
@@ -87,7 +92,8 @@ function ExpenseForm({
   formId: string
   draft: ExpenseDraft
   errors: ExpenseErrors
-  submitted: boolean
+  /** How many submits have failed since the dialog opened. */
+  failedSubmits: number
   /** The currency this expense is (or will be) stored in. */
   currency: CurrencyCode
   /** The trip's currency, which is what its totals are counted in. */
@@ -99,9 +105,15 @@ function ExpenseForm({
   const messages = Object.values(errors).filter((message): message is string => Boolean(message))
   const messageCount = messages.length
 
+  /*
+    Focus moves to the summary only because a submit just failed. Tying it to
+    the error list instead pulled focus out of a field every time typing
+    cleared one of its errors, and the rest of the word was lost. The counter
+    also changes on a second failed submit, so that one is announced too.
+  */
   useEffect(() => {
-    if (submitted && messageCount > 0) summaryRef.current?.focus()
-  }, [messageCount, submitted])
+    if (failedSubmits > 0) summaryRef.current?.focus()
+  }, [failedSubmits])
 
   return (
     <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-5">
@@ -142,6 +154,7 @@ function ExpenseForm({
           label="Amount"
           required
           min={0}
+          max={maxBudgetFor(currency)}
           step={fromCents(1, currency)}
           value={draft.amount}
           prefix={CURRENCY_SYMBOLS[currency]}
@@ -208,6 +221,7 @@ export function ExpenseFormDialog({
   const [draft, setDraft] = useState<ExpenseDraft>(emptyDraft)
   const [errors, setErrors] = useState<ExpenseErrors>({})
   const [submitted, setSubmitted] = useState(false)
+  const [failedSubmits, setFailedSubmits] = useState(0)
   const formId = useId()
   // A new expense is always stored in the trip's current currency.
   const currency = trip.currency
@@ -217,6 +231,7 @@ export function ExpenseFormDialog({
     setDraft(emptyDraft())
     setErrors({})
     setSubmitted(false)
+    setFailedSubmits(0)
   }, [open])
 
   const patch = useCallback(
@@ -233,7 +248,10 @@ export function ExpenseFormDialog({
     setSubmitted(true)
     const result = validateExpense(draft, currency)
     setErrors(result)
-    if (Object.keys(result).length > 0) return
+    if (Object.keys(result).length > 0) {
+      setFailedSubmits((count) => count + 1)
+      return
+    }
     actions.addExpense({
       tripId: trip.id,
       description: draft.description.trim(),
@@ -272,7 +290,7 @@ export function ExpenseFormDialog({
         formId={formId}
         draft={draft}
         errors={errors}
-        submitted={submitted}
+        failedSubmits={failedSubmits}
         currency={currency}
         tripCurrency={trip.currency}
         onPatch={patch}
@@ -297,6 +315,7 @@ export function EditExpenseDialog({
   const [draft, setDraft] = useState<ExpenseDraft>(emptyDraft)
   const [errors, setErrors] = useState<ExpenseErrors>({})
   const [submitted, setSubmitted] = useState(false)
+  const [failedSubmits, setFailedSubmits] = useState(0)
   const formId = useId()
   // An edit never changes an expense's currency (the patch below does not send
   // one), so the amount is read, validated and rounded in the currency it was
@@ -308,6 +327,7 @@ export function EditExpenseDialog({
     setDraft(toDraft(expense))
     setErrors({})
     setSubmitted(false)
+    setFailedSubmits(0)
   }, [open, expense])
 
   const patch = useCallback(
@@ -326,7 +346,10 @@ export function EditExpenseDialog({
     setSubmitted(true)
     const result = validateExpense(draft, currency)
     setErrors(result)
-    if (Object.keys(result).length > 0) return
+    if (Object.keys(result).length > 0) {
+      setFailedSubmits((count) => count + 1)
+      return
+    }
     actions.updateExpense(expense.id, {
       description: draft.description.trim(),
       amount: settledAmount(draft.amount, currency),
@@ -364,7 +387,7 @@ export function EditExpenseDialog({
         formId={formId}
         draft={draft}
         errors={errors}
-        submitted={submitted}
+        failedSubmits={failedSubmits}
         currency={currency}
         tripCurrency={trip.currency}
         onPatch={patch}

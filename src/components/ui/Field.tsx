@@ -2,7 +2,7 @@ import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectH
 
 /** `min-h-11` keeps every control on the 44px touch floor; `py-2.5` left them at 43. */
 export const CONTROL_CLASS =
-  'w-full min-h-11 rounded-control border border-line-strong bg-surface px-3 py-2.5 text-body-md text-ink placeholder:text-ink-subtle transition-colors focus:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus disabled:bg-surface-low disabled:text-ink-subtle'
+  'w-full min-h-11 rounded-control border border-field bg-surface px-3 py-2.5 text-body-md text-ink placeholder:text-ink-subtle transition-colors focus:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus disabled:bg-surface-low disabled:text-ink-subtle'
 
 function describedBy(id: string, hint?: string, error?: string): string | undefined {
   const ids = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean)
@@ -288,7 +288,7 @@ export function RadioChipGroup<T extends string>({
                 } ${
                   checked
                     ? 'border-btn-primary bg-btn-primary text-btn-primary-fg'
-                    : 'border-line-strong bg-surface text-ink hover:bg-surface-low'
+                    : 'border-field bg-surface text-ink hover:bg-surface-low'
                 }`}
               >
                 <span className="text-label-lg">{option.label}</span>
@@ -369,7 +369,7 @@ export function CheckboxChipGroup<T extends string>({
                 className={`inline-flex min-h-11 cursor-pointer items-center rounded-pill border px-4 text-label-lg capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
                   checked
                     ? 'border-btn-primary bg-btn-primary text-btn-primary-fg'
-                    : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-low'
+                    : 'border-field bg-surface text-ink-muted hover:bg-surface-low'
                 }`}
               >
                 {option.label}

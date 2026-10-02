@@ -572,6 +572,26 @@ describe('validateTripDraft rejects budget', () => {
     expect(validateTripDraft(draftWith({ budget: Number.NaN })).errors.budget).toBeDefined()
   })
 
+  it('rejects a budget below the smallest unit of its currency, which would round to no budget', () => {
+    freezeClock()
+    expect(validateTripDraft(draftWith({ currency: 'EUR', budget: 0.001 })).errors.budget).toBe(
+      'Enter a budget greater than 0.',
+    )
+    expect(validateTripDraft(draftWith({ currency: 'JPY', budget: 0.4 })).errors.budget).toBe(
+      'Enter a budget greater than 0.',
+    )
+    // 0.01 is the smallest euro amount, but half a yen is still no yen at all.
+    expect(validateTripDraft(draftWith({ currency: 'JPY', budget: 0.01 })).errors.budget).toBe(
+      'Enter a budget greater than 0.',
+    )
+  })
+
+  it('accepts the smallest amount each currency can actually hold', () => {
+    freezeClock()
+    expect(validateTripDraft(draftWith({ currency: 'EUR', budget: 0.01 })).errors.budget).toBeUndefined()
+    expect(validateTripDraft(draftWith({ currency: 'JPY', budget: 1 })).errors.budget).toBeUndefined()
+  })
+
   it('rejects a budget above 1,000,000', () => {
     freezeClock()
     expect(validateTripDraft(draftWith({ budget: 1_000_001 })).errors.budget).toBe(

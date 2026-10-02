@@ -371,7 +371,7 @@ describe('ItineraryItemCard', () => {
   })
 
   describe('the move panel', () => {
-    it('lists the other days, takes focus, and moves the stop once a day is chosen', async () => {
+    it('lists the other days, takes focus, and moves the stop once Move is pressed', async () => {
       const user = userEvent.setup()
       const onMove = vi.fn()
       renderCard({ days: [DAY_ONE, DAY_TWO], moving: true, onMove })
@@ -386,8 +386,55 @@ describe('ItineraryItemCard', () => {
       expect(screen.getAllByRole('option')).toHaveLength(2)
 
       await user.selectOptions(select, 'day-2')
+      await user.click(screen.getByRole('button', { name: 'Move' }))
 
       expect(onMove).toHaveBeenCalledExactlyOnceWith('day-2')
+    })
+
+    /*
+      On Windows, ArrowDown on a closed select fires `change` for every option
+      it passes. Moving on change meant a keyboard user could only ever reach
+      the first other day, and the stop left before they had finished choosing.
+    */
+    it('does not move the stop when the day is only chosen', async () => {
+      const user = userEvent.setup()
+      const onMove = vi.fn()
+      const DAY_THREE = makeDay('day-3', '2026-03-12', 2, [])
+      renderCard({ days: [DAY_ONE, DAY_TWO, DAY_THREE], moving: true, onMove })
+
+      const select = screen.getByLabelText('Move Louvre highlights to another day')
+      await user.selectOptions(select, 'day-2')
+      await user.selectOptions(select, 'day-3')
+
+      expect(onMove).not.toHaveBeenCalled()
+      expect(select).toHaveValue('day-3')
+
+      await user.click(screen.getByRole('button', { name: 'Move' }))
+      expect(onMove).toHaveBeenCalledExactlyOnceWith('day-3')
+    })
+
+    it('has nothing to move to until a day is chosen', async () => {
+      const user = userEvent.setup()
+      const onMove = vi.fn()
+      renderCard({ days: [DAY_ONE, DAY_TWO], moving: true, onMove })
+
+      const move = screen.getByRole('button', { name: 'Move' })
+      expect(move).toBeDisabled()
+
+      await user.selectOptions(screen.getByLabelText('Move Louvre highlights to another day'), 'day-2')
+      expect(move).toBeEnabled()
+      expect(onMove).not.toHaveBeenCalled()
+    })
+
+    it('forgets a chosen day when the panel is cancelled and opened again', async () => {
+      const user = userEvent.setup()
+      const { rerender, props } = renderCard({ days: [DAY_ONE, DAY_TWO], moving: true })
+      await user.selectOptions(screen.getByLabelText('Move Louvre highlights to another day'), 'day-2')
+
+      rerender(<ItineraryItemCard {...props} moving={false} />)
+      rerender(<ItineraryItemCard {...props} moving />)
+
+      expect(screen.getByLabelText('Move Louvre highlights to another day')).toHaveValue('')
     })
 
     it('can be dismissed without moving the stop', async () => {

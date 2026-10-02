@@ -164,6 +164,98 @@ describe('Dialog', () => {
     expect(dialog).toContainElement(document.activeElement as HTMLElement)
   })
 
+  it('sends Shift+Tab from the dialog panel itself to the last control inside it', async () => {
+    const user = userEvent.setup()
+    render(<Harness onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open trip details' }))
+    const dialog = screen.getByRole('dialog', { name: 'Trip details' })
+
+    // Clicking the dialog's text focuses the panel, which is not a tab stop,
+    // so Shift+Tab used to walk straight out to the page behind.
+    dialog.focus()
+    expect(document.activeElement).toBe(dialog)
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Save details' }))
+
+    dialog.focus()
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close dialog' }))
+  })
+
+  it('pulls focus back in when Tab is pressed from outside the dialog', async () => {
+    const user = userEvent.setup()
+    render(<Harness onClose={vi.fn()} />)
+
+    const trigger = screen.getByRole('button', { name: 'Open trip details' })
+    await user.click(trigger)
+
+    trigger.focus()
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close dialog' }))
+
+    trigger.focus()
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Save details' }))
+  })
+
+  it('makes the page behind inert while open, and gives it back on close', async () => {
+    const user = userEvent.setup()
+    render(<Harness onClose={vi.fn()} />)
+
+    const trigger = screen.getByRole('button', { name: 'Open trip details' })
+    expect(trigger.closest('[inert]')).toBeNull()
+
+    await user.click(trigger)
+    const dialog = screen.getByRole('dialog', { name: 'Trip details' })
+    expect(trigger.closest('[inert]')).not.toBeNull()
+    // The dialog is portalled beside the page, so it stays interactive.
+    expect(dialog.closest('[inert]')).toBeNull()
+
+    await user.keyboard('{Escape}')
+    expect(document.querySelector('[inert]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('gives the page back when an open dialog is unmounted', () => {
+    const { unmount } = render(
+      <>
+        <p>Page behind</p>
+        <Dialog open onClose={vi.fn()} title="Trip details">
+          <p>Body copy</p>
+        </Dialog>
+      </>,
+    )
+    expect(screen.getByText('Page behind').closest('[inert]')).not.toBeNull()
+
+    unmount()
+    expect(document.querySelector('[inert]')).toBeNull()
+  })
+
+  it('leaves inert alone on anything that was already inert, and survives a re-render', () => {
+    const outsider = document.createElement('div')
+    outsider.setAttribute('inert', '')
+    document.body.appendChild(outsider)
+    try {
+      const { rerender, unmount } = render(
+        <Dialog open onClose={vi.fn()} title="Trip details">
+          <p>Body copy</p>
+        </Dialog>,
+      )
+      rerender(
+        <Dialog open onClose={vi.fn()} title="Trip details, renamed">
+          <p>Body copy</p>
+        </Dialog>,
+      )
+      expect(screen.getByRole('dialog').closest('[inert]')).toBeNull()
+
+      unmount()
+      expect(outsider).toHaveAttribute('inert')
+    } finally {
+      outsider.remove()
+    }
+  })
+
   it('always calls the newest onClose, even when it changes without reopening', () => {
     const first = vi.fn()
     const second = vi.fn()

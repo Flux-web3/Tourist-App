@@ -79,6 +79,15 @@ export interface PersistenceSalvage {
    */
   orphanedDayBuckets: number
   /**
+   * Day, expense and note buckets that still held records but were filed under
+   * a trip that is not in the snapshot: one the salvage pass had to drop, or
+   * one that was never there. Nothing in the app can reach a bucket without its
+   * trip, so keeping it would only re-save it for ever. Counted per bucket.
+   * A bucket that was already empty is pruned without being counted, since
+   * nothing is lost with it.
+   */
+  orphanedBuckets: number
+  /**
    * Catalogue stops whose experience is no longer in the catalogue (or that
    * never named one), so their currency could not be confirmed and was taken
    * from the trip. These are *kept*, not dropped - counted so a caller can flag
@@ -141,7 +150,15 @@ export interface PersistenceService {
   /** The same read, with the detail needed to tell the traveller what happened. */
   loadDetailed(): PersistenceLoadResult
   save(state: PersistedState): PersistenceSaveResult
+  /** Removes the live payload, keeping a copy of it in the backup slot. */
   clear(): void
+  /** True when the backup slot holds a copy of an earlier payload. */
+  hasBackup(): boolean
+  /**
+   * Removes the backup copy and nothing else. This is the one deliberate
+   * destruction without a copy: it is what makes "Clear all data" true.
+   */
+  discardBackup(): void
 }
 
 export interface TripMutationResult {
@@ -168,6 +185,8 @@ export interface ItineraryService {
     trip: Trip
     day: ItineraryDay
     item: ItineraryItem
+    /** Every day of the trip, so the alternative is not a stop already planned elsewhere. */
+    days?: readonly ItineraryDay[]
     shouldFail?: boolean
     variant?: number
   }): Promise<ItineraryItem>

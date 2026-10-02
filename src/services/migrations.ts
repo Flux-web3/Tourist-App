@@ -139,6 +139,7 @@ export function noSalvage(): PersistenceSalvage {
     notes: 0,
     generation: 0,
     orphanedDayBuckets: 0,
+    orphanedBuckets: 0,
     unmatchedCatalogItems: 0,
     rebuiltUser: false,
   }
@@ -154,6 +155,7 @@ export function isCleanSalvage(salvage: PersistenceSalvage): boolean {
     salvage.notes === 0 &&
     salvage.generation === 0 &&
     salvage.orphanedDayBuckets === 0 &&
+    salvage.orphanedBuckets === 0 &&
     !salvage.rebuiltUser
   )
 }
@@ -168,6 +170,7 @@ export function describeSalvage(salvage: PersistenceSalvage): string {
   if (salvage.notes) parts.push(`${salvage.notes} note(s)`)
   if (salvage.generation) parts.push(`${salvage.generation} generation record(s)`)
   if (salvage.orphanedDayBuckets) parts.push(`${salvage.orphanedDayBuckets} orphaned day bucket(s)`)
+  if (salvage.orphanedBuckets) parts.push(`${salvage.orphanedBuckets} bucket(s) of records with no trip`)
   if (salvage.rebuiltUser) parts.push('rebuilt the user record')
   return parts.join(', ')
 }
@@ -231,6 +234,25 @@ function bucketCurrency(
       if (!isRecord(item) || !isString(item.tripId)) continue
       const byItem = currencies.get(item.tripId)
       if (byItem) return byItem
+    }
+  }
+  return null
+}
+
+/**
+ * The surviving trip a day bucket belongs to: the key it is filed under, else
+ * the `tripId` its days and items carry (the same order `bucketCurrency` looks
+ * in). `null` means no trip in this snapshot owns it.
+ */
+function bucketOwner(tripId: string, bucket: unknown, tripIds: ReadonlySet<string>): string | null {
+  if (tripIds.has(tripId)) return tripId
+  if (!Array.isArray(bucket)) return null
+  for (const day of bucket) {
+    if (!isRecord(day)) continue
+    if (isString(day.tripId) && tripIds.has(day.tripId)) return day.tripId
+    if (!Array.isArray(day.items)) continue
+    for (const item of day.items) {
+      if (isRecord(item) && isString(item.tripId) && tripIds.has(item.tripId)) return item.tripId
     }
   }
   return null
@@ -421,25 +443,41 @@ function readList<T>(value: unknown, read: (entry: unknown) => T | null): { list
 }
 
 /**
- * A trip-keyed map of lists. Keys are preserved even when their list empties
- * out, so a trip that legitimately has no days still reads back as `[]` and the
- * rest of the snapshot is untouched.
+ * A trip-keyed map of lists. A surviving trip's key is preserved even when its
+ * list empties out, so a trip that legitimately has no expenses still reads
+ * back as `[]` and the rest of the snapshot is untouched.
+ *
+ * A bucket whose trip is not in `tripIds` is left out. Every screen reaches a
+ * bucket through its trip, so one without a trip is invisible, and keeping it
+ * meant re-saving records nobody could see or delete for as long as the
+ * snapshot lived. `orphaned` counts the ones that still held something.
  */
 function readBuckets<T>(
   value: unknown,
+  tripIds: ReadonlySet<string>,
   read: (entry: unknown, tripId: string) => T | null,
-): { buckets: Record<string, T[]>; dropped: number } {
+): { buckets: Record<string, T[]>; dropped: number; orphaned: number } {
   if (!isRecord(value)) {
-    return { buckets: {}, dropped: value === undefined || value === null ? 0 : 1 }
+    return { buckets: {}, dropped: value === undefined || value === null ? 0 : 1, orphaned: 0 }
   }
   const buckets: Record<string, T[]> = {}
   let dropped = 0
+  let orphaned = 0
   for (const [tripId, entry] of Object.entries(value)) {
+    if (!tripIds.has(tripId)) {
+      if (!isEmptyBucket(entry)) orphaned += 1
+      continue
+    }
     const { list, dropped: lost } = readList(entry, (record) => read(record, tripId))
     dropped += lost
     buckets[tripId] = list
   }
-  return { buckets, dropped }
+  return { buckets, dropped, orphaned }
+}
+
+/** A bucket with nothing in it, so nothing is lost when it goes. */
+function isEmptyBucket(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.length === 0)
 }
 
 /**
@@ -717,32 +755,51 @@ export function readSnapshot(raw: unknown, options: SnapshotReadOptions): Snapsh
   salvage.rebuiltUser = !hasUserRecord
 
   /**
+   * Only a bucket whose trip survived is kept (see `readBuckets`). A trip the
+   * pass above had to drop takes its days, expenses, notes and generation
+   * record with it; they are still in the backup copy a salvaged load takes.
+   */
+  const tripIds = new Set(trips.list.map((trip) => trip.id))
+
+  /**
    * Items are priced in their own trip's currency, resolved the same way the
-   * v1 migration resolves it, so a bucket filed under a stale key is still
-   * matched by the `tripId` its days and items carry.
+   * v1 migration resolves it. A bucket filed under a stale key is matched by
+   * the `tripId` its days and items carry and is put back under that trip,
+   * where the app can reach it, unless the trip already has a bucket of its own.
    */
   const currencies = new Map(trips.list.map((trip) => [trip.id, trip.currency] as const))
   const dayBuckets: Record<string, ItineraryDay[]> = {}
   if (isRecord(payload.daysByTrip)) {
-    for (const [tripId, bucket] of Object.entries(payload.daysByTrip)) {
-      const currency = bucketCurrency(tripId, bucket, currencies)
-      const { list, dropped } = readList(bucket, (entry) => readDay(entry, tripId, currency, salvage))
+    const source = payload.daysByTrip
+    for (const [key, bucket] of Object.entries(source)) {
+      const owner = bucketOwner(key, bucket, tripIds)
+      const taken = owner !== key && owner !== null && (owner in source || owner in dayBuckets)
+      if (owner === null || taken) {
+        if (!isEmptyBucket(bucket)) salvage.orphanedBuckets += 1
+        continue
+      }
+      const currency = bucketCurrency(key, bucket, currencies)
+      const { list, dropped } = readList(bucket, (entry) => readDay(entry, owner, currency, salvage))
       salvage.days += dropped
-      dayBuckets[tripId] = list
+      dayBuckets[owner] = list
     }
   } else if (payload.daysByTrip !== undefined && payload.daysByTrip !== null) {
     salvage.days += 1
   }
 
-  const expenses = readBuckets(payload.expensesByTrip, readExpense)
+  const expenses = readBuckets(payload.expensesByTrip, tripIds, readExpense)
   salvage.expenses += expenses.dropped
+  salvage.orphanedBuckets += expenses.orphaned
 
-  const notes = readBuckets(payload.notesByTrip, readNote)
+  const notes = readBuckets(payload.notesByTrip, tripIds, readNote)
   salvage.notes += notes.dropped
+  salvage.orphanedBuckets += notes.orphaned
 
   const generation: Record<string, GenerationState> = {}
   if (isRecord(payload.generation)) {
     for (const [tripId, entry] of Object.entries(payload.generation)) {
+      // Bookkeeping for a trip that is not there: nothing of the traveller's.
+      if (!tripIds.has(tripId)) continue
       const record = readGeneration(entry)
       if (record === null) salvage.generation += 1
       else generation[tripId] = record

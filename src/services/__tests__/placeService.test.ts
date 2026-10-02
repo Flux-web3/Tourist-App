@@ -236,6 +236,46 @@ describe('placeService.search with a text query', () => {
     expect(idsOf(mixed)).toEqual(idsOf(lower))
   })
 
+  describe('ignores accents, apostrophes and word order', () => {
+    const idsFor = async (text: string, destinationId = 'paris') =>
+      idsOf(await placeService.search(query({ text, destinationId })))
+
+    it('finds an accented name from the plain letters', async () => {
+      expect(await idsFor('musee')).toContain('exp_musee_dorsay')
+      expect(await idsFor('marche')).toContain('exp_food_market_walk')
+    })
+
+    it('finds a ligature and a hyphenated name from how it is typed on a plain keyboard', async () => {
+      expect(await idsFor('sacre coeur')).toEqual(['exp_sacre_coeur'])
+      expect(await idsFor('sacre-coeur')).toEqual(['exp_sacre_coeur'])
+    })
+
+    it('finds a neighbourhood from its unaccented words', async () => {
+      const found = await idsFor('ile de la cite')
+      expect(found.length).toBeGreaterThan(0)
+      const accented = await idsFor('Île de la Cité')
+      expect(found).toEqual(accented)
+    })
+
+    it('treats a straight and a curly apostrophe alike', async () => {
+      expect(await idsFor("d'orsay")).toEqual(['exp_musee_dorsay'])
+      expect(await idsFor('d’orsay')).toEqual(['exp_musee_dorsay'])
+      expect(await idsFor("Musée d'Orsay")).toEqual(['exp_musee_dorsay'])
+    })
+
+    it('needs every word, in any order', async () => {
+      expect(await idsFor('eiffel summit')).toEqual(['exp_eiffel_tower'])
+      expect(await idsFor('summit eiffel')).toEqual(['exp_eiffel_tower'])
+      expect(await idsFor('tower london', 'london')).toEqual(['exp_london_tower_of_london'])
+      // One word that matches is not enough when another does not.
+      expect(await idsFor('eiffel zzzznotathing')).toEqual([])
+    })
+
+    it('collapses extra spaces between words', async () => {
+      expect(await idsFor('  eiffel    summit ')).toEqual(['exp_eiffel_tower'])
+    })
+  })
+
   it('ranks a name match above a tag match', async () => {
     const results = await placeService.search(query({ text: 'museum' }))
 

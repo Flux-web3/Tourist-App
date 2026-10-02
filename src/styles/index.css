@@ -28,6 +28,12 @@
   --surface-bright: #fdfcf9;
   --border: #e5e0d8;
   --border-strong: #d5cebe;
+  /*
+    The edge of a field, select or unselected chip is the only thing that shows
+    where it is, so it has to reach 3:1 against the surface behind it. The
+    strong hairline measures about 1.5:1; this measures 3.3 to 3.7.
+  */
+  --field-border: #8a8578;
 
   /* Ink */
   --ink: #1b1c19;
@@ -80,9 +86,10 @@
   --btn-primary: #14233a;
   --btn-primary-fg: #ffffff;
   --btn-primary-hover: #213552;
-  --btn-accent: #c85a3d;
+  /* White on #c85a3d measured 4.21, under AA for button text. This is 5.11. */
+  --btn-accent: #b44f34;
   --btn-accent-fg: #ffffff;
-  --btn-accent-hover: #b44f34;
+  --btn-accent-hover: #a8492f;
 
   /* AI draft / generated estimate */
   --ai-bg: #fdf6ee;
@@ -136,10 +143,16 @@
   */
   --border: #44566f;
   --border-strong: #5b7597;
+  --field-border: #6a85a8;
 
   --ink: #f3f1ec;
   --ink-muted: #a8b2c0;
-  --ink-subtle: #8591a2;
+  /*
+    Was #8591a2, which fell to 4.16 on the raised surface and 3.44 on the bright
+    one (timestamps on pinned notes, the placeholder tag in the time chip).
+    This measures 4.73 on the bright surface and more on every other.
+  */
+  --ink-subtle: #a0abbb;
   --ink-inverse: #18202b;
 
   --navy: #d7e3f6;
@@ -200,6 +213,7 @@
   --color-surface-bright: var(--surface-bright);
   --color-line: var(--border);
   --color-line-strong: var(--border-strong);
+  --color-field: var(--field-border);
 
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
@@ -458,6 +472,7 @@
     --surface-high: rgba(255, 255, 255, 0.2);
     --border: rgba(255, 255, 255, 0.28);
     --border-strong: rgba(255, 255, 255, 0.5);
+    --field-border: rgba(255, 255, 255, 0.6);
     --ink: #ffffff;
     --ink-muted: rgba(255, 255, 255, 0.9);
     --ink-subtle: rgba(255, 255, 255, 0.8);
@@ -531,6 +546,25 @@
     .photo-fade-top {
       -webkit-mask-image: none;
       mask-image: none;
+    }
+  }
+
+  /*
+    Small print set low in a tall hero lands on the bright part of the photo,
+    where the shading is deliberately light (it measured under 2:1 there on a
+    phone). It gets its own ground instead of darkening the picture. On a wide
+    screen the words sit in the shaded left side, so it is not needed.
+  */
+  .photo-note {
+    background-color: rgba(10, 22, 38, 0.72);
+    border-radius: var(--radius-control);
+    padding: 0.625rem 0.75rem;
+  }
+
+  @media (min-width: 64rem) {
+    .photo-note {
+      background-color: transparent;
+      padding: 0;
     }
   }
 

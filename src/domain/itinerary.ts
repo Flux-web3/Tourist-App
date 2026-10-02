@@ -7,6 +7,7 @@ import type {
   Experience,
   ItineraryDay,
   ItineraryItem,
+  ItineraryItemRole,
   VisitWindow,
   Weekday,
 } from './types'
@@ -250,6 +251,25 @@ function nearestDayIndex(
  * discarded, because those are regenerable. Losing the traveller's stops with
  * the day would be silent data loss, the opposite of what the edit dialog
  * promises.
+ *
+ * The fresh draft is then fitted around what was kept. The generator drafts
+ * every day in full without seeing the plan it will be merged into, so adding
+ * its days whole put a second St Paul's beside the one the traveller had edited
+ * and a morning of new stops on top of a booked tour, and counted all of it in
+ * the estimate. A kept stop always wins and is never moved, changed or dropped.
+ * A drafted stop is left out when it has the title of a kept stop anywhere on
+ * the trip, or when it would run within `SLOT_BUFFER_MINUTES` of a kept stop on
+ * its day, the gap the generator leaves between its own stops. A day can
+ * therefore come back with fewer stops than a first draft, which is correct.
+ * With nothing kept, the result is the generated days exactly.
+ *
+ * Arrival and departure are settled first (see `settleKeptAnchors`). The
+ * draft's own arrival and departure are never left out for overlapping a kept
+ * stop: a plan with no way home is worse than a crowded last morning.
+ *
+ * Kept and drafted stops are not compared as meals. A stop does not record
+ * whether it is a breakfast, lunch or dinner, and guessing from its title would
+ * drop real stops, so a drafted lunch can follow a kept one if their times allow.
  */
 export function mergeGeneratedDays(
   existing: readonly ItineraryDay[],
@@ -264,7 +284,7 @@ export function mergeGeneratedDays(
   const byDayNumber = !existing.some((day) => generatedDates.has(day.date))
   const claimed = new Set<ItineraryDay>()
 
-  const merged = generated.map((day) => {
+  const paired = generated.map((day) => {
     // Unclaimed only: two generated days must never draw on the same existing day.
     const previous = existing.find(
       (candidate) =>
@@ -272,23 +292,112 @@ export function mergeGeneratedDays(
         (byDayNumber ? candidate.index === day.index : candidate.date === day.date),
     )
     if (previous) claimed.add(previous)
-    const preserved = previous ? previous.items.filter(isPreservedOnRegenerate) : []
-    return { ...day, items: [...preserved, ...day.items] }
+    return previous ? previous.items.filter(isPreservedOnRegenerate) : []
   })
 
-  const rescued = new Map<number, ItineraryItem[]>()
   for (const dropped of existing) {
     if (claimed.has(dropped)) continue
     const carried = dropped.items.filter(isPreservedOnRegenerate)
     if (carried.length === 0) continue
-    const target = nearestDayIndex(merged, dropped, byDayNumber)
-    rescued.set(target, [...(rescued.get(target) ?? []), ...carried])
+    paired[nearestDayIndex(generated, dropped, byDayNumber)].push(...carried)
   }
 
-  return merged.map((day, index) => {
-    const carried = rescued.get(index)
-    return { ...day, items: sortItems(carried ? [...day.items, ...carried] : day.items) }
+  const { kept, anchors } = settleKeptAnchors(paired)
+  const keptTitles = new Set(kept.flat().map((item) => titleKey(item.title)))
+  const lastIndex = generated.length - 1
+
+  return generated.map((day, index) => {
+    const busy = kept[index].map(stopInterval)
+    const arrival = index === 0 ? anchors.arrival : undefined
+    const departure = index === lastIndex ? anchors.departure : undefined
+
+    const drafted = day.items.filter((candidate) => {
+      if (candidate.role !== undefined) return anchors[candidate.role] === undefined
+      const title = titleKey(candidate.title)
+      if (title !== '' && keptTitles.has(title)) return false
+
+      const slot = stopInterval(candidate)
+      const crowded = busy.some(
+        (stop) =>
+          slot.start < stop.end + SLOT_BUFFER_MINUTES && stop.start < slot.end + SLOT_BUFFER_MINUTES,
+      )
+      if (crowded) return false
+      // Nothing is drafted before the traveller has arrived, or so late that it
+      // runs into the time they have said they are leaving.
+      if (arrival && slot.start < stopInterval(arrival).end) return false
+      if (departure && slot.end > stopInterval(departure).start - DEPARTURE_BUFFER_MINUTES) return false
+      return true
+    })
+    return { ...day, items: sortItems([...kept[index], ...drafted]) }
   })
+}
+
+/** How titles are compared when asking whether two stops are the same stop. */
+function titleKey(title: string): string {
+  return title.trim().toLowerCase()
+}
+
+/**
+ * When a stop starts and ends, in minutes since midnight. A stop saved without
+ * an end time, or with one that is not after its start, is taken to last
+ * `DEFAULT_STOP_MINUTES`.
+ */
+function stopInterval(item: ItineraryItem): { start: number; end: number } {
+  const start = timeToMinutes(item.startTime)
+  const end = item.endTime === null ? start : timeToMinutes(item.endTime)
+  return { start, end: end > start ? end : start + DEFAULT_STOP_MINUTES }
+}
+
+const ANCHOR_ROLES: readonly ItineraryItemRole[] = ['arrival', 'departure']
+
+/**
+ * Puts a kept arrival on the first day and a kept departure on the last, one of
+ * each, and reports which roles the kept stops now fill.
+ *
+ * The stop card asks the traveller to edit the departure to their real time.
+ * Doing so makes it theirs, so it is kept, and the fresh draft brought its own
+ * 12:00 departure as well: two ways home on one day. When the dates changed, the
+ * kept one also stayed where it was, mid-trip. So a kept arrival or departure
+ * replaces the drafted one, and follows the trip's first or last day with its
+ * own times and every other field untouched.
+ *
+ * Plans saved while that bug was live can hold several kept stops with the same
+ * role. The most recently updated one is the traveller's latest word and stays
+ * the anchor. The others lose the role and stay where they are as ordinary
+ * stops, because deleting a stop the traveller edited is never the answer.
+ *
+ * Pure: `days` and its items are not modified.
+ */
+function settleKeptAnchors(days: readonly (readonly ItineraryItem[])[]): {
+  kept: ItineraryItem[][]
+  anchors: Partial<Record<ItineraryItemRole, ItineraryItem>>
+} {
+  let kept = days.map((items) => [...items])
+  const anchors: Partial<Record<ItineraryItemRole, ItineraryItem>> = {}
+
+  for (const role of ANCHOR_ROLES) {
+    const holders = kept.flat().filter((item) => item.role === role)
+    if (holders.length === 0) continue
+    // Strictly later, so an exact tie keeps the earlier stop and stays deterministic.
+    const anchor = holders.reduce((latest, candidate) =>
+      candidate.updatedAt > latest.updatedAt ? candidate : latest,
+    )
+    const home = role === 'arrival' ? 0 : kept.length - 1
+    kept = kept.map((items, index) => {
+      const rest = items
+        .filter((item) => item !== anchor)
+        .map((item) => (item.role === role ? withoutRole(item) : item))
+      return index === home ? [...rest, anchor] : rest
+    })
+    anchors[role] = anchor
+  }
+  return { kept, anchors }
+}
+
+function withoutRole(item: ItineraryItem): ItineraryItem {
+  const plain = { ...item }
+  delete plain.role
+  return plain
 }
 
 /**
@@ -399,17 +508,30 @@ export function findDayForDate(days: readonly ItineraryDay[], dateISO: string): 
   return days.find((day) => day.date === dateISO) ?? null
 }
 
+/**
+ * The start time offered for a stop the traveller is adding by hand: ninety
+ * minutes after the day's latest start, capped at 22:00.
+ *
+ * A day with a departure is the exception. Its latest start is the departure
+ * itself, so the default landed after the traveller had left and saving it
+ * raised "This stop is after your departure". There the first gap that holds a
+ * `DEFAULT_STOP_MINUTES` stop and still clears the departure is offered
+ * instead, found the way `suggestPlaceSlot` finds one. Only when the day has no
+ * such gap does the usual default apply, and the form then says why.
+ */
 export function nextEmptySlotStartTime(day: ItineraryDay): string {
+  if (day.items.some((item) => item.role === 'departure')) {
+    const start = earliestFreeStart(day, DEFAULT_STOP_MINUTES, 0, Number.POSITIVE_INFINITY)
+    if (start !== null) return minutesToTime(start)
+  }
   const latest = day.items.reduce((max, item) => Math.max(max, timeToMinutes(item.startTime)), 8 * 60)
-  const minutes = Math.min(latest + 90, 22 * 60)
-  const hours = Math.floor(minutes / 60)
-  return `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+  return minutesToTime(Math.min(latest + 90, 22 * 60))
 }
 
 /*
  * Suggesting a start time for a catalogue place.
  *
- * `nextEmptySlotStartTime` above only looks at the day's latest start, which is
+ * `nextEmptySlotStartTime` above mostly looks at the day's latest start, which is
  * fine for the traveller's own stops (they pick the time) but put the Tower of
  * London at 21:30 after an evening pub stop. A place has usual hours and a
  * length, so it is fitted between the day's stops instead, inside those hours,
@@ -484,12 +606,25 @@ export function suggestPlaceSlot(day: ItineraryDay, place: PlaceForSlot): PlaceS
   // A close at or before the opening ("05:30 - 00:30", midnight) is past midnight.
   const closes = rawCloses === null || rawCloses <= opens ? Number.POSITIVE_INFINITY : rawCloses
 
+  const start = earliestFreeStart(day, place.durationMinutes, opens, closes)
+  return start === null
+    ? { kind: 'none', window, windowSource: source }
+    : { kind: 'slot', startTime: minutesToTime(start), window, windowSource: source }
+}
+
+/**
+ * The gap search behind `suggestPlaceSlot`, in minutes since midnight: the
+ * earliest quarter-hour start at which a stop of `durationMinutes` fits between
+ * `opens` and `closes` under the rules described there, or null when none does.
+ */
+function earliestFreeStart(
+  day: ItineraryDay,
+  durationMinutes: number,
+  opens: number,
+  closes: number,
+): number | null {
   const busy = day.items
-    .map((item) => {
-      const start = timeToMinutes(item.startTime)
-      const end = item.endTime === null ? start : timeToMinutes(item.endTime)
-      return { start, end: end > start ? end : start + DEFAULT_STOP_MINUTES, role: item.role }
-    })
+    .map((item) => ({ ...stopInterval(item), role: item.role }))
     .sort((a, b) => a.start - b.start)
 
   let earliest = Math.max(opens, timeToMinutes(EARLIEST_SUGGESTED_START))
@@ -499,7 +634,7 @@ export function suggestPlaceSlot(day: ItineraryDay, place: PlaceForSlot): PlaceS
     if (stop.role === 'departure') latestEnd = Math.min(latestEnd, stop.start - DEPARTURE_BUFFER_MINUTES)
   }
 
-  const duration = Math.max(0, place.durationMinutes)
+  const duration = Math.max(0, durationMinutes)
   const roundUp = (minutes: number) => Math.ceil(minutes / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES
   let start = roundUp(earliest)
   for (const stop of busy) {
@@ -507,9 +642,7 @@ export function suggestPlaceSlot(day: ItineraryDay, place: PlaceForSlot): PlaceS
     if (start + duration + SLOT_BUFFER_MINUTES <= stop.start) break
     start = Math.max(start, roundUp(stop.end + SLOT_BUFFER_MINUTES))
   }
-  return start + duration <= latestEnd
-    ? { kind: 'slot', startTime: minutesToTime(start), window, windowSource: source }
-    : { kind: 'none', window, windowSource: source }
+  return start + duration <= latestEnd ? start : null
 }
 
 const WEEKDAYS: readonly Weekday[] = [

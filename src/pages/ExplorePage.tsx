@@ -470,7 +470,8 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
               variant="secondary"
               icon={<Icon name="tune" size={18} />}
               aria-expanded={filtersOpen}
-              aria-controls={filterPanelId}
+              // The panel is only in the page while it is open, so the id only names something then.
+              aria-controls={filtersOpen ? filterPanelId : undefined}
               onClick={() => setFiltersOpen((open) => !open)}
             >
               {hiddenFilterCount > 0 ? `Filters (${hiddenFilterCount})` : 'Filters'}

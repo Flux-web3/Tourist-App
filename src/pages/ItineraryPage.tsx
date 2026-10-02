@@ -26,7 +26,7 @@ import {
   findItemInDays,
   nextEmptySlotStartTime,
 } from '@/domain/itinerary'
-import { CURRENCY_SYMBOLS, formatAmount, formatPrice, toCents } from '@/domain/money'
+import { CURRENCY_SYMBOLS, formatAmount, formatPrice, partitionByCurrency, toCents } from '@/domain/money'
 import { ITINERARY_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { describePlan } from '@/services'
 import { useGeneration, useTourist, useTrip, useTripDays } from '@/state/useTourist'
@@ -127,10 +127,17 @@ function ItineraryItemDialog({
   const [submitted, setSubmitted] = useState(false)
   const formId = useId()
   const summaryRef = useRef<HTMLDivElement>(null)
+  /*
+    Counts submits that failed validation, and is the only thing that sends
+    focus to the summary. Keyed on the errors instead, the effect ran on every
+    keystroke of a re-validated field and pulled focus out from under the
+    traveller mid-word.
+  */
+  const [failedSubmits, setFailedSubmits] = useState(0)
 
   useEffect(() => {
-    if (submitted && Object.keys(errors).length > 0) summaryRef.current?.focus()
-  }, [errors, submitted])
+    if (failedSubmits > 0) summaryRef.current?.focus()
+  }, [failedSubmits])
 
   const update = useCallback(
     (patch: Partial<ItemFormValue>) => {
@@ -146,7 +153,10 @@ function ItineraryItemDialog({
     setSubmitted(true)
     const found = validateForm(value, showDayField, dayId)
     setErrors(found)
-    if (Object.keys(found).length > 0) return
+    if (Object.keys(found).length > 0) {
+      setFailedSubmits((count) => count + 1)
+      return
+    }
     onSubmit({
       title: value.title.trim(),
       category: value.category,
@@ -264,7 +274,7 @@ function ItineraryItemDialog({
             label={`Estimated cost (${currency})`}
             min={0}
             step={1}
-            prefix={CURRENCY_SYMBOLS[currency]}
+            prefix={CURRENCY_SYMBOLS[currency] !== currency ? CURRENCY_SYMBOLS[currency] : undefined}
             suffix={currency}
             value={value.estimatedCost}
             error={errors.estimatedCost}
@@ -330,7 +340,7 @@ export default function ItineraryPage() {
   const trip = useTrip(tripId)
   const days = useTripDays(tripId)
   const generation = useGeneration(tripId)
-  const { actions, pendingItemId, swapError: latestSwapError, swapTripId } = useTourist()
+  const { actions, hydrated, pendingItemId, swapError: latestSwapError, swapTripId } = useTourist()
   // A failed swap on one trip must not surface on another trip's itinerary.
   const swapError = swapTripId === tripId ? latestSwapError : null
 
@@ -384,6 +394,20 @@ export default function ItineraryPage() {
     [days, today],
   )
 
+  /*
+    Saved trips are read after the first paint. Without this, a deep link or a
+    refresh on a real trip's itinerary opened on "We could not find that trip"
+    for a moment, the one page that did not wait like the others.
+  */
+  if (!hydrated) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Itinerary" description="Restoring this trip from your device." />
+        <TimelineSkeleton />
+      </div>
+    )
+  }
+
   if (!trip) {
     return (
       <div className="flex flex-col gap-4">
@@ -405,11 +429,15 @@ export default function ItineraryPage() {
   const planEstimate = estimateTotal(days, trip.currency)
   /*
    * Stops priced in a different currency are left out of the estimate above,
-   * never converted. Say how many, or the total would be quietly partial.
+   * never converted. Say how many, or the total would be quietly partial. The
+   * Budget page counts with the same helper, so the two always agree.
    */
-  const uncountedStops = days
-    .flatMap((day) => day.items)
-    .filter((item) => item.currency !== trip.currency && toCents(item.estimatedCost) !== 0).length
+  const planItems = days.flatMap((day) => day.items)
+  const uncountedStops = partitionByCurrency(
+    planItems.map((item) => item.estimatedCost),
+    planItems.map((item) => item.currency),
+    trip.currency,
+  ).uncountedCount
   const noDaysYet = days.length === 0
   const showSkeletons = loading && !hasItems
 
@@ -450,7 +478,7 @@ export default function ItineraryPage() {
               <Badge tone="ai" icon={<Icon name="auto_awesome" size={14} />}>
                 {PROTOTYPE_LABEL.aiDraftEstimate}
                 <span className="tnum">
-                  {`${formatAmount(planEstimate, trip.currency)} ${trip.currency}`}
+                  {formatAmount(planEstimate, trip.currency, { showCode: true })}
                 </span>
               </Badge>
               {uncountedStops > 0 ? (

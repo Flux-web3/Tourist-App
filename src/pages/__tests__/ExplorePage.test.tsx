@@ -877,4 +877,23 @@ describe('ExplorePage', () => {
       await waitFor(() => expect(screen.getByText(`${LONDON_NAMES.length} places`)).toBeInTheDocument())
     })
   })
+
+  it('only points the Filters button at its panel while the panel exists', async () => {
+    const user = userEvent.setup()
+    renderAt(undefined, fixtureState())
+    await waitFor(() => expect(screen.getByText(ALL_PLACES)).toBeInTheDocument())
+
+    // Closed, the panel is not rendered, so there is nothing for the id to name.
+    expect(filterToggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(filterToggle()).not.toHaveAttribute('aria-controls')
+
+    await openFilters(user)
+    expect(filterToggle()).toHaveAttribute('aria-expanded', 'true')
+    const panelId = filterToggle().getAttribute('aria-controls')
+    expect(panelId).toBeTruthy()
+    expect(document.getElementById(panelId ?? '')).toContainElement(screen.getByRole('radio', { name: 'Food' }))
+
+    await openFilters(user)
+    expect(filterToggle()).not.toHaveAttribute('aria-controls')
+  })
 })

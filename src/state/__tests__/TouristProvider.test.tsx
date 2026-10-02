@@ -307,7 +307,7 @@ describe('TouristProvider trips', () => {
     expect(state.trips[0].name).toBe('Paris trip')
     expect(state.trips[0].travelers).toBe(3)
     expect(state.trips[0].budget).toBe(2500)
-    expect(state.trips[0].status).toBe('draft')
+    expect(state.trips[0].status).toBe('itinerary_ready')
     expect(state.trips[0].userId).toBe(USER.id)
     expect(state.daysByTrip[createdId]).toHaveLength(4)
     expect(state.daysByTrip[createdId].map((day) => day.date)).toEqual([
@@ -1304,7 +1304,9 @@ describe('TouristProvider persistence', () => {
     expect(state.expensesByTrip).toEqual({})
     expect(state.generation).toEqual({})
     expect(state.hasDemoData).toBe(false)
-    expect(state.user.id).toBe(USER.id)
+    // The user record goes with everything else: a fresh guest takes its place.
+    expect(state.user.id).not.toBe(USER.id)
+    expect(state.user.isGuest).toBe(true)
     expect(state.themePreference).toBe('system')
 
     const stored = readStored()
@@ -2254,5 +2256,602 @@ describe('TouristProvider adding a place without a start time', () => {
     expect(stored.find((item) => item.id === 'itm_own')).toEqual(own)
     expect(stored.find((item) => item.id === 'itm_edited')).toEqual(edited)
     expect(stored.find((item) => item.id === 'itm_moved')).toEqual(moved)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Two tabs, storage outcomes and the full wipe                               */
+/* -------------------------------------------------------------------------- */
+
+const BACKUP_KEY = 'tourist.state.backup'
+
+interface Tab {
+  ctx(): TouristContextValue
+  unmount(): void
+}
+
+/** A second (or first) provider on the same storage, standing in for a browser tab. */
+function openTab(): Tab {
+  const box: { current: TouristContextValue | null } = { current: null }
+  function TabHarness() {
+    box.current = useTourist()
+    return null
+  }
+  const view = render(
+    <TouristProvider>
+      <TabHarness />
+    </TouristProvider>,
+  )
+  return {
+    ctx: () => {
+      if (!box.current) throw new Error('the tab is not mounted')
+      return box.current
+    },
+    unmount: () => view.unmount(),
+  }
+}
+
+/**
+ * What the browser tells every *other* tab after one tab writes. jsdom does not
+ * deliver it between two providers that share a window, so the test does.
+ */
+function deliverStorageEvent(key: string = STATE_KEY): void {
+  act(() => {
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key,
+        newValue: window.localStorage.getItem(key),
+        storageArea: window.localStorage,
+      }),
+    )
+  })
+}
+
+function stateWrites(spy: { mock: { calls: unknown[][] } }): number {
+  return spy.mock.calls.filter(([key]) => key === STATE_KEY).length
+}
+
+describe('TouristProvider across two tabs', () => {
+  it('does not lose an expense and a note added in another tab', () => {
+    seedState(seededState())
+    const tabA = openTab()
+    const tabB = openTab()
+
+    act(() => {
+      tabA.ctx().actions.addExpense({
+        tripId: TRIP_ID,
+        description: 'Ferry ticket',
+        amount: 18.5,
+        category: 'activities',
+        date: '2026-04-01',
+        notes: '',
+      })
+      tabA.ctx().actions.addNote({ tripId: TRIP_ID, title: 'Gate code', body: '4411' })
+    })
+    deliverStorageEvent()
+
+    // Tab B sees what tab A wrote, without a reload.
+    expect(tabB.ctx().state.expensesByTrip[TRIP_ID]).toHaveLength(2)
+    expect(tabB.ctx().state.notesByTrip?.[TRIP_ID]).toHaveLength(1)
+
+    act(() => {
+      tabB.ctx().actions.setThemePreference('dark')
+    })
+
+    const stored = readStored()
+    expect(stored.expensesByTrip[TRIP_ID].map((expense) => expense.description)).toEqual([
+      'Expense exp_a',
+      'Ferry ticket',
+    ])
+    expect(stored.notesByTrip?.[TRIP_ID]?.map((note) => note.title)).toEqual(['Gate code'])
+    expect(stored.themePreference).toBe('dark')
+  })
+
+  it('does not resurrect a trip deleted in another tab', () => {
+    seedState(seededState())
+    const tabA = openTab()
+    const tabB = openTab()
+
+    act(() => {
+      tabA.ctx().actions.deleteTrip(TRIP_ID)
+    })
+    deliverStorageEvent()
+    expect(tabB.ctx().state.trips).toEqual([])
+
+    act(() => {
+      tabB.ctx().actions.setThemePreference('dark')
+    })
+
+    const stored = readStored()
+    expect(stored.trips).toEqual([])
+    expect(stored.daysByTrip[TRIP_ID]).toBeUndefined()
+    expect(stored.expensesByTrip[TRIP_ID]).toBeUndefined()
+  })
+
+  it('follows the other tab without writing anything back, so two tabs cannot loop', () => {
+    seedState(seededState())
+    const tabA = openTab()
+    const tabB = openTab()
+
+    act(() => {
+      tabA.ctx().actions.addNote({ tripId: TRIP_ID, title: 'Gate code', body: '4411' })
+    })
+    const written = window.localStorage.getItem(STATE_KEY)
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+
+    // Each delivery reaches both providers here, which is harsher than a
+    // browser: a write in answer to one would be answered by the other.
+    deliverStorageEvent()
+    deliverStorageEvent()
+    deliverStorageEvent()
+
+    expect(tabB.ctx().state.notesByTrip?.[TRIP_ID]).toHaveLength(1)
+    expect(stateWrites(setItem)).toBe(0)
+    expect(window.localStorage.getItem(STATE_KEY)).toBe(written)
+  })
+
+  it('adopts a theme chosen in another tab', () => {
+    seedState(seededState())
+    const tabA = openTab()
+    const tabB = openTab()
+
+    act(() => {
+      tabA.ctx().actions.setThemePreference('dark')
+    })
+    deliverStorageEvent()
+
+    expect(tabB.ctx().state.themePreference).toBe('dark')
+    expect(readStored().themePreference).toBe('dark')
+  })
+
+  it('hydrates to an empty state when the key is removed in another tab', () => {
+    seedState(seededState())
+    const tab = openTab()
+    expect(tab.ctx().state.trips).toHaveLength(1)
+
+    window.localStorage.removeItem(STATE_KEY)
+    deliverStorageEvent()
+
+    expect(tab.ctx().hydrated).toBe(true)
+    expect(tab.ctx().state.trips).toEqual([])
+    expect(tab.ctx().state.daysByTrip).toEqual({})
+    expect(tab.ctx().state.expensesByTrip).toEqual({})
+    expect(tab.ctx().state.user.isGuest).toBe(true)
+  })
+
+  it('ignores a change to a key that is not the saved state', () => {
+    seedState(seededState())
+    const tab = openTab()
+    const before = tab.ctx().state
+
+    window.localStorage.setItem('some.other.key', 'x')
+    deliverStorageEvent('some.other.key')
+
+    expect(tab.ctx().state).toBe(before)
+  })
+
+  /** Another tab, holding the same state, logs an expense and saves. */
+  function writeExpenseFromAnotherTab(): void {
+    const theirs = readStored()
+    theirs.expensesByTrip[TRIP_ID] = [
+      ...theirs.expensesByTrip[TRIP_ID],
+      makeExpense(TRIP_ID, 'exp_theirs', { description: 'Ferry ticket' }),
+    ]
+    seedState(theirs)
+    deliverStorageEvent()
+  }
+
+  it('abandons a draft that was in flight when another tab changed the data', async () => {
+    seedState(seededState())
+    const tab = openTab()
+    const runs = holdGenerations()
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = tab.ctx().actions.generateItinerary(TRIP_ID, { regenerate: true })
+    })
+    expect(readStored().generation[TRIP_ID].status).toBe('loading')
+    writeExpenseFromAnotherTab()
+
+    // The spinner was this tab's own and nothing is behind it any more, so it
+    // becomes a retryable error at once, in storage too.
+    expect(tab.ctx().state.generation[TRIP_ID].status).toBe('error')
+    expect(tab.ctx().state.generation[TRIP_ID].error).toMatch(/another tab.*not changed/)
+    expect(readStored().generation[TRIP_ID].status).toBe('error')
+
+    await act(async () => {
+      runs[0].succeed()
+      await pending
+    })
+
+    // The result was built for a state this tab no longer has: it is not written.
+    expect(allIds(tab.ctx().state.daysByTrip[TRIP_ID])).toEqual(['itm_a', 'itm_b', 'itm_c'])
+    expect(tab.ctx().state.generation[TRIP_ID].status).toBe('error')
+    expect(readStored().expensesByTrip[TRIP_ID].map((expense) => expense.id)).toEqual([
+      'exp_a',
+      'exp_theirs',
+    ])
+    expect(allIds(readStored().daysByTrip[TRIP_ID])).toEqual(['itm_a', 'itm_b', 'itm_c'])
+  })
+
+  it('writes an abandoned draft off once, then goes quiet again', async () => {
+    seedState(seededState())
+    const tab = openTab()
+    holdGenerations()
+    act(() => {
+      void tab.ctx().actions.generateItinerary(TRIP_ID, { regenerate: true })
+    })
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    const seeded = stateWrites(setItem)
+
+    writeExpenseFromAnotherTab()
+    // One write from the test standing in for the other tab, one from this tab
+    // recording that its draft stopped.
+    expect(stateWrites(setItem) - seeded).toBe(2)
+
+    // The other tab's answer to that write is to adopt it. Nothing more follows.
+    deliverStorageEvent()
+    deliverStorageEvent()
+    expect(stateWrites(setItem) - seeded).toBe(2)
+  })
+
+  it('leaves a draft another tab is running alone', () => {
+    const drafting = seededState()
+    drafting.generation[TRIP_ID] = {
+      status: 'loading',
+      error: null,
+      startedAt: '2026-04-01T09:00:00.000Z',
+      completedAt: null,
+    }
+    seedState(seededState())
+    const tab = openTab()
+
+    // The other tab starts drafting. This tab has nothing in flight, so the
+    // spinner is not its to settle: writing an error would stop the other tab.
+    seedState(drafting)
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    deliverStorageEvent()
+
+    expect(tab.ctx().state.generation[TRIP_ID].status).toBe('loading')
+    expect(stateWrites(setItem)).toBe(0)
+    expect(readStored().generation[TRIP_ID].status).toBe('loading')
+  })
+
+  it('lets a new draft run after an abandoned one, and the old one still cannot land', async () => {
+    seedState(seededState())
+    const tab = openTab()
+    const runs = holdGenerations()
+
+    let first: Promise<void> | null = null
+    act(() => {
+      first = tab.ctx().actions.generateItinerary(TRIP_ID, { regenerate: true })
+    })
+    deliverStorageEvent()
+    let second: Promise<void> | null = null
+    act(() => {
+      second = tab.ctx().actions.retryGeneration(TRIP_ID)
+    })
+    // The abandoned run settles first, and fails: it must not stamp an error
+    // over the run that replaced it.
+    await act(async () => {
+      runs[0].fail()
+      await first
+    })
+    expect(tab.ctx().state.generation[TRIP_ID].status).toBe('loading')
+
+    await act(async () => {
+      runs[1].succeed()
+      await second
+    })
+    expect(tab.ctx().state.generation[TRIP_ID].status).toBe('success')
+  })
+
+  it('abandons a swap that was in flight, and clears its spinner and error', async () => {
+    seedState(seededState())
+    const tab = openTab()
+    const suggestions = holdSuggestions()
+
+    let pending: Promise<void> | null = null
+    act(() => {
+      pending = tab.ctx().actions.replaceItem(TRIP_ID, 'itm_a')
+    })
+    expect(tab.ctx().pendingItemId).toBe('itm_a')
+
+    deliverStorageEvent()
+    expect(tab.ctx().pendingItemId).toBeNull()
+    expect(tab.ctx().swapTripId).toBeNull()
+
+    await act(async () => {
+      suggestions[0].succeed()
+      await pending
+    })
+    expect(allIds(tab.ctx().state.daysByTrip[TRIP_ID])).toEqual(['itm_a', 'itm_b', 'itm_c'])
+    expect(tab.ctx().state.daysByTrip[TRIP_ID][0].items[0].title).toBe('Item itm_a')
+    expect(tab.ctx().swapError).toBeNull()
+  })
+})
+
+describe('TouristProvider storage status', () => {
+  function quotaExceeded(): never {
+    throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+  }
+
+  it('reports a clean load and a working save', () => {
+    seedState(seededState())
+    renderProvider()
+
+    expect(ctx().storage.load).toBe('loaded')
+    expect(ctx().storage.saving).toBe('ok')
+    expect(ctx().storage.readOnly).toBe(false)
+  })
+
+  it('reports a save the browser rejected, and recovers when a later save succeeds', () => {
+    seedState(seededState())
+    renderProvider()
+    const before = window.localStorage.getItem(STATE_KEY)
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quotaExceeded)
+    act(() => {
+      ctx().actions.addNote({ tripId: TRIP_ID, title: 'Gate code', body: '4411' })
+    })
+
+    expect(ctx().storage.saving).toBe('failing')
+    // The session carries on in memory; storage still has the earlier payload.
+    expect(ctx().state.notesByTrip?.[TRIP_ID]).toHaveLength(1)
+    expect(window.localStorage.getItem(STATE_KEY)).toBe(before)
+
+    setItem.mockRestore()
+    act(() => {
+      ctx().actions.addNote({ tripId: TRIP_ID, title: 'Second', body: 'note' })
+    })
+
+    expect(ctx().storage.saving).toBe('ok')
+    expect(readStored().notesByTrip?.[TRIP_ID]).toHaveLength(2)
+  })
+
+  it('reports a load that had to leave records out, and that a copy was kept', () => {
+    const damaged = JSON.parse(JSON.stringify(seededState())) as PersistedState
+    ;(damaged.expensesByTrip[TRIP_ID] as unknown[]).push({ id: 'exp_bad', amount: 'lots' })
+    const raw = JSON.stringify(damaged)
+    window.localStorage.setItem(STATE_KEY, raw)
+    renderProvider()
+
+    expect(ctx().storage.load).toBe('salvaged')
+    expect(ctx().storage.backedUp).toBe(true)
+    expect(ctx().storage.hasBackup).toBe(true)
+    expect(ctx().storage.noticeDismissed).toBe(false)
+    expect(window.localStorage.getItem(BACKUP_KEY)).toBe(raw)
+
+    act(() => {
+      ctx().actions.dismissStorageNotice()
+    })
+    expect(ctx().storage.noticeDismissed).toBe(true)
+  })
+
+  it('reports saved data it could not read, and that it started fresh with a copy kept', () => {
+    window.localStorage.setItem(STATE_KEY, '{ "trips": [ { "id": "trip_half')
+    renderProvider()
+
+    expect(ctx().storage.load).toBe('unreadable')
+    expect(ctx().storage.backedUp).toBe(true)
+    expect(ctx().storage.readOnly).toBe(false)
+    expect(ctx().state.trips).toEqual([])
+    expect(window.localStorage.getItem(BACKUP_KEY)).toBe('{ "trips": [ { "id": "trip_half')
+    expect(readStored().trips).toEqual([])
+  })
+
+  describe('when the backup copy cannot be written', () => {
+    /** Storage that takes every write except the backup copy. */
+    function refuseBackupWrites() {
+      const original = Storage.prototype.setItem
+      return vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (key === BACKUP_KEY) quotaExceeded()
+        original.call(this, key, value)
+      })
+    }
+
+    it('leaves a newer-version payload untouched, on mount and after an action', () => {
+      const future = JSON.stringify({ ...seededState(), version: STORAGE_VERSION + 1 })
+      window.localStorage.setItem(STATE_KEY, future)
+      refuseBackupWrites()
+      renderProvider()
+
+      expect(window.localStorage.getItem(STATE_KEY)).toBe(future)
+      expect(ctx().storage.load).toBe('future')
+      expect(ctx().storage.backedUp).toBe(false)
+      expect(ctx().storage.readOnly).toBe(true)
+
+      act(() => {
+        ctx().actions.signIn({ name: 'Ada Lovelace', email: 'ada@example.com' })
+      })
+      act(() => {
+        ctx().actions.loadDemoData()
+      })
+
+      // The session works in memory, and the only copy is still there.
+      expect(ctx().state.user.name).toBe('Ada Lovelace')
+      expect(ctx().state.trips).toHaveLength(1)
+      expect(window.localStorage.getItem(STATE_KEY)).toBe(future)
+    })
+
+    it('leaves an unreadable payload untouched as well', () => {
+      window.localStorage.setItem(STATE_KEY, '{ broken')
+      refuseBackupWrites()
+      renderProvider()
+      act(() => {
+        ctx().actions.signIn({ name: 'Ada Lovelace', email: null })
+      })
+
+      expect(window.localStorage.getItem(STATE_KEY)).toBe('{ broken')
+      expect(ctx().storage.load).toBe('unreadable')
+      expect(ctx().storage.readOnly).toBe(true)
+    })
+  })
+
+  it('stops writing when another tab leaves data this build cannot read', () => {
+    seedState(seededState())
+    renderProvider()
+    const future = JSON.stringify({ ...seededState(), version: STORAGE_VERSION + 1 })
+    window.localStorage.setItem(STATE_KEY, future)
+    deliverStorageEvent()
+
+    expect(ctx().storage.readOnly).toBe(true)
+    expect(ctx().storage.fromOtherTab).toBe(true)
+    // What this tab was showing stays on screen rather than vanishing.
+    expect(ctx().state.trips).toHaveLength(1)
+
+    act(() => {
+      ctx().actions.setThemePreference('dark')
+    })
+    expect(window.localStorage.getItem(STATE_KEY)).toBe(future)
+  })
+})
+
+describe('TouristProvider clear all data is a full wipe', () => {
+  it('leaves neither the name nor the email in the stored payload', () => {
+    seedState(seededState())
+    renderProvider()
+    act(() => {
+      ctx().actions.signIn({ name: 'Ada Lovelace', email: 'ada@example.com' })
+    })
+    expect(window.localStorage.getItem(STATE_KEY)).toContain('ada@example.com')
+
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    const live = window.localStorage.getItem(STATE_KEY) ?? ''
+    expect(live).not.toContain('Ada Lovelace')
+    expect(live).not.toContain('ada@example.com')
+    expect(ctx().state.user.isGuest).toBe(true)
+    expect(ctx().state.user.email).toBeNull()
+    expect(ctx().state.user.name).toBe(USER.name)
+    // A fresh guest, not the old record with its fields blanked.
+    expect(ctx().state.user.id).not.toBe(USER.id)
+  })
+
+  it('removes a backup copy that was already there', () => {
+    seedState(seededState())
+    window.localStorage.setItem(BACKUP_KEY, JSON.stringify(seededState()))
+    renderProvider()
+    expect(ctx().storage.hasBackup).toBe(true)
+
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(window.localStorage.getItem(BACKUP_KEY)).toBeNull()
+    expect(ctx().storage.hasBackup).toBe(false)
+  })
+
+  it('removes the backup taken from data it could not read, and its notice', () => {
+    window.localStorage.setItem(STATE_KEY, '{ "trips": [ { "id": "trip_half')
+    renderProvider()
+    expect(window.localStorage.getItem(BACKUP_KEY)).not.toBeNull()
+
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(window.localStorage.getItem(BACKUP_KEY)).toBeNull()
+    expect(ctx().storage.backedUp).toBe(false)
+    expect(ctx().storage.load).toBe('empty')
+  })
+
+  it('keeps the colour theme', () => {
+    seedState(seededState())
+    renderProvider()
+    act(() => {
+      ctx().actions.setThemePreference('dark')
+    })
+    act(() => {
+      ctx().actions.clearAllData()
+    })
+
+    expect(ctx().state.themePreference).toBe('dark')
+    expect(readStored().themePreference).toBe('dark')
+    expect(window.localStorage.getItem(THEME_KEY)).toBe('dark')
+  })
+})
+
+describe('TouristProvider first draft keeps stops added while it ran', () => {
+  it('keeps a custom stop added while the first draft was in flight', async () => {
+    seedState(seededState())
+    renderProvider()
+    const runs = holdGenerations()
+
+    const pending = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: false }))
+    act(() => {
+      ctx().actions.addCustomItem(
+        TRIP_ID,
+        {
+          title: 'Dinner with Sam',
+          category: 'food',
+          startTime: '19:30',
+          endTime: '21:00',
+          location: 'Le Marais',
+          description: '',
+          estimatedCost: 60,
+          notes: '',
+        },
+        { dayId: `${TRIP_ID}_d1` },
+      )
+    })
+    await land(runs[0].succeed, pending)
+
+    expect(generationFor(TRIP_ID).status).toBe('success')
+    expect(allTitles(ctx().state.daysByTrip[TRIP_ID])).toContain('Dinner with Sam')
+    expect(allTitles(readStored().daysByTrip[TRIP_ID])).toContain('Dinner with Sam')
+  })
+})
+
+describe('TouristProvider decides the itinerary shape by destination id', () => {
+  /** A trip update that changes only the destination text, as a rename would. */
+  function retitleDestination(destination: string) {
+    vi.spyOn(services.trips, 'update').mockImplementation((state, tripId) => {
+      const trips = state.trips.map((trip) => (trip.id === tripId ? { ...trip, destination } : trip))
+      return { state: { ...state, trips }, trip: trips.find((trip) => trip.id === tripId) ?? null }
+    })
+  }
+
+  async function draftWhileRetitling(destination: string): Promise<void> {
+    renderProvider()
+    const runs = holdGenerations()
+    const pending = start(() => ctx().actions.generateItinerary(TRIP_ID, { regenerate: true }))
+    retitleDestination(destination)
+    act(() => {
+      ctx().actions.updateTrip(TRIP_ID, { destination })
+    })
+    await land(runs[0].succeed, pending)
+  }
+
+  it('keeps a draft when only the display text changed and the id did not', async () => {
+    seedState(seededState())
+    await draftWhileRetitling('Paris')
+
+    expect(ctx().state.trips[0].destination).toBe('Paris')
+    expect(generationFor(TRIP_ID).status).toBe('success')
+  })
+
+  it('compares trimmed text when neither trip has an id', async () => {
+    const state = seededState()
+    state.trips = [makeTrip({ destination: 'Lisbon, Portugal', destinationId: null })]
+    seedState(state)
+    await draftWhileRetitling('  Lisbon, Portugal ')
+
+    expect(generationFor(TRIP_ID).status).toBe('success')
+  })
+
+  it('still discards a draft when the text names somewhere else and there are no ids', async () => {
+    const state = seededState()
+    state.trips = [makeTrip({ destination: 'Lisbon, Portugal', destinationId: null })]
+    seedState(state)
+    await draftWhileRetitling('Porto, Portugal')
+
+    expect(generationFor(TRIP_ID).status).toBe('idle')
   })
 })

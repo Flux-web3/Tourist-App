@@ -1,6 +1,6 @@
 import { createId, nowISO } from '@/domain/ids'
 import { eachDay } from '@/domain/format'
-import { mergeGeneratedDays, stripOtherDestinationItems } from '@/domain/itinerary'
+import { countItems, mergeGeneratedDays, stripOtherDestinationItems } from '@/domain/itinerary'
 import { getDestination, matchDestination } from '@/data/destinations'
 import { suggestTripName, validateTripDraft } from '@/domain/validation'
 import { buildItinerary } from './itineraryGenerator'
@@ -48,8 +48,12 @@ function destinationIdFromText(text: string): string | null {
  * from variant 0 on every save. A rename or a budget change threw away the draft
  * the traveller had regenerated to.
  *
- * The destination is compared as text and as `destinationId`: the id is what the
- * generator drafts from, and the text alone is all a pre-catalogue trip has.
+ * The destination is compared by `destinationId` whenever either trip has one,
+ * because the id is what the generator drafts from. The text is only display: a
+ * migrated trip stored as "paris" becomes "Paris, France" when the traveller
+ * picks the same city again, and comparing the text re-drafted their plan for a
+ * change of spelling. The text decides only between two trips with no id, which
+ * is all a pre-catalogue trip has, and then without its surrounding spaces.
  *
  * `currency` is deliberately not in the set. The generator's template prices are
  * euro prices, and every generated stop is priced in EUR whatever the trip's
@@ -62,12 +66,17 @@ function destinationIdFromText(text: string): string | null {
  * decides when an in-flight generation describes a trip that no longer exists.
  */
 function shouldReflow(current: Trip, next: Trip): boolean {
+  const currentId = current.destinationId ?? null
+  const nextId = next.destinationId ?? null
+  const destinationChanged =
+    currentId !== null || nextId !== null
+      ? nextId !== currentId
+      : next.destination.trim() !== current.destination.trim()
   return (
     next.startDate !== current.startDate ||
     next.endDate !== current.endDate ||
     next.pace !== current.pace ||
-    next.destination !== current.destination ||
-    (next.destinationId ?? null) !== (current.destinationId ?? null)
+    destinationChanged
   )
 }
 
@@ -91,7 +100,7 @@ export const tripService: TripService = {
 
     const timestamp = nowISO()
     const tripId = createId('trip')
-    const trip: Trip = {
+    const drafted: Trip = {
       id: tripId,
       userId,
       name: named.name,
@@ -111,8 +120,12 @@ export const tripService: TripService = {
       updatedAt: timestamp,
     }
 
-    const dayIds = eachDay(trip.startDate, trip.endDate)
-    const days = buildItinerary(trip, 0, timestamp).slice(0, dayIds.length)
+    const dayIds = eachDay(drafted.startDate, drafted.endDate)
+    const days = buildItinerary(drafted, 0, timestamp).slice(0, dayIds.length)
+    // The plan is drafted right here, so a trip that has stops is not a bare
+    // draft. Left as 'draft', the Trips list said "Itinerary not generated"
+    // beside "15 planned stops".
+    const trip: Trip = countItems(days) > 0 ? { ...drafted, status: 'itinerary_ready' } : drafted
 
     return {
       trip,

@@ -12,7 +12,12 @@ import type { Weekday } from '@/domain/types'
 const TIME = /\b\d{2}:\d{2}\b/g
 /** "09:00 - 18:00", "05:00 - midnight", "07:30 - sunset". */
 const RANGE = /(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}|midnight|sunset)/
-const CLOSED_DAY = /closed (Sun|Mon|Tues|Wednes|Thurs|Fri|Satur)days/g
+const DAY_STEM = '(Sun|Mon|Tues|Wednes|Thurs|Fri|Satur)'
+/**
+ * The two ways a note says a place cannot be visited on a day: "closed Tuesdays",
+ * and "services only on Sundays" (a church that is open to visitors the rest of the week).
+ */
+const CLOSED_DAY = new RegExp(`closed ${DAY_STEM}days|services only on ${DAY_STEM}days`, 'g')
 
 /** How the window records the note's words for a closing time. */
 const WORD_CLOSE: Record<string, string> = { midnight: '00:00', sunset: '18:00' }
@@ -57,11 +62,15 @@ describe('catalogue visiting windows', () => {
   it('lists exactly the closed days the note names', () => {
     for (const experience of EXPERIENCES) {
       const named = [...experience.hoursNote.matchAll(CLOSED_DAY)].map(
-        (match) => `${match[1]}day` as Weekday,
+        (match) => `${match[1] ?? match[2]}day` as Weekday,
       )
       expect([...(experience.visitWindow?.closedOn ?? [])], experience.id).toEqual(named)
     }
     expect(EXPERIENCES_BY_ID.get('exp_louvre_museum')?.visitWindow?.closedOn).toEqual(['Tuesday'])
+    // "services only on Sundays" means a visitor cannot go in on a Sunday.
+    expect(EXPERIENCES_BY_ID.get('exp_london_westminster_abbey')?.visitWindow?.closedOn).toEqual([
+      'Sunday',
+    ])
   })
 
   it('reads the notes the scheduler depends on as intended', () => {

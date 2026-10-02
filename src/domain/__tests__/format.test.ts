@@ -141,22 +141,64 @@ describe('toISODate', () => {
   })
 })
 
+/**
+ * Runs `body` with the process time zone set to `zone`. Node re-reads `TZ` when
+ * it is assigned, so `Date`'s local getters follow it inside this test process.
+ */
+function inTimeZone(zone: string, body: () => void): void {
+  const previous = process.env.TZ
+  process.env.TZ = zone
+  try {
+    body()
+  } finally {
+    if (previous === undefined) delete process.env.TZ
+    else process.env.TZ = previous
+  }
+}
+
 describe('todayISO', () => {
   it('matches the yyyy-mm-dd shape', () => {
     useFrozenClock(NOW)
     expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
-  it('returns the UTC date of the frozen clock', () => {
-    useFrozenClock(NOW)
-    expect(todayISO()).toBe('2025-03-01')
+  it('returns the local date of the traveller, not the UTC date', () => {
+    // 02:30 UTC on 2 March is still the evening of 1 March in New York.
+    useFrozenClock('2025-03-02T02:30:00.000Z')
+    inTimeZone('America/New_York', () => expect(todayISO()).toBe('2025-03-01'))
+    // 23:30 UTC on 1 March is already 00:30 on 2 March in Lagos (UTC+1).
+    vi.setSystemTime(new Date('2025-03-01T23:30:00.000Z'))
+    inTimeZone('Africa/Lagos', () => expect(todayISO()).toBe('2025-03-02'))
+    // 20:00 UTC on 1 March is 05:00 on 2 March in Tokyo (UTC+9).
+    vi.setSystemTime(new Date('2025-03-01T20:00:00.000Z'))
+    inTimeZone('Asia/Tokyo', () => expect(todayISO()).toBe('2025-03-02'))
   })
 
-  it('reports the next UTC day once the clock rolls past midnight UTC', () => {
+  it('agrees with UTC in the UTC zone', () => {
+    useFrozenClock(NOW)
+    inTimeZone('UTC', () => expect(todayISO()).toBe('2025-03-01'))
+  })
+
+  it('rolls over at local midnight', () => {
+    useFrozenClock('2025-03-01T04:59:59.999Z')
+    inTimeZone('America/New_York', () => expect(todayISO()).toBe('2025-02-28'))
+    vi.setSystemTime(new Date('2025-03-01T05:00:00.000Z'))
+    inTimeZone('America/New_York', () => expect(todayISO()).toBe('2025-03-01'))
+  })
+
+  it('is built from the local calendar fields whatever the zone', () => {
     useFrozenClock('2025-03-01T23:59:59.999Z')
-    expect(todayISO()).toBe('2025-03-01')
-    vi.setSystemTime(new Date('2025-03-02T00:00:00.000Z'))
-    expect(todayISO()).toBe('2025-03-02')
+    for (const zone of ['Africa/Lagos', 'America/New_York', 'Asia/Tokyo', 'UTC']) {
+      inTimeZone(zone, () => {
+        const now = new Date()
+        const local = [
+          String(now.getFullYear()).padStart(4, '0'),
+          String(now.getMonth() + 1).padStart(2, '0'),
+          String(now.getDate()).padStart(2, '0'),
+        ].join('-')
+        expect(todayISO(), zone).toBe(local)
+      })
+    }
   })
 })
 

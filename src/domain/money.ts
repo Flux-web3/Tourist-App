@@ -22,6 +22,14 @@ const CURRENCY_LOCALE: Record<CurrencyCode, string> = {
 }
 
 /**
+ * Catalogue and draft prices are for one adult and no total multiplies them by
+ * `Trip.travelers`. Screens that show an estimate say so with this sentence
+ * rather than let it pass for a price for the whole party.
+ */
+export const ESTIMATE_PER_PERSON_NOTE =
+  'Estimates are per person and are not multiplied by the number of travellers.'
+
+/**
  * Digits in the smallest unit each currency actually has. Yen has none: there
  * is no such thing as half a yen, so `¥1,000.00` is not a tidier `¥1,000` but a
  * wrong number with two invented digits.
@@ -117,7 +125,9 @@ export function formatMoney(
     maximumFractionDigits: fractionDigits,
   })
   const formatted = formatter.format(Number.isFinite(amount) ? amount : 0)
-  return showCode ? `${formatted} ${currency}` : formatted
+  // AED has no glyph, so Intl already printed the code as the symbol; adding it
+  // again would read `AED 1,234.50 AED`.
+  return showCode && !formatted.includes(currency) ? `${formatted} ${currency}` : formatted
 }
 
 /** Compact form for dense tiles, e.g. `\u20ac2,500 EUR`. */
@@ -143,12 +153,19 @@ export function hasFractionalPart(amount: number, currency: CurrencyCode): boole
  * `\u20ac2,500` rather than `\u20ac2,500.00 EUR`. The currency code is disclosed once
  * per screen instead of being repeated against every number, which is what
  * made the earlier budget and itinerary screens read like a ledger.
+ *
+ * `showCode` is for the one place a figure stands alone and must name its
+ * currency; it never doubles a code that the symbol already is (AED).
  */
-export function formatAmount(amount: number, currency: CurrencyCode): string {
+export function formatAmount(
+  amount: number,
+  currency: CurrencyCode,
+  options: { showCode?: boolean } = {},
+): string {
   const safe = Number.isFinite(amount) ? amount : 0
   return formatMoney(safe, currency, {
     showCents: hasFractionalPart(safe, currency),
-    showCode: false,
+    showCode: options.showCode ?? false,
   })
 }
 
@@ -220,14 +237,20 @@ export interface BudgetSummary {
  * already, which is what lets a caller pass only amounts and get the behaviour
  * it always got. Shared by the expense and the itinerary-estimate paths so the
  * two can never drift into treating a mismatch differently.
+ *
+ * A free amount in another currency adds nothing to any total, so it is neither
+ * reported as a foreign code nor counted: `uncountedCount` is the number of
+ * priced amounts left out, which is the number a screen can honestly show. It
+ * is exported so every screen that states that number uses this one rule.
  */
-function partitionByCurrency(
+export function partitionByCurrency(
   amounts: readonly number[],
   codes: readonly CurrencyCode[] | undefined,
   currency: CurrencyCode,
 ): { counted: number[]; otherCodes: CurrencyCode[]; uncountedCount: number } {
   const counted: number[] = []
   const otherCodes = new Set<CurrencyCode>()
+  let uncountedCount = 0
 
   amounts.forEach((amount, index) => {
     const amountCurrency = codes?.[index] ?? currency
@@ -235,14 +258,12 @@ function partitionByCurrency(
       counted.push(amount)
       return
     }
+    if (toCents(amount, amountCurrency) === 0) return
     otherCodes.add(amountCurrency)
+    uncountedCount += 1
   })
 
-  return {
-    counted,
-    otherCodes: [...otherCodes].sort(),
-    uncountedCount: amounts.length - counted.length,
-  }
+  return { counted, otherCodes: [...otherCodes].sort(), uncountedCount }
 }
 
 /**

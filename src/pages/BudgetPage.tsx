@@ -14,7 +14,7 @@ import { Icon } from '@/components/ui/Icon'
 import { ProgressBar } from '@/components/ui/StatTile'
 import { formatDate, formatShortDate } from '@/domain/format'
 import { estimateTotal } from '@/domain/itinerary'
-import { CURRENCY_SYMBOLS, formatAmount } from '@/domain/money'
+import { CURRENCY_SYMBOLS, ESTIMATE_PER_PERSON_NOTE, formatAmount } from '@/domain/money'
 import { EXPENSE_CATEGORY_LABEL, PROTOTYPE_LABEL } from '@/lib/labels'
 import { selectExpensesByCategory } from '@/state/selectors'
 import { useTourist, useTrip, useTripBudget, useTripDays, useTripExpenses } from '@/state/useTourist'
@@ -354,8 +354,7 @@ export default function BudgetPage() {
             any time.
           </Definition>
           <Definition term={PROTOTYPE_LABEL.aiDraftEstimate}>
-            A projection from the itinerary, not a booking or a bill. It adds up the estimated cost
-            of every planned stop.
+            {`A projection from the itinerary, not a booking or a bill. It adds up the estimated cost of every planned stop. ${ESTIMATE_PER_PERSON_NOTE}`}
           </Definition>
           <Definition term={PROTOTYPE_LABEL.actualSpent}>
             Expenses you have logged. This is the only settled figure on the page.

@@ -669,7 +669,7 @@ const LONDON_SPECS: SeedSpec[] = [
     image: 'westminsterAbbey',
     tags: ['church', 'history', 'architecture'],
     hoursNote: 'Demo hours: roughly 09:30 - 15:30 Mon - Sat, services only on Sundays',
-    visitWindow: { opens: '09:30', closes: '15:30' },
+    visitWindow: { opens: '09:30', closes: '15:30', closedOn: ['Sunday'] },
     bestTime: 'Weekday morning',
   },
 ]

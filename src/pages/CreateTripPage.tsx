@@ -107,9 +107,16 @@ export default function CreateTripPage() {
     [errors],
   )
 
+  /*
+    Focus moves to the summary only because a submit just failed. Tying it to
+    the error list instead pulled focus out of a field every time typing
+    cleared one of its errors, and the rest of the word was lost. The counter
+    also changes on a second failed submit, so that one is announced too.
+  */
+  const [failedSubmits, setFailedSubmits] = useState(0)
   useEffect(() => {
-    if (submitted && messages.length > 0) summaryRef.current?.focus()
-  }, [messages.length, submitted])
+    if (failedSubmits > 0) summaryRef.current?.focus()
+  }, [failedSubmits])
 
   const update = useCallback(
     (patch: Partial<TripDraft>) => {
@@ -126,7 +133,10 @@ export default function CreateTripPage() {
     setSubmitted(true)
     const result = validateTripDraft(draft)
     setErrors(result.errors)
-    if (!result.isValid) return
+    if (!result.isValid) {
+      setFailedSubmits((count) => count + 1)
+      return
+    }
     setIsSubmitting(true)
     const trip = actions.createTrip({
       ...draft,

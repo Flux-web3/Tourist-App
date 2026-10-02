@@ -91,6 +91,8 @@ export function ItineraryItemCard({
    */
   useEffect(() => {
     if (moving) movePanelRef.current?.querySelector('select')?.focus()
+    // A day chosen and then cancelled is not remembered the next time.
+    else setTargetDayId('')
   }, [moving])
 
   const timeParts = [formatTime(item.startTime), item.endTime ? formatTime(item.endTime) : null]
@@ -276,14 +278,26 @@ export function ItineraryItemCard({
             options={moveOptions}
             value={targetDayId}
             placeholder="Choose a day"
-            className="min-w-0 flex-1 sm:max-w-72"
-            onChange={(event) => {
-              const next = event.target.value
-              if (next === '') return
-              setTargetDayId('')
-              onMove(next)
-            }}
+            className="min-w-0 flex-1 basis-full sm:max-w-72 sm:basis-auto"
+            onChange={(event) => setTargetDayId(event.target.value)}
           />
+          {/*
+            Choosing a day only chooses it. The stop used to move from the
+            select's own change event, and on Windows ArrowDown on a closed
+            select fires that for every option it passes, so a keyboard user
+            could never get beyond the first other day.
+          */}
+          <Button
+            variant="secondary"
+            disabled={targetDayId === ''}
+            onClick={() => {
+              const chosen = targetDayId
+              setTargetDayId('')
+              onMove(chosen)
+            }}
+          >
+            Move
+          </Button>
           <Button variant="ghost" onClick={onToggleMove}>
             Cancel
           </Button>
