@@ -283,9 +283,11 @@ export function RadioChipGroup<T extends string>({
               />
               <label
                 htmlFor={id}
-                className={`flex min-h-11 cursor-pointer flex-col justify-center rounded-control border px-3 py-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
+                className={`flex min-h-11 cursor-pointer flex-col justify-center border px-4 py-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
+                  option.hint ? 'rounded-control' : 'rounded-pill'
+                } ${
                   checked
-                    ? 'border-navy bg-navy text-ink-inverse'
+                    ? 'border-btn-primary bg-btn-primary text-btn-primary-fg'
                     : 'border-line-strong bg-surface text-ink hover:bg-surface-low'
                 }`}
               >
@@ -366,7 +368,7 @@ export function CheckboxChipGroup<T extends string>({
                 htmlFor={id}
                 className={`inline-flex min-h-11 cursor-pointer items-center rounded-pill border px-4 text-label-lg capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
                   checked
-                    ? 'border-terracotta bg-terracotta text-btn-accent-fg'
+                    ? 'border-btn-primary bg-btn-primary text-btn-primary-fg'
                     : 'border-line-strong bg-surface text-ink-muted hover:bg-surface-low'
                 }`}
               >

@@ -62,16 +62,16 @@ function DayPreview({ day }: { day: ItineraryDay }) {
   const hidden = day.items.length - shown.length
 
   return (
-    <div className="rounded-control border border-line bg-surface-low p-3">
-      <p className="text-label-md text-ink">{`Already in Day ${day.index}`}</p>
+    <div className="rounded-control border border-line bg-surface-low p-4">
+      <p className="text-label-lg text-ink">{`Already in Day ${day.index}`}</p>
       {day.items.length === 0 ? (
         <p className="mt-1 text-body-sm text-ink-subtle">Nothing planned yet.</p>
       ) : (
         <>
-          <ul className="mt-2 flex list-none flex-col gap-1">
+          <ul className="mt-2 flex list-none flex-col gap-1.5">
             {shown.map((item) => (
               <li key={item.id} className="flex min-w-0 items-baseline gap-2 text-body-sm">
-                <span className="tnum w-20 shrink-0 text-ink-subtle">
+                <span className="tnum w-20 shrink-0 font-semibold text-ink-muted">
                   {formatTime(item.startTime) ?? 'Any time'}
                 </span>
                 <span className="min-w-0 break-words text-ink-muted">{item.title}</span>
@@ -191,17 +191,17 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
         </>
       }
     >
-      <form id={formId} noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-body-sm text-ink-muted">
-          <span className="inline-flex items-center gap-1.5">
+      <form id={formId} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <p className="flex flex-wrap items-center gap-2 text-label-md text-ink-muted">
+          <span className="inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-low px-3 py-1">
             <Icon name="schedule" size={16} className="text-ink-subtle" />
             {formatDuration(experience.durationMinutes)}
           </span>
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-low px-3 py-1">
             <Icon name={ITINERARY_CATEGORY_ICON[experience.category]} size={16} className="text-ink-subtle" />
             {ITINERARY_CATEGORY_LABEL[experience.category]}
           </span>
-          <span className="tnum inline-flex items-center gap-1.5">
+          <span className="tnum inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-low px-3 py-1">
             <Icon name="sell" size={16} className="text-ink-subtle" />
             {`${PROTOTYPE_LABEL.estimatedPrice}: ${priceLine}`}
           </span>
@@ -257,7 +257,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
         />
 
         {suggestion?.kind === 'slot' ? (
-          <p className="text-body-sm text-ink-muted" aria-live="polite">
+          <p className="rounded-control bg-surface-low px-3 py-2 text-body-sm text-ink-muted" aria-live="polite">
             {suggestionLine(suggestion)}
           </p>
         ) : null}
@@ -269,7 +269,7 @@ export function AddToTripDialog({ trip, experience, onClose, onAdded }: AddToTri
           </Alert>
         ) : null}
         {closedWeekday ? (
-          <p className="text-body-sm text-ink-muted">
+          <p className="rounded-control bg-surface-low px-3 py-2 text-body-sm text-ink-muted">
             {`Its demo hours list it as closed on ${closedWeekday}s, and this day is a ${closedWeekday}. Check before you go.`}
           </p>
         ) : null}

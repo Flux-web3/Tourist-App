@@ -50,14 +50,16 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    // `page-header` drops the bottom margin when the page already spaces its
+    // sections with a flex gap, so the two never add up to a double gap.
+    <header className="page-header mb-6 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="mb-1 text-label-sm uppercase tracking-widest text-terracotta">{eyebrow}</p>
+          <p className="eyebrow mb-2">{eyebrow}</p>
         ) : null}
-        <h1 className="text-headline-lg">{title}</h1>
+        <h1 className="text-headline-lg text-ink">{title}</h1>
         {description ? (
-          <div className="mt-2 max-w-2xl text-body-md text-ink-muted">{description}</div>
+          <div className="mt-2 max-w-2xl text-body-md text-ink-muted sm:text-body-lg">{description}</div>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

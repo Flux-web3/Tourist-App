@@ -58,15 +58,27 @@ function FigureRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-3 rounded-control border px-3 py-2 ${FIGURE_TONE[tone]}`}
+      className={`flex items-center justify-between gap-3 rounded-control border px-3.5 py-2.5 ${FIGURE_TONE[tone]}`}
     >
       <dt className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-label-lg">
-        <Icon name={icon} size={14} className="shrink-0 opacity-70" />
+        <Icon name={icon} size={14} className="shrink-0 self-center" />
         <span className="min-w-0">{label}</span>
-        {note ? <span className="text-body-sm opacity-80">{note}</span> : null}
+        {note ? <span className="text-body-sm font-normal">{note}</span> : null}
       </dt>
-      <dd className="tnum shrink-0 text-headline-sm">{formatAmount(amount, currency)}</dd>
+      <dd className="tnum min-w-0 max-w-[60%] text-right text-body-lg font-semibold [overflow-wrap:anywhere]">
+        {formatAmount(amount, currency)}
+      </dd>
     </div>
+  )
+}
+
+/** The closing line of a list card: one label, one figure, one rule above it. */
+function TotalRow({ label, amount }: { label: string; amount: string }) {
+  return (
+    <p className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-line pt-3 text-label-lg text-ink">
+      <span>{label}</span>
+      <span className="tnum text-right [overflow-wrap:anywhere]">{amount}</span>
+    </p>
   )
 }
 
@@ -74,7 +86,7 @@ function Definition({ term, children }: { term: string; children: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-label-md">{term}</dt>
-      <dd className="opacity-90">{children}</dd>
+      <dd>{children}</dd>
     </div>
   )
 }
@@ -167,7 +179,7 @@ export default function BudgetPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Budget"
         title={trip.name}
@@ -193,7 +205,7 @@ export default function BudgetPage() {
         full-width tiles carrying `€1,385.00 EUR` each, which pushed the expense
         list — the only part of the page a traveller acts on — below the fold.
       */}
-      <section aria-label="Budget summary" className="surface-card flex flex-col gap-3 p-4 sm:p-5">
+      <section aria-label="Budget summary" className="surface-card flex flex-col gap-5 p-5">
         {/*
           Over budget reads through the `danger` border and figure plus the
           wording, not through a flooded red panel or an alarm icon. The minus
@@ -203,15 +215,11 @@ export default function BudgetPage() {
         */}
         <div
           role="status"
-          className={`rounded-control border bg-surface-low px-4 py-3 ${
+          className={`rounded-control border bg-surface-low px-4 py-4 ${
             over ? 'border-danger/50' : 'border-line'
           }`}
         >
-          <p
-            className={`flex items-center gap-1.5 text-label-sm uppercase tracking-wider ${
-              over ? 'text-danger' : 'text-ink-subtle'
-            }`}
-          >
+          <p className={`eyebrow flex items-center gap-1.5 ${over ? 'text-danger' : ''}`}>
             <Icon name="account_balance_wallet" size={14} className="shrink-0" />
             <span>{PROTOTYPE_LABEL.remaining}</span>
           </p>
@@ -221,7 +229,7 @@ export default function BudgetPage() {
             minus, leaving the sign alone above the number.
           */}
           <p
-            className={`tnum mt-0.5 [overflow-wrap:anywhere] ${
+            className={`tnum mt-1 [overflow-wrap:anywhere] ${
               remainingText.length <= 11
                 ? 'text-headline-lg sm:text-display'
                 : remainingText.length <= 15
@@ -231,14 +239,14 @@ export default function BudgetPage() {
           >
             {remainingText}
           </p>
-          <p className="mt-0.5 text-body-sm text-ink-muted">
+          <p className="mt-1.5 text-body-sm text-ink-muted">
             {over
               ? `${overBy} past your ${PROTOTYPE_LABEL.tripBudget}. Log less, remove an expense, or raise the budget.`
               : `${PROTOTYPE_LABEL.tripBudget} minus ${PROTOTYPE_LABEL.actualSpent}.`}
           </p>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <p className="text-label-lg text-ink">Budget used</p>
             <p className="tnum text-body-sm text-ink-muted">
@@ -260,7 +268,7 @@ export default function BudgetPage() {
           )}
         </div>
 
-        <dl className="flex flex-col gap-1.5">
+        <dl className="flex flex-col gap-2">
           <FigureRow
             tone="planned"
             icon="savings"
@@ -309,7 +317,6 @@ export default function BudgetPage() {
           title={`${budget.uncountedExpenseCount} ${
             budget.uncountedExpenseCount === 1 ? 'expense is' : 'expenses are'
           } not counted in this total`}
-          className="mb-4"
         >
           {mixedExpenseAdvice}
         </Alert>
@@ -327,7 +334,6 @@ export default function BudgetPage() {
           title={`${budget.uncountedEstimateCount} planned ${
             budget.uncountedEstimateCount === 1 ? 'stop is' : 'stops are'
           } not counted in the ${PROTOTYPE_LABEL.aiDraftEstimate}`}
-          className="mb-4"
         >
           {`They are priced in ${budget.otherEstimateCurrencies.join(', ')} and this trip is in ${currency}. Tourist does not convert between currencies. Your ${PROTOTYPE_LABEL.tripBudget}, ${PROTOTYPE_LABEL.actualSpent} and ${PROTOTYPE_LABEL.remaining} are unaffected, because the estimate never counts toward them.`}
         </Alert>
@@ -391,11 +397,11 @@ export default function BudgetPage() {
               {expenses.map((expense) => (
                 <li
                   key={expense.id}
-                  className="flex items-start gap-2 border-b border-line py-2.5 first:pt-0 last:border-b-0 last:pb-0"
+                  className="flex items-start gap-3 border-b border-line py-3 first:pt-0 last:border-b-0 last:pb-0"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="break-words text-label-lg text-ink">{expense.description}</p>
-                    <p className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                       <Badge tone="actual">{EXPENSE_CATEGORY_LABEL[expense.category]}</Badge>
                       <span className="tnum text-body-sm text-ink-subtle">
                         {formatShortDate(expense.date)}
@@ -421,8 +427,8 @@ export default function BudgetPage() {
                     scannable. Each is shown in the currency it was logged in,
                     never relabelled with the trip's symbol.
                   */}
-                  <div className="flex shrink-0 items-center gap-1">
-                    <p className="tnum text-label-lg text-ink">
+                  <div className="flex max-w-[60%] shrink-0 items-center gap-1">
+                    <p className="tnum text-right text-label-lg font-semibold text-ink [overflow-wrap:anywhere]">
                       {formatAmount(expense.amount, expense.currency)}
                     </p>
                     <ActionMenu
@@ -441,10 +447,10 @@ export default function BudgetPage() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
-              <span>{PROTOTYPE_LABEL.actualSpent}</span>
-              <span className="tnum">{formatAmount(budget.actualSpent, currency)}</span>
-            </p>
+            <TotalRow
+              label={PROTOTYPE_LABEL.actualSpent}
+              amount={formatAmount(budget.actualSpent, currency)}
+            />
           </>
         )}
       </Card>
@@ -469,16 +475,16 @@ export default function BudgetPage() {
           />
         ) : (
           <>
-            <ul className="flex list-none flex-col gap-3">
+            <ul className="flex list-none flex-col gap-4">
               {breakdown.map((row) => {
                 const share =
                   budget.actualSpent > 0 ? Math.round((row.total / budget.actualSpent) * 100) : 0
                 const label = EXPENSE_CATEGORY_LABEL[row.category]
                 return (
-                  <li key={row.category} className="flex flex-col gap-1">
+                  <li key={row.category} className="flex flex-col gap-1.5">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="text-label-lg text-ink">{label}</span>
-                      <span className="tnum text-label-lg text-ink">
+                      <span className="tnum text-right text-label-lg font-semibold text-ink [overflow-wrap:anywhere]">
                         {formatAmount(row.total, currency)}
                       </span>
                     </div>
@@ -495,10 +501,7 @@ export default function BudgetPage() {
                 )
               })}
             </ul>
-            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
-              <span>Total logged</span>
-              <span className="tnum">{formatAmount(budget.actualSpent, currency)}</span>
-            </p>
+            <TotalRow label="Total logged" amount={formatAmount(budget.actualSpent, currency)} />
             {budget.mixedCurrency ? (
               <p className="tnum mt-1 text-body-sm text-ink-subtle">
                 {`Not counted here: ${uncountedLabel} in ${otherCurrencyList}.`}
@@ -540,7 +543,7 @@ export default function BudgetPage() {
               {days.map((day) => (
                 <li
                   key={day.id}
-                  className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line py-2 first:pt-0 last:border-b-0 last:pb-0"
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line py-3 first:pt-0 last:border-b-0 last:pb-0"
                 >
                   <span className="text-body-md text-ink-muted">
                     <span className="tnum text-label-lg text-ink">{`Day ${day.index}`}</span>
@@ -548,16 +551,16 @@ export default function BudgetPage() {
                       {formatShortDate(day.date)}
                     </span>
                   </span>
-                  <span className="tnum text-body-md text-ink">
+                  <span className="tnum text-right text-body-md font-semibold text-ink [overflow-wrap:anywhere]">
                     {formatAmount(estimateTotal([day], currency), currency)}
                   </span>
                 </li>
               ))}
             </ul>
-            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3 text-label-lg text-ink">
-              <span>{PROTOTYPE_LABEL.aiDraftEstimate}</span>
-              <span className="tnum">{formatAmount(budget.itineraryEstimate, currency)}</span>
-            </p>
+            <TotalRow
+              label={PROTOTYPE_LABEL.aiDraftEstimate}
+              amount={formatAmount(budget.itineraryEstimate, currency)}
+            />
           </>
         )}
       </Card>

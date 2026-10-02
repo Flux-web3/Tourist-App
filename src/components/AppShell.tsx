@@ -1,7 +1,8 @@
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useAppState } from '@/state/useTourist'
+import { Brand } from './Brand'
 import { ThemeToggle } from './ThemeToggle'
 import { Icon } from './ui/Icon'
 
@@ -12,23 +13,14 @@ function useTripContextId(): string | null {
   return TRIP_PATH.exec(pathname)?.[1] ?? null
 }
 
-function Brand() {
-  return (
-    // The logo goes home to the landing page, as it does on the landing page
-    // itself. Trips stays one tap away in the primary nav and the mobile tab bar.
-    <Link to="/" className="flex items-center gap-2 rounded-control" aria-label="Tourist, home">
-      <span className="grid h-9 w-9 place-items-center rounded-control bg-navy text-btn-primary-fg">
-        <Icon name="travel_explore" size={20} />
-      </span>
-      <span className="text-headline-sm">Tourist</span>
-    </Link>
-  )
-}
-
 function navClass({ isActive }: { isActive: boolean }): string {
+  // A pill, like every other control. The active one is filled and edged so it
+  // reads in both themes without leaning on colour alone.
   return [
-    'rounded-control px-3 py-2 text-label-lg transition-colors',
-    isActive ? 'bg-surface-high text-ink' : 'text-ink-muted hover:bg-surface-low hover:text-ink',
+    'inline-flex min-h-10 items-center rounded-pill border px-3.5 py-1.5 text-label-lg transition-colors',
+    isActive
+      ? 'border-line-strong bg-surface-high text-ink'
+      : 'border-transparent text-ink-muted hover:bg-surface-low hover:text-ink',
   ].join(' ')
 }
 
@@ -49,13 +41,24 @@ function MobileTab({
       end={end}
       className={({ isActive }) =>
         [
-          'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-label-sm',
+          'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-label-sm',
           isActive ? 'text-terracotta' : 'text-ink-subtle',
         ].join(' ')
       }
     >
-      <Icon name={icon} size={20} />
-      {label}
+      {({ isActive }) => (
+        <>
+          {/* The active tab gets a pill behind its icon, the same shape as the desktop nav. */}
+          <span
+            className={`grid h-8 w-14 place-items-center rounded-pill transition-colors ${
+              isActive ? 'bg-surface-high' : ''
+            }`}
+          >
+            <Icon name={icon} size={20} />
+          </span>
+          {label}
+        </>
+      )}
     </NavLink>
   )
 }
@@ -104,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             aria-label="Trip sections"
             className="mx-auto hidden max-w-6xl items-center gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:flex"
           >
-            <span className="mr-2 max-w-56 truncate text-label-md text-ink-subtle" title={trip.name}>
+            <span className="mr-2 max-w-56 truncate text-label-md font-semibold text-ink-muted" title={trip.name}>
               {trip.name}
             </span>
             <NavLink to={`/trips/${trip.id}`} end className={navClass}>

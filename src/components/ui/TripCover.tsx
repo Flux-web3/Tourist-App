@@ -1,27 +1,25 @@
 import type { ReactNode } from 'react'
 
 /**
- * A generated cover for a trip.
+ * A drawn cover for a trip, used when Tourist has no photograph of the place.
  *
  * Trips go wherever the traveller types, and Tourist has photographs of
  * exactly one city. Showing a stock photograph of somewhere else — or a
  * generic "travel" picture — would be the same class of dishonesty as the
  * invented review counts: it implies the product knows the place. So this
- * draws an illustration instead, seeded from the destination, and never
- * pretends to be a photograph.
+ * draws an illustration instead, and never pretends to be a photograph.
  *
- * The same destination always produces the same cover, which is what makes a
- * trip recognisable in a list. Every colour is a palette token, so it follows
- * the theme without a second set of values.
+ * It is drawn in the landing page's own language: the night sky as the ground
+ * (`photo-hero`, inside the `on-photo` scope so the gold is the on-photograph
+ * gold), a low gold sun, and three calm ridges that fade from a warm dusk tone
+ * to the night itself. Nothing on it is a hex value; the tones are mixes of the
+ * `--night` and `--gold` tokens, which do not change with the theme, so the
+ * cover is the same in light and dark just as a photograph would be.
+ *
+ * The seed (the destination) only moves the sun, the stars and the height of
+ * the ridges, so the same destination always draws the same cover. That is
+ * what makes a trip recognisable in a list.
  */
-
-const PALETTES = [
-  { sun: 'var(--terracotta)', far: 'var(--navy)', near: 'var(--sage)' },
-  { sun: 'var(--sage)', far: 'var(--terracotta)', near: 'var(--navy)' },
-  { sun: 'var(--navy)', far: 'var(--sage)', near: 'var(--terracotta)' },
-  { sun: 'var(--terracotta)', far: 'var(--sage)', near: 'var(--navy)' },
-  { sun: 'var(--sage)', far: 'var(--navy)', near: 'var(--terracotta)' },
-] as const
 
 /** FNV-1a. Small, stable across runs, and good enough to scatter short strings. */
 function hash(value: string): number {
@@ -33,6 +31,11 @@ function hash(value: string): number {
   return out >>> 0
 }
 
+/** Ridge fills, far to near. Each steps closer to the pure night ground. */
+const FAR_RIDGE = 'color-mix(in srgb, var(--night) 74%, var(--gold) 26%)'
+const MID_RIDGE = 'color-mix(in srgb, var(--night) 86%, var(--gold) 14%)'
+const NEAR_RIDGE = 'var(--night)'
+
 export interface TripCoverProps {
   /** Seeds the illustration. The same destination always draws the same cover. */
   destination: string
@@ -40,7 +43,7 @@ export interface TripCoverProps {
   ratio?: string
   rounded?: string
   className?: string
-  /** Overlaid content, e.g. a trip name. */
+  /** Overlaid content, e.g. a trip name. It sits in the on-photo scope. */
   children?: ReactNode
 }
 
@@ -52,16 +55,27 @@ export function TripCover({
   children,
 }: TripCoverProps) {
   const seed = hash(destination.trim().toLowerCase() || 'somewhere')
-  const palette = PALETTES[seed % PALETTES.length]
-  const sunX = 60 + ((seed >>> 3) % 280)
-  const sunY = 54 + ((seed >>> 7) % 40)
-  const sunR = 26 + ((seed >>> 11) % 16)
-  const farLift = ((seed >>> 13) % 34) - 17
-  const nearLift = ((seed >>> 17) % 30) - 15
+  const sunX = 70 + ((seed >>> 3) % 260)
+  const sunY = 78 + ((seed >>> 7) % 34)
+  const sunR = 20 + ((seed >>> 11) % 14)
+  const farLift = ((seed >>> 13) % 30) - 15
+  const midLift = ((seed >>> 17) % 24) - 12
+  const nearLift = ((seed >>> 21) % 20) - 10
+
+  // A handful of stars in the upper sky, scattered by the same seed.
+  const stars = [0, 1, 2, 3, 4].map((index) => {
+    const bits = hash(`${seed}:${index}`)
+    return {
+      x: 12 + (bits % 376),
+      y: 10 + ((bits >>> 9) % 52),
+      r: bits % 3 === 0 ? 1.6 : 1.1,
+      o: 0.35 + ((bits >>> 17) % 4) * 0.1,
+    }
+  })
 
   return (
     <div
-      className={`relative overflow-hidden bg-surface-low ${rounded} ${className}`}
+      className={`on-photo photo-hero relative overflow-hidden ${rounded} ${className}`}
       style={{ aspectRatio: ratio }}
     >
       <svg
@@ -71,20 +85,29 @@ export function TripCover({
         aria-hidden="true"
         focusable="false"
       >
-        <circle cx={sunX} cy={sunY} r={sunR} fill={palette.sun} opacity="0.5" />
+        {stars.map((star, index) => (
+          <circle key={index} cx={star.x} cy={star.y} r={star.r} fill="var(--ink)" opacity={star.o} />
+        ))}
+        <circle cx={sunX} cy={sunY} r={sunR * 2.1} fill="var(--gold)" opacity="0.14" />
+        <circle cx={sunX} cy={sunY} r={sunR * 1.45} fill="var(--gold)" opacity="0.22" />
+        <circle cx={sunX} cy={sunY} r={sunR} fill="var(--gold)" />
         <path
-          d={`M0 ${150 + farLift} C 90 ${112 + farLift}, 150 ${182 + farLift}, 236 ${146 + farLift} S 340 ${
+          d={`M0 ${140 + farLift} C 80 ${112 + farLift}, 150 ${160 + farLift}, 236 ${132 + farLift} S 340 ${
             108 + farLift
-          }, 400 ${140 + farLift} L400 225 L0 225 Z`}
-          fill={palette.far}
-          opacity="0.22"
+          }, 400 ${128 + farLift} L400 225 L0 225 Z`}
+          fill={FAR_RIDGE}
         />
         <path
-          d={`M0 ${182 + nearLift} C 78 ${152 + nearLift}, 138 ${204 + nearLift}, 214 ${180 + nearLift} S 332 ${
-            150 + nearLift
-          }, 400 ${176 + nearLift} L400 225 L0 225 Z`}
-          fill={palette.near}
-          opacity="0.34"
+          d={`M0 ${170 + midLift} C 90 ${142 + midLift}, 150 ${190 + midLift}, 230 ${164 + midLift} S 340 ${
+            146 + midLift
+          }, 400 ${164 + midLift} L400 225 L0 225 Z`}
+          fill={MID_RIDGE}
+        />
+        <path
+          d={`M0 ${196 + nearLift} C 70 ${180 + nearLift}, 140 ${214 + nearLift}, 220 ${198 + nearLift} S 340 ${
+            184 + nearLift
+          }, 400 ${196 + nearLift} L400 225 L0 225 Z`}
+          fill={NEAR_RIDGE}
         />
       </svg>
       {children ? <div className="relative h-full w-full">{children}</div> : null}

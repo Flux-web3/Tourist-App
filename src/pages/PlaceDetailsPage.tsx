@@ -23,7 +23,7 @@ const NO_BOOKING = 'No booking or payment in this prototype.'
 
 function DetailFact({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 border-b border-line pb-2 last:border-b-0">
+    <div className="flex min-w-0 flex-col gap-0.5 border-b border-line pb-3 last:border-b-0">
       <dt className="text-label-sm uppercase tracking-wider text-ink-subtle">{term}</dt>
       <dd className="break-words text-body-md text-ink">{children}</dd>
     </div>
@@ -32,17 +32,18 @@ function DetailFact({ term, children }: { term: string; children: ReactNode }) {
 
 function LoadingView() {
   return (
-    <div className="flex flex-col gap-4" aria-busy="true">
+    <div className="flex flex-col gap-6" aria-busy="true">
       <p role="status" className="sr-only">
         Loading place details
       </p>
-      <Skeleton className="h-9 w-40" />
-      <Skeleton className="h-10 w-3/4" />
-      <Skeleton className="h-4 w-2/3" />
-      <Skeleton className="aspect-video w-full" />
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-4/5" />
+      <Skeleton className="h-11 w-40" />
+      <div className="aspect-video w-full animate-pulse rounded-sheet bg-surface-high" aria-hidden="true" />
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-10 w-3/4" />
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-4/5" />
+      </div>
     </div>
   )
 }
@@ -123,105 +124,113 @@ export default function PlaceDetailsPage() {
     : ''
 
   return (
-    <div className="flex flex-col gap-5">
-      <ButtonLink to={backHref} variant="ghost" icon={<Icon name="arrow_back" size={18} />}>
+    <div className="flex flex-col gap-6">
+      <ButtonLink
+        to={backHref}
+        variant="ghost"
+        icon={<Icon name="arrow_back" size={18} />}
+        className="-ml-3 self-start"
+      >
         Back to explore
       </ButtonLink>
 
-      <PageHeader
-        eyebrow={ITINERARY_CATEGORY_LABEL[experience.category]}
-        title={experience.name}
-        description={experience.summary}
-        actions={
-          <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
-            {PROTOTYPE_LABEL.curatedGuide}
-          </Badge>
-        }
-      />
-
-      <p className="flex flex-wrap items-center gap-x-4 gap-y-2 text-body-md text-ink-muted">
-        <span className="inline-flex min-w-0 items-start gap-1.5">
-          <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
-          <span className="min-w-0 break-words">
-            {`${experience.neighborhood} · ${experience.city}, ${experience.country}`}
-          </span>
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Icon name="schedule" size={16} className="shrink-0 text-ink-subtle" />
-          {formatDuration(experience.durationMinutes)}
-        </span>
-      </p>
-
-      <figure className="flex flex-col">
-        <PlaceImage experience={experience} ratio="16 / 9" loading="eager" />
-        {experience.imageCredit ? (
-          <figcaption className="mt-2 break-words text-body-sm text-ink-subtle">
-            {`Photo: ${experience.imageCredit.author} · `}
-            <a
-              href={experience.imageCredit.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="font-semibold text-navy underline underline-offset-2 hover:text-navy-hover"
-            >
-              {`${experience.imageCredit.license} source on Wikimedia Commons`}
-              <span className="sr-only"> (opens in a new tab)</span>
-            </a>
-          </figcaption>
-        ) : null}
-      </figure>
-
-      <Disclosure
-        tone="catalog"
-        icon="auto_stories"
-        summary="Curated demo record, not a live listing"
-      >
-        {`This record is hand-written prototype data, not a live listing. Prices are estimates and opening hours are typical ranges rather than live availability, and there is no map behind this page. ${PROTOTYPE_LABEL.informationMayChange}.`}
-      </Disclosure>
-
-      {addedDay && trip ? (
-        <div
-          role="status"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-actual-border bg-actual-bg px-4 py-3 text-actual-ink"
-        >
-          <div className="min-w-0">
-            <p className="text-body-md">
-              {`${experience.name} was added to Day ${addedDay.index} · ${formatShortDate(
-                addedDay.date,
-              )} of ${trip.name}.`}
-            </p>
-            {addedPlace?.suggested ? (
-              <p className="mt-1 text-body-sm">
-                {`Tourist suggested the ${formatTime(addedPlace.startTime) ?? addedPlace.startTime} start; you can change it in the itinerary.`}
-              </p>
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
+        <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
+          {/* The place leads: its photograph, or the drawn cover when Tourist has none. */}
+          <figure className="flex flex-col">
+            <PlaceImage experience={experience} ratio="16 / 9" rounded="rounded-sheet" loading="eager" />
+            {experience.imageCredit ? (
+              <figcaption className="mt-3 break-words text-body-sm text-ink-subtle">
+                {`Photo: ${experience.imageCredit.author} · `}
+                <a
+                  href={experience.imageCredit.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-navy underline underline-offset-2 hover:text-navy-hover"
+                >
+                  {`${experience.imageCredit.license} source on Wikimedia Commons`}
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              </figcaption>
             ) : null}
+          </figure>
+
+          <div className="flex flex-col gap-4">
+            <PageHeader
+              eyebrow={ITINERARY_CATEGORY_LABEL[experience.category]}
+              title={experience.name}
+              description={experience.summary}
+              actions={
+                <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
+                  {PROTOTYPE_LABEL.curatedGuide}
+                </Badge>
+              }
+            />
+
+            <p className="flex flex-wrap items-center gap-x-4 gap-y-2 text-body-md text-ink-muted">
+              <span className="inline-flex min-w-0 items-start gap-1.5">
+                <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+                <span className="min-w-0 break-words">
+                  {`${experience.neighborhood} · ${experience.city}, ${experience.country}`}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="schedule" size={16} className="shrink-0 text-ink-subtle" />
+                {formatDuration(experience.durationMinutes)}
+              </span>
+            </p>
           </div>
-          <ButtonLink
-            to={`/trips/${trip.id}/itinerary`}
-            size="sm"
-            variant="secondary"
-            icon={<Icon name="calendar_month" size={16} />}
+
+          <Disclosure
+            tone="catalog"
+            icon="auto_stories"
+            summary="Curated demo record, not a live listing"
           >
-            Open itinerary
-          </ButtonLink>
-        </div>
-      ) : null}
+            {`This record is hand-written prototype data, not a live listing. Prices are estimates and opening hours are typical ranges rather than live availability, and there is no map behind this page. ${PROTOTYPE_LABEL.informationMayChange}.`}
+          </Disclosure>
 
-      {tripMissing ? (
-        <Alert
-          tone="warning"
-          title="That trip is no longer on this device"
-          action={
-            <ButtonLink to="/trips" size="sm" variant="secondary" icon={<Icon name="luggage" size={16} />}>
-              Choose a trip
-            </ButtonLink>
-          }
-        >
-          Pick a trip and the add-to-itinerary action comes back.
-        </Alert>
-      ) : null}
+          {addedDay && trip ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-actual-border bg-actual-bg px-4 py-3 text-actual-ink"
+            >
+              <div className="min-w-0">
+                <p className="text-body-md">
+                  {`${experience.name} was added to Day ${addedDay.index} · ${formatShortDate(
+                    addedDay.date,
+                  )} of ${trip.name}.`}
+                </p>
+                {addedPlace?.suggested ? (
+                  <p className="mt-1 text-body-sm">
+                    {`Tourist suggested the ${formatTime(addedPlace.startTime) ?? addedPlace.startTime} start; you can change it in the itinerary.`}
+                  </p>
+                ) : null}
+              </div>
+              <ButtonLink
+                to={`/trips/${trip.id}/itinerary`}
+                size="sm"
+                variant="secondary"
+                icon={<Icon name="calendar_month" size={16} />}
+              >
+                Open itinerary
+              </ButtonLink>
+            </div>
+          ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        <div className="flex flex-col gap-5 lg:col-span-2">
+          {tripMissing ? (
+            <Alert
+              tone="warning"
+              title="That trip is no longer on this device"
+              action={
+                <ButtonLink to="/trips" size="sm" variant="secondary" icon={<Icon name="luggage" size={16} />}>
+                  Choose a trip
+                </ButtonLink>
+              }
+            >
+              Pick a trip and the add-to-itinerary action comes back.
+            </Alert>
+          ) : null}
+
           <Card>
             <CardTitle>About this place</CardTitle>
             <p className="text-body-lg text-ink-muted">{experience.description}</p>
@@ -250,8 +259,8 @@ export default function PlaceDetailsPage() {
         </div>
 
         <div className="flex flex-col gap-4 lg:col-span-1">
-          <Card as="aside" className="flex flex-col gap-3">
-            <div className="rounded-card border border-line bg-surface-low p-4">
+          <Card as="aside" className="flex flex-col gap-4">
+            <div className="rounded-control border border-line bg-surface-low p-4">
               <p className="text-label-sm uppercase tracking-wider text-ink-subtle">
                 {experience.isFree
                   ? PROTOTYPE_LABEL.estimatedPrice

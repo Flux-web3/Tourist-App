@@ -6,7 +6,7 @@ const TONE_CLASS: Record<AlertTone, string> = {
   info: 'bg-planned-bg text-planned-ink border-planned-border',
   success: 'bg-actual-bg text-actual-ink border-actual-border',
   warning: 'bg-ai-bg text-ai-ink border-ai-border',
-  danger: 'bg-danger-bg text-danger-ink border-danger/40',
+  danger: 'bg-danger-bg text-danger-ink border-danger-line',
   prototype: 'bg-catalog-bg text-catalog-ink border-catalog-border',
 }
 

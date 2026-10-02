@@ -42,13 +42,13 @@ function NoteForm({
       : 'Line breaks are kept exactly as you write them.'
 
   return (
-    <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+    <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-5">
       {messageCount > 0 ? (
         <div
           ref={summaryRef}
           role="alert"
           tabIndex={-1}
-          className="rounded-control border border-danger/40 bg-danger-bg px-4 py-3 text-danger-ink"
+          className="rounded-control border border-danger-line bg-danger-bg px-4 py-3 text-danger-ink"
         >
           <p className="text-label-lg">
             {messageCount === 1 ? '1 field needs attention' : `${messageCount} fields need attention`}

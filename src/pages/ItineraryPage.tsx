@@ -185,7 +185,7 @@ function ItineraryItemDialog({
             ref={summaryRef}
             role="alert"
             tabIndex={-1}
-            className="rounded-control border border-danger/40 bg-danger-bg px-4 py-3 text-danger-ink"
+            className="rounded-control border border-danger-line bg-danger-bg px-4 py-3 text-danger-ink"
           >
             <p className="text-label-lg">
               {messages.length === 1 ? '1 field needs attention' : `${messages.length} fields need attention`}
@@ -509,7 +509,7 @@ export default function ItineraryPage() {
         </Alert>
       ) : null}
 
-      <section aria-labelledby="itinerary-days" className="flex flex-col gap-4">
+      <section aria-labelledby="itinerary-days" className="flex flex-col gap-6">
         {/* The day headings below are the visible structure; this only names the region. */}
         <h2 id="itinerary-days" className="sr-only">
           Day by day
@@ -548,31 +548,29 @@ export default function ItineraryPage() {
             }
           />
         ) : (
-          <ol className="flex list-none flex-col gap-8">
+          <ol className="flex list-none flex-col gap-10">
             {days.map((day, position) => {
               const dayTotal = estimateTotal([day], trip.currency)
               const afterDeparture = stopsAfterDeparture(day)
               const lateIds = new Set(afterDeparture?.late.map((item) => item.id) ?? [])
               return (
-                <li key={day.id} className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-line pb-2">
+                <li key={day.id} className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line pb-3">
                     <div className="min-w-0">
-                      <p className="text-label-sm uppercase tracking-widest text-terracotta">
-                        {`Day ${position + 1}`}
-                      </p>
+                      <p className="eyebrow">{`Day ${position + 1}`}</p>
                       <h3
                         id={`day-heading-${day.id}`}
                         tabIndex={-1}
-                        className="break-words text-headline-sm"
+                        className="mt-1 break-words text-headline-md"
                       >
                         {formatLongDate(day.date)}
                       </h3>
                       {day.title ? (
-                        <p className="mt-0.5 text-body-md text-ink-muted">{day.title}</p>
+                        <p className="mt-1 text-body-md text-ink-muted">{day.title}</p>
                       ) : null}
                     </div>
                     {day.items.length > 0 ? (
-                      <p className="tnum shrink-0 text-label-md text-ink-muted">
+                      <p className="tnum shrink-0 rounded-pill border border-line bg-surface px-3 py-1 text-label-md text-ink-muted">
                         {`${day.items.length} ${
                           day.items.length === 1 ? 'stop' : 'stops'
                         } · ${formatAmount(dayTotal, trip.currency)} estimated`}
@@ -612,7 +610,7 @@ export default function ItineraryPage() {
                       </Button>
                     </div>
                   ) : (
-                    <ul className="flex list-none flex-col gap-3">
+                    <ul className="flex list-none flex-col gap-4">
                       {day.items.map((item) => (
                         <li key={item.id}>
                           <ItineraryItemCard

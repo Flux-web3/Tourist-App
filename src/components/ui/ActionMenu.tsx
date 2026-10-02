@@ -118,7 +118,7 @@ export function ActionMenu({
           setDropUp(Boolean(box && window.innerHeight - box.bottom < needed && box.top > needed))
           setOpen(true)
         }}
-        className="grid h-11 w-11 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
+        className="grid h-11 w-11 place-items-center rounded-pill text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
       >
         <Icon name="more_horiz" size={20} />
         <span className="sr-only">{label}</span>
@@ -130,7 +130,7 @@ export function ActionMenu({
           id={menuId}
           role="menu"
           aria-label={label}
-          className={`surface-raised absolute z-40 flex min-w-48 flex-col p-1 ${
+          className={`surface-raised absolute z-40 flex min-w-48 flex-col rounded-control p-1 ${
             align === 'end' ? 'right-0' : 'left-0'
           } ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
@@ -148,7 +148,7 @@ export function ActionMenu({
               className={`flex min-h-11 items-center gap-2 rounded-control px-3 text-left text-label-lg transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                 item.destructive
                   ? 'text-danger hover:bg-danger-bg'
-                  : 'text-ink hover:bg-surface-low'
+                  : 'text-ink hover:bg-surface-high'
               }`}
             >
               {item.icon ? <Icon name={item.icon} size={18} className="shrink-0 opacity-80" /> : null}

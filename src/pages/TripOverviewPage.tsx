@@ -11,6 +11,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
+import { PhotoHero } from '@/components/ui/PhotoHero'
 import { ProgressBar, StatTile } from '@/components/ui/StatTile'
 import {
   formatDate,
@@ -22,6 +23,7 @@ import {
 } from '@/domain/format'
 import { countItems, findDayForDate } from '@/domain/itinerary'
 import { CURRENCY_SYMBOLS, formatAmount } from '@/domain/money'
+import { destinationPhoto } from '@/data/destinationPhotos'
 import {
   GUIDE_LABEL,
   INTEREST_LABEL,
@@ -45,7 +47,7 @@ function countLabel(count: number, singular: string, plural: string): string {
  */
 function DetailRow({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-line py-1.5 last:border-b-0">
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-line py-2 last:border-b-0">
       <dt className="text-body-sm text-ink-subtle">{term}</dt>
       <dd className="text-body-md text-ink">{children}</dd>
     </div>
@@ -103,9 +105,9 @@ export default function TripOverviewPage() {
   */
   if (!hydrated) {
     return (
-      <div className="flex flex-col gap-5" aria-busy="true">
+      <div className="flex flex-col gap-6" aria-busy="true">
         <p className="sr-only">Loading this trip from your device.</p>
-        <div className="surface-raised flex flex-col gap-3 p-5 sm:p-6">
+        <div className="on-photo photo-hero flex min-h-[15rem] flex-col gap-3 rounded-sheet p-5 sm:p-6">
           <Skeleton className="h-4 w-24" />
           <Skeleton className="h-9 w-56" />
           <Skeleton className="h-4 w-64" />
@@ -154,60 +156,107 @@ export default function TripOverviewPage() {
     navigate('/trips')
   }
 
+  const photo = destinationPhoto(trip.destinationId)
+  const credit = photo?.credit ?? null
+
   return (
-    <div className="flex flex-col gap-5">
-      <section aria-label="Trip summary" className="surface-raised p-5 sm:p-6">
-        <Link
-          to="/trips"
-          className="inline-flex min-h-11 items-center gap-1 rounded-control text-label-md text-ink-muted transition-colors hover:text-ink"
-        >
-          <Icon name="arrow_back" size={16} />
-          All trips
-        </Link>
-
-        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-label-md uppercase tracking-wider text-terracotta">
-          <Icon name="flight_takeoff" size={16} />
-          <span>{trip.origin}</span>
-          <Icon name="arrow_forward" size={14} />
-          <span className="sr-only">to</span>
-          <span>{trip.destination}</span>
-        </p>
-
-        <h1 className="mt-1 text-headline-lg sm:text-display">{trip.name}</h1>
-
-        {isSample ? (
-          <p className="mt-2">
-            <Badge tone="catalog" icon={<Icon name="science" size={14} />}>
-              {PROTOTYPE_LABEL.sampleTrip}
-            </Badge>
-          </p>
-        ) : null}
-
+    <div className="flex flex-col gap-6">
+      <section aria-label="Trip summary" className="flex flex-col gap-3">
         {/*
-          A scannable line rather than a label/value table. `TRAVELLERS` above
-          `2 travellers` said the same thing twice, and three stacked rows of
-          uppercase terms pushed the trip's own content down the screen.
+          The trip opens the way the landing page does: its destination's
+          photograph with the words set on it. A destination Tourist holds no
+          photograph of gets the plain night band, never a picture of somewhere
+          else. The bottom padding clears the credit chip pinned to the foot.
         */}
-        <ul className="mt-3 flex list-none flex-wrap items-center gap-x-3 gap-y-1 text-body-md text-ink-muted">
-          <MetaItem icon="calendar_month" numeric>
-            {formatDateRange(trip.startDate, trip.endDate)}
-          </MetaItem>
-          <MetaItem icon="hourglass_bottom" numeric>
-            {countLabel(tripLengthInDays(trip.startDate, trip.endDate), 'day', 'days')}
-          </MetaItem>
-          <MetaItem icon="group">{countLabel(trip.travelers, 'traveller', 'travellers')}</MetaItem>
-          <MetaItem icon="speed">{`${PACE_LABEL[trip.pace]} pace`}</MetaItem>
-        </ul>
-
-        <ul className="mt-3 flex list-none flex-wrap items-center gap-1.5">
-          {trip.interests.map((interest) => (
-            <li key={interest} className="list-none">
-              <span className="inline-flex items-center rounded-pill border border-line bg-surface px-2.5 py-1 text-label-md text-ink-muted">
-                {INTEREST_LABEL[interest]}
+        <PhotoHero
+          shade="cover"
+          src={photo?.src ?? null}
+          alt={photo?.alt ?? ''}
+          className="rounded-sheet"
+          credit={
+            photo ? (
+              <span className="flex items-start gap-1.5">
+                <Icon name="location_on" size={16} className="mt-px shrink-0" />
+                <span>
+                  {photo.caption}.{' '}
+                  {credit ? (
+                    <>
+                      Photo by{' '}
+                      <a
+                        href={credit.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        {credit.author}
+                      </a>{' '}
+                      ({credit.license}).
+                    </>
+                  ) : null}
+                </span>
               </span>
-            </li>
-          ))}
-        </ul>
+            ) : undefined
+          }
+        >
+          <div
+            className={`flex min-h-[15rem] min-w-0 flex-col items-start gap-2 p-5 sm:min-h-[18rem] sm:p-8 ${
+              photo ? 'pb-24 sm:pb-20' : 'pb-6 sm:pb-8'
+            }`}
+          >
+            <Link
+              to="/trips"
+              className="-ms-1 inline-flex min-h-11 items-center gap-1 rounded-control px-1 text-label-md text-ink-muted transition-colors hover:text-ink"
+            >
+              <Icon name="arrow_back" size={16} />
+              All trips
+            </Link>
+
+            <p className="eyebrow flex flex-wrap items-center gap-1.5">
+              <Icon name="flight_takeoff" size={16} />
+              <span>{trip.origin}</span>
+              <Icon name="arrow_forward" size={14} />
+              <span className="sr-only">to</span>
+              <span>{trip.destination}</span>
+            </p>
+
+            <h1 className="max-w-full break-words text-headline-lg sm:text-display">{trip.name}</h1>
+
+            {isSample ? (
+              <p>
+                <Badge tone="catalog" icon={<Icon name="science" size={14} />}>
+                  {PROTOTYPE_LABEL.sampleTrip}
+                </Badge>
+              </p>
+            ) : null}
+
+            {/*
+              A scannable line rather than a label/value table. `TRAVELLERS`
+              above `2 travellers` said the same thing twice, and three stacked
+              rows of uppercase terms pushed the trip's own content down the
+              screen.
+            */}
+            <ul className="mt-1 flex list-none flex-wrap items-center gap-x-4 gap-y-1 text-body-md text-ink-muted">
+              <MetaItem icon="calendar_month" numeric>
+                {formatDateRange(trip.startDate, trip.endDate)}
+              </MetaItem>
+              <MetaItem icon="hourglass_bottom" numeric>
+                {countLabel(tripLengthInDays(trip.startDate, trip.endDate), 'day', 'days')}
+              </MetaItem>
+              <MetaItem icon="group">{countLabel(trip.travelers, 'traveller', 'travellers')}</MetaItem>
+              <MetaItem icon="speed">{`${PACE_LABEL[trip.pace]} pace`}</MetaItem>
+            </ul>
+
+            <ul className="flex list-none flex-wrap items-center gap-1.5">
+              {trip.interests.map((interest) => (
+                <li key={interest} className="list-none">
+                  <span className="inline-flex items-center rounded-pill border border-line bg-surface px-3 py-1 text-label-md text-ink-muted">
+                    {INTEREST_LABEL[interest]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </PhotoHero>
 
         {/*
           The Explore tab sits one tap away in the navigation for every trip,
@@ -216,7 +265,6 @@ export default function TripOverviewPage() {
         */}
         {tripGuide.guide === 'general' ? (
           <Disclosure
-            className="mt-4"
             icon="info"
             summary={`No curated guide for ${tripGuide.place} yet`}
           >
@@ -226,7 +274,6 @@ export default function TripOverviewPage() {
 
         {isSample ? (
           <Disclosure
-            className="mt-4"
             tone="catalog"
             icon="science"
             summary="This is Tourist's sample trip, not one you planned"
@@ -243,7 +290,7 @@ export default function TripOverviewPage() {
         even on a finished plan, and Delete sat at the same visual weight as
         everything else.
       */}
-      <section aria-label="Trip actions" className="flex flex-col gap-2">
+      <section aria-label="Trip actions" className="flex flex-col gap-3">
         {hasPlan ? (
           <ButtonLink
             to={`/trips/${trip.id}/itinerary`}
@@ -329,7 +376,7 @@ export default function TripOverviewPage() {
         left. Blurring them is the one thing this screen must not do. They are
         only made denser, and the currency is stated once for the section.
       */}
-      <section aria-labelledby={moneyHeadingId} className="flex flex-col gap-3">
+      <section aria-labelledby={moneyHeadingId} className="flex flex-col gap-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id={moneyHeadingId} className="text-headline-sm">
             Money
@@ -340,7 +387,7 @@ export default function TripOverviewPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <StatTile
             label={PROTOTYPE_LABEL.tripBudget}
             value={formatAmount(budget.tripBudget, trip.currency)}
@@ -376,7 +423,7 @@ export default function TripOverviewPage() {
           />
         </div>
 
-        <div className="surface-card flex flex-col gap-2 p-4">
+        <div className="surface-card flex flex-col gap-2 p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-label-lg text-ink">Budget used</p>
             <p className="tnum text-body-sm text-ink-muted">

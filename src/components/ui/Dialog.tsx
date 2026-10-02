@@ -110,7 +110,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-headline-sm">
+            <h2 id={titleId} className="text-headline-md">
               {title}
             </h2>
             {description ? (
@@ -123,7 +123,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
             type="button"
             data-dialog-close="true"
             onClick={onClose}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-pill text-ink-muted transition-colors hover:bg-surface-low hover:text-ink"
           >
             <Icon name="close" size={20} />
             <span className="sr-only">Close dialog</span>

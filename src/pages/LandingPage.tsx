@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { PlaceImage } from '@/components/PlaceImage'
+import { Brand } from '@/components/Brand'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
 import { Card } from '@/components/ui/Card'
 import { Icon } from '@/components/ui/Icon'
+import { PhotoHero } from '@/components/ui/PhotoHero'
 import { EXPERIENCES, EXPERIENCES_BY_ID, GUIDE_CITY_LIST } from '@/data/experiences'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
 import { useTourist } from '@/state/useTourist'
@@ -86,17 +87,6 @@ const NAV_LINKS = [
   { to: '/explore', label: 'Explore catalog', icon: 'explore' },
 ] as const
 
-function Brand() {
-  return (
-    <Link to="/" className="flex items-center gap-2 rounded-control" aria-label="Tourist, home">
-      <span className="grid h-9 w-9 place-items-center rounded-control bg-navy text-btn-primary-fg">
-        <Icon name="travel_explore" size={20} />
-      </span>
-      <span className="text-headline-sm">Tourist</span>
-    </Link>
-  )
-}
-
 function LandingMenu() {
   const [open, setOpen] = useState(false)
   const toggleRef = useRef<HTMLButtonElement>(null)
@@ -162,7 +152,7 @@ function LandingMenu() {
         id="landing-menu"
         ref={panelRef}
         hidden={!open}
-        className="absolute inset-x-0 top-full z-40 border-b border-line bg-canvas px-4 py-3 shadow-raised"
+        className="absolute inset-x-3 top-full z-40 rounded-card border border-line bg-canvas px-2 py-2 shadow-overlay"
       >
         <nav aria-label="Landing" className="flex flex-col">
           {NAV_LINKS.map((link) => (
@@ -203,8 +193,13 @@ export default function LandingPage() {
         Skip to main content
       </a>
 
-      <header className="sticky top-0 z-30 border-b border-line bg-canvas/85 backdrop-blur">
-        <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+      {/*
+        The header rides on the photograph, as the hero's own top edge. It is
+        in the on-photo scope, so the brand, links and theme control turn white
+        without any landing-only styling.
+      */}
+      <header className="on-photo absolute inset-x-0 top-0 z-30">
+        <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 sm:px-6">
           <Brand />
           <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
             {NAV_LINKS.map((link) => (
@@ -224,60 +219,24 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 md:py-12">
-        <div className="flex flex-col gap-12 md:gap-16">
-          {/*
-            Hero and photograph share a row on desktop so the first screen shows
-            the promise and the place at once, and stack on a phone.
-          */}
-          <section className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-            <div className="flex flex-col gap-5">
-              <p className="text-label-sm uppercase tracking-widest text-terracotta">
-                AI travel companion
-              </p>
-              <h1 className="text-display">Plan the trip first. Then plan the days inside it.</h1>
-              <p className="max-w-xl text-body-lg text-ink-muted">
-                Answer a handful of honest questions and Tourist drafts a day-by-day itinerary you
-                can argue with — then keeps track of what the trip actually costs.
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <ButtonLink to="/welcome" size="lg" icon={<Icon name="add_location_alt" size={20} />}>
-                  Plan your trip
-                </ButtonLink>
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  loading={loadingDemo}
-                  loadingLabel="Loading the demo"
-                  icon={<Icon name="auto_stories" size={20} />}
-                  onClick={startDemo}
-                >
-                  Try the demo
-                </Button>
-              </div>
-              <p className="text-body-sm text-ink-subtle">
-                No account, no email. Drafts, prices and estimates are labelled as such throughout.
-              </p>
-              {returningTraveller ? (
-                <p className="text-body-sm text-ink-muted">
-                  You already have {state.trips.length === 1 ? 'a trip' : `${state.trips.length} trips`}{' '}
-                  on this device.{' '}
-                  <Link to="/trips" className="underline underline-offset-2 hover:text-ink">
-                    Open your trips
-                  </Link>
-                  .
-                </p>
-              ) : null}
-            </div>
-
-            <figure className="flex flex-col gap-2">
-              <PlaceImage
-                experience={FEATURED}
-                ratio="4 / 3"
-                rounded="rounded-sheet"
-                loading="eager"
-              />
-              <figcaption className="text-body-sm text-ink-subtle">
+      <main id="main-content" className="flex-1">
+        {/*
+          The first screen is the photograph with the promise set on it. On a
+          phone the picture is anchored to the foot of the hero and fades up
+          into the night sky, so the tower stands clear of the words; on a wide
+          screen it fills the hero and the words keep to the left.
+        */}
+        <PhotoHero
+          src={FEATURED.imageUrl}
+          // The same photograph at twice the width, for screens wide enough to show it.
+          srcSet="/images/eiffel-tower.jpg 960w, /images/eiffel-tower-wide.jpg 1920w"
+          alt={FEATURED.imageAlt}
+          className="flex min-h-[max(100svh,46rem)] flex-col lg:min-h-[min(100svh,50rem)]"
+          imageClassName="photo-fade-top inset-x-0 bottom-0 h-[62%] w-full object-[30%_100%] lg:inset-0 lg:h-full lg:origin-left lg:scale-[1.3] lg:object-center"
+          credit={
+            <span className="flex items-start gap-1.5">
+              <Icon name="location_on" size={16} className="mt-px shrink-0" />
+              <span>
                 {FEATURED.name}, {FEATURED.neighborhood}.{' '}
                 {credit ? (
                   <>
@@ -286,31 +245,82 @@ export default function LandingPage() {
                       href={credit.sourceUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="underline underline-offset-2 hover:text-ink"
+                      className="underline underline-offset-2"
                     >
                       {credit.author}
                     </a>{' '}
                     ({credit.license}).
                   </>
                 ) : null}
-              </figcaption>
-            </figure>
+              </span>
+            </span>
+          }
+        >
+          <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 pb-28 pt-24 sm:px-6 lg:pt-36">
+            <p className="eyebrow">AI travel companion</p>
+            <h1 className="max-w-[44rem] text-hero">
+              <span className="block">Plan the trip first.</span>{' '}
+              <span className="block">Then plan the days</span>{' '}
+              <span className="block">inside it.</span>
+            </h1>
+            <p className="max-w-md text-body-lg text-ink-muted lg:max-w-lg">
+              Answer a handful of honest questions and Tourist drafts a day-by-day itinerary you can
+              argue with — then keeps track of what the trip actually costs.
+            </p>
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+              <ButtonLink
+                to="/welcome"
+                size="lg"
+                icon={<Icon name="auto_awesome" size={20} />}
+                iconAfter={<Icon name="arrow_forward" size={20} />}
+              >
+                Plan your trip
+              </ButtonLink>
+              <Button
+                size="lg"
+                variant="secondary"
+                loading={loadingDemo}
+                loadingLabel="Loading the demo"
+                icon={<Icon name="auto_stories" size={20} />}
+                onClick={startDemo}
+              >
+                Try the demo
+              </Button>
+            </div>
+            <p className="max-w-xs text-body-sm text-ink-subtle sm:max-w-md">
+              No account, no email. Drafts, prices and estimates are labelled as such throughout.
+            </p>
+            {returningTraveller ? (
+              <p className="text-body-sm text-ink-muted">
+                You already have {state.trips.length === 1 ? 'a trip' : `${state.trips.length} trips`}{' '}
+                on this device.{' '}
+                <Link to="/trips" className="font-semibold underline underline-offset-2">
+                  Open your trips
+                </Link>
+                .
+              </p>
+            ) : null}
           </section>
+        </PhotoHero>
 
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-14 px-5 py-12 sm:px-6 md:gap-20 md:py-16">
           <section aria-labelledby="steps-heading" className="flex flex-col gap-5">
-            <h2 id="steps-heading" className="text-headline-lg">
-              How it works
-            </h2>
+            <div className="flex flex-col gap-2">
+              <p className="eyebrow">Three steps</p>
+              <h2 id="steps-heading" className="text-headline-lg">
+                How it works
+              </h2>
+            </div>
             <ol className="grid gap-3 sm:grid-cols-3">
               {STEPS.map((step, index) => (
                 <li
                   key={step.title}
-                  className="flex flex-col gap-2 rounded-card border border-line bg-surface-low p-4"
+                  className="surface-card flex flex-col gap-2 p-5"
                 >
-                  <span className="tnum grid h-8 w-8 place-items-center rounded-badge bg-navy text-label-lg text-ink-inverse">
+                  <span className="tnum grid h-9 w-9 place-items-center rounded-pill border border-gold-border bg-gold-bg text-label-lg text-gold-ink">
                     {index + 1}
                   </span>
-                  <h3 className="text-label-lg text-ink">{step.title}</h3>
+                  <h3 className="mt-1 text-headline-sm">{step.title}</h3>
                   <p className="text-body-sm text-ink-muted">{step.description}</p>
                 </li>
               ))}
@@ -318,18 +328,21 @@ export default function LandingPage() {
           </section>
 
           <section aria-labelledby="areas-heading" className="flex flex-col gap-5">
-            <h2 id="areas-heading" className="text-headline-lg">
-              What you get
-            </h2>
+            <div className="flex flex-col gap-2">
+              <p className="eyebrow">Inside every trip</p>
+              <h2 id="areas-heading" className="text-headline-lg">
+                What you get
+              </h2>
+            </div>
             {/* `li` wrappers: a Card renders an <article>, which is not a legal child of <ul>. */}
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {AREAS.map((area) => (
                 <li key={area.name} className="contents">
                   <Card as="article" className="flex flex-col gap-2">
-                    <span className="grid h-9 w-9 place-items-center rounded-control bg-surface-high text-navy">
-                      <Icon name={area.icon} size={18} />
+                    <span className="grid h-10 w-10 place-items-center rounded-control bg-navy text-btn-primary-fg">
+                      <Icon name={area.icon} size={20} />
                     </span>
-                    <h3 className="text-label-lg text-ink">{area.name}</h3>
+                    <h3 className="mt-1 text-headline-sm">{area.name}</h3>
                     <p className="text-body-sm text-ink-muted">{area.description}</p>
                   </Card>
                 </li>
@@ -404,9 +417,10 @@ export default function LandingPage() {
             </Card>
           </section>
 
+          {/* The closing band is the same night ground as the hero, without a photo. */}
           <section
             aria-labelledby="start-heading"
-            className="flex flex-col gap-4 rounded-card border border-line-strong bg-surface-low p-6 sm:p-8"
+            className="on-photo photo-hero flex flex-col gap-4 rounded-sheet p-6 sm:p-10"
           >
             <h2 id="start-heading" className="text-headline-lg">
               Start with the trip, not the app

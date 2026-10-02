@@ -16,8 +16,8 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
  * which are exactly the controls a traveller taps one-handed on a phone.
  */
 const SIZE_CLASS: Record<ButtonSize, string> = {
-  sm: 'min-h-11 px-3 text-label-md gap-1.5',
-  md: 'min-h-11 px-4 text-label-lg gap-2',
+  sm: 'min-h-11 px-4 text-label-md gap-1.5',
+  md: 'min-h-11 px-5 text-label-lg gap-2',
   lg: 'min-h-12 px-6 text-body-lg gap-2',
 }
 
@@ -33,7 +33,7 @@ export function buttonClasses({
   className?: string
 } = {}): string {
   return [
-    'inline-flex items-center justify-center rounded-control font-semibold',
+    'inline-flex items-center justify-center rounded-pill font-semibold',
     'transition-colors duration-150 select-none',
     'disabled:cursor-not-allowed disabled:opacity-55',
     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',

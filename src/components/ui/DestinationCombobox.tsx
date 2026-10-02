@@ -235,7 +235,7 @@ export function DestinationCombobox({
         <div
           hidden={!open}
           onMouseDown={(event) => event.preventDefault()}
-          className="surface-raised absolute inset-x-0 top-full z-40 mt-1 max-h-72 overflow-y-auto overscroll-contain p-1"
+          className="surface-raised absolute inset-x-0 top-full z-40 mt-1 max-h-72 rounded-control overflow-y-auto overscroll-contain p-1"
         >
           <ul id={listboxId} role="listbox" aria-label="Cities">
             {options.map((destination, index) => {
@@ -261,7 +261,7 @@ export function DestinationCombobox({
                     if (!highlighted) setActiveIndex(index)
                   }}
                   className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-control px-3 py-2 ${
-                    highlighted ? 'bg-surface-low' : ''
+                    highlighted ? 'bg-surface-high' : ''
                   }`}
                 >
                   <span className="min-w-0 flex-1">

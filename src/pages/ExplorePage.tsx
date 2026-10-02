@@ -5,7 +5,7 @@ import { PlaceImage } from '@/components/PlaceImage'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
-import { Card, PageHeader } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/Card'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
 import { CheckboxChipGroup, NumberField, RadioChipGroup, TextField } from '@/components/ui/Field'
@@ -84,48 +84,60 @@ function ExperienceCard({
 
   return (
     <li className="list-none">
-      <Card as="article" className="flex h-full flex-col gap-3">
-        <PlaceImage experience={experience} ratio="4 / 3" rounded="rounded-control" />
+      <article className="surface-card flex h-full flex-col overflow-hidden">
+        <PlaceImage experience={experience} ratio="4 / 3" rounded="rounded-none" />
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
-            {PROTOTYPE_LABEL.curatedGuide}
-          </Badge>
-          <Badge tone="neutral" icon={<Icon name={ITINERARY_CATEGORY_ICON[experience.category]} size={14} />}>
-            {ITINERARY_CATEGORY_LABEL[experience.category]}
-          </Badge>
-        </div>
+        <div className="flex flex-1 flex-col gap-3 p-5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone="catalog" icon={<Icon name="auto_stories" size={14} />}>
+              {PROTOTYPE_LABEL.curatedGuide}
+            </Badge>
+            <Badge tone="neutral" icon={<Icon name={ITINERARY_CATEGORY_ICON[experience.category]} size={14} />}>
+              {ITINERARY_CATEGORY_LABEL[experience.category]}
+            </Badge>
+          </div>
 
-        <div className="min-w-0">
-          <h3 className="break-words text-headline-sm">{experience.name}</h3>
-          <p className="mt-1 flex items-start gap-1.5 text-body-md text-ink-muted">
-            <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
-            <span className="min-w-0 break-words">
-              {`${experience.neighborhood} · ${experience.city}`}
-            </span>
-          </p>
-        </div>
+          <div className="min-w-0">
+            <h3 className="break-words text-headline-sm">{experience.name}</h3>
+            <p className="mt-1 flex items-start gap-1.5 text-body-sm text-ink-muted">
+              <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+              <span className="min-w-0 break-words">
+                {`${experience.neighborhood} · ${experience.city}`}
+              </span>
+            </p>
+          </div>
 
-        <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-body-md">
-          <span className="text-label-sm uppercase tracking-wider text-ink-subtle">
-            {experience.isFree ? PROTOTYPE_LABEL.estimatedPrice : `${PROTOTYPE_LABEL.estimatedPrice} from`}
-          </span>
-          <span className="tnum font-semibold text-ink">{price}</span>
-        </p>
+          <div className="flex flex-col gap-1 border-t border-line pt-3">
+            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-label-sm uppercase tracking-wider text-ink-subtle">
+                {experience.isFree ? PROTOTYPE_LABEL.estimatedPrice : `${PROTOTYPE_LABEL.estimatedPrice} from`}
+              </span>
+              <span className="tnum text-headline-sm text-ink">{price}</span>
+            </p>
+            <p className="break-words text-body-sm text-ink-subtle">{experience.hoursNote}</p>
+          </div>
 
-        <p className="break-words text-body-sm text-ink-subtle">{experience.hoursNote}</p>
-
-        <div className="mt-auto flex flex-col gap-2">
-          {onAdd ? (
-            <>
-              <Button
-                variant="primary"
-                fullWidth
-                icon={<Icon name="add" size={18} />}
-                onClick={onAdd}
-              >
-                Add to trip
-              </Button>
+          <div className="mt-auto flex flex-col gap-2 pt-2">
+            {onAdd ? (
+              <>
+                <Button
+                  variant="primary"
+                  fullWidth
+                  icon={<Icon name="add" size={18} />}
+                  onClick={onAdd}
+                >
+                  Add to trip
+                </Button>
+                <ButtonLink
+                  to={placeHref(experience.id, tripId)}
+                  variant="ghost"
+                  fullWidth
+                  icon={<Icon name="arrow_forward" size={18} />}
+                >
+                  View details
+                </ButtonLink>
+              </>
+            ) : (
               <ButtonLink
                 to={placeHref(experience.id, tripId)}
                 variant="secondary"
@@ -134,19 +146,10 @@ function ExperienceCard({
               >
                 View details
               </ButtonLink>
-            </>
-          ) : (
-            <ButtonLink
-              to={placeHref(experience.id, tripId)}
-              variant="primary"
-              fullWidth
-              icon={<Icon name="arrow_forward" size={18} />}
-            >
-              View details
-            </ButtonLink>
-          )}
+            )}
+          </div>
         </div>
-      </Card>
+      </article>
     </li>
   )
 }
@@ -154,11 +157,13 @@ function ExperienceCard({
 function ResultSkeleton() {
   return (
     <li className="list-none">
-      <div className="surface-card flex flex-col gap-3 p-5">
-        <Skeleton className="aspect-[4/3] w-full" />
-        <Skeleton className="h-5 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="h-10 w-full" />
+      <div className="surface-card flex flex-col overflow-hidden">
+        <div className="aspect-[4/3] w-full animate-pulse bg-surface-high" aria-hidden="true" />
+        <div className="flex flex-col gap-3 p-5">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-10 w-full" />
+        </div>
       </div>
     </li>
   )
@@ -370,7 +375,7 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
 
   if (trip && !tripHasGuide) {
     return (
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-6">
         <PageHeader
           eyebrow={trip.name}
           title="Explore"
@@ -385,7 +390,7 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
   const currencySymbol = currency ? CURRENCY_SYMBOLS[currency] : undefined
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow={trip ? trip.name : PROTOTYPE_LABEL.curatedGuide}
         title="Explore"
@@ -433,7 +438,7 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3">
+      <div className="surface-card flex flex-col gap-4 p-4 sm:p-5">
         {tripId ? null : (
           <RadioChipGroup<string>
             legend="City"
@@ -483,7 +488,7 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
         </div>
 
         {filtersOpen ? (
-          <div id={filterPanelId} className="surface-card flex flex-col gap-4 p-4">
+          <div id={filterPanelId} className="flex flex-col gap-4 border-t border-line pt-4">
             <div className="grid gap-4 sm:grid-cols-2">
               {pricedDestination && currency ? (
                 <NumberField
@@ -524,9 +529,9 @@ function ExploreView({ tripId }: { tripId: string | undefined }) {
         ) : null}
       </div>
 
-      <section aria-label="Places" className="flex flex-col gap-3">
+      <section aria-label="Places" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h2 className="text-headline-sm">Places</h2>
+          <h2 className="text-headline-md">Places</h2>
           <p aria-live="polite" aria-atomic="true" className="tnum text-body-md text-ink-muted">
             {announcement}
           </p>

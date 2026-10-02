@@ -43,7 +43,7 @@ export function ThemeToggle() {
       <button
         type="button"
         onClick={() => setPreference(NEXT[preference])}
-        className="grid h-11 w-11 place-items-center rounded-control text-ink-muted transition-colors hover:bg-surface-low hover:text-ink sm:hidden"
+        className="grid h-11 w-11 place-items-center rounded-pill text-ink-muted transition-colors hover:bg-surface-low hover:text-ink sm:hidden"
       >
         <Icon name={ICON[preference]} size={20} />
         <span className="sr-only">

@@ -59,6 +59,12 @@ Pushing `main` deploys to production on Vercel.
   newer version, which this build cannot read, is copied to that backup before
   the app starts fresh.
 
+## Design system
+
+The visual language is documented in [DESIGN.md](DESIGN.md) and implemented as
+tokens in `src/styles/index.css`. Screens use the shared components and tokens;
+there is no page-specific styling.
+
 ## Known limitations
 
 - **Regenerate variant is not remembered across reloads.** Each Regenerate
@@ -77,15 +83,15 @@ Pushing `main` deploys to production on Vercel.
 - **Swapped alternatives can crowd the next stop.** A swap prefers a stop of a
   similar kind over one that fits the gap exactly, so about 6% of swaps overlap
   the following stop's start time.
-- **Adding a place ignores its opening hours.** Without a chosen start time,
-  a place from Explore goes straight after the day's last stop, even past
-  closing time. The hours are free text, copied into the stop's notes, and the
-  add dialog accepts a start time.
 - **Departure time is not asked for.** There is no flight or train time on a
   trip, so every draft leaves at 12:00; an evening flight means moving the
   departure stop by hand. On general destinations the last morning is
   sometimes empty when no general stop fits before 10:30.
 - **Eight destinations, three with places.** Only catalogue cities can be
-  chosen for a new trip. London and Lagos places have drawn covers, not photos.
+  chosen for a new trip. Three Lagos places (Nike Art Gallery, Lekki Arts &
+  Crafts Market, Glover Court Suya) have drawn covers, not photos: Tourist only
+  shows a photograph taken at the place it describes, with its credit, and the
+  available photos of those three were of artworks, of people, or of somewhere
+  else. All photographs are served from `public/images/`.
 - **Estimates are illustrative.** Prices and places are sample data, not live
   quotes.

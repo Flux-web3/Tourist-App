@@ -86,9 +86,7 @@ function destinationChangeCopy(
 function SectionLabel({ children, divider = true }: { children: ReactNode; divider?: boolean }) {
   return (
     <h3
-      className={`text-label-md uppercase tracking-wider text-ink-subtle ${
-        divider ? 'border-t border-line pt-4' : ''
-      }`}
+      className={`eyebrow ${divider ? 'border-t border-line pt-4' : ''}`}
     >
       {children}
     </h3>
@@ -231,7 +229,7 @@ export function EditTripDialog({
         </>
       }
     >
-      <form id={formId} noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form id={formId} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {startDateInPast ? (
           <Alert tone="warning" title="This trip has already started">
             {`Its start date, ${formatDate(draft.startDate)}, is in the past, and a trip cannot be saved on a past start date. Keep the original start date to leave the current plan untouched, or choose a future date to re-flow the itinerary.`}
@@ -243,7 +241,7 @@ export function EditTripDialog({
             ref={summaryRef}
             role="alert"
             tabIndex={-1}
-            className="rounded-control border border-danger/40 bg-danger-bg px-4 py-3 text-danger-ink"
+            className="rounded-control border border-danger-line bg-danger-bg px-4 py-3 text-danger-ink"
           >
             <p className="text-label-lg">
               {messages.length === 1 ? '1 field needs attention' : `${messages.length} fields need attention`}

@@ -133,31 +133,37 @@ export function ItineraryItemCard({
     <article
       aria-labelledby={titleId}
       aria-busy={pending || undefined}
-      className="surface-card p-4"
+      className={`surface-card p-4 sm:p-5 ${afterDeparture ? 'border-danger-line' : ''}`}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-3">
+        {/* Travel stops carry the product's icon tile; it is dropped on a phone to keep the text wide. */}
+        {travelRole ? (
+          <span
+            aria-hidden="true"
+            className="hidden h-10 w-10 shrink-0 place-items-center rounded-control bg-navy text-btn-primary-fg sm:grid"
+          >
+            <Icon name={travelRole === 'arrival' ? 'flight_land' : 'flight_takeoff'} size={20} />
+          </span>
+        ) : null}
+
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {timeRange ? (
-              <p className="tnum rounded-badge bg-surface-high px-2 py-0.5 text-label-md text-ink-muted">
+              <p
+                className={`tnum rounded-pill border px-2.5 py-0.5 text-label-md text-ink ${
+                  placeholderTime ? 'border-dashed border-line-strong' : 'border-line'
+                } bg-surface-high`}
+              >
                 {timeRange}
                 {/* Said at the time itself: a note at the end of the description was easy to miss. */}
                 {placeholderTime ? <span className="text-ink-subtle"> (placeholder)</span> : null}
               </p>
             ) : null}
 
-            <p className="tnum text-label-md text-ink-muted">
-              <span className="sr-only">{`${PROTOTYPE_LABEL.estimatedPrice}: `}</span>
-              {free ? price : `≈ ${price}`}
-              {foreign ? (
-                <span className="text-ink-subtle">{` ${item.currency} · not in the ${currency} total`}</span>
-              ) : null}
-            </p>
-
             {pending ? (
               <p
                 role="status"
-                className="inline-flex items-center gap-1.5 rounded-badge border border-ai-border bg-ai-bg px-2 py-0.5 text-label-md text-ai-ink"
+                className="inline-flex items-center gap-1.5 rounded-pill border border-ai-border bg-ai-bg px-2.5 py-0.5 text-label-md text-ai-ink"
               >
                 <Spinner size={12} />
                 Swapping
@@ -165,11 +171,25 @@ export function ItineraryItemCard({
             ) : null}
           </div>
 
-          <h4 id={titleId} className="mt-1.5 break-words text-label-lg text-ink">
+          <h4 id={titleId} className="mt-2 break-words text-headline-sm text-ink">
             {item.title}
           </h4>
 
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {item.location ? (
+            <p className="mt-1 flex items-start gap-1.5 text-body-sm text-ink-muted">
+              <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
+              <span className="min-w-0 break-words">{item.location}</span>
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            <p className="tnum text-label-lg text-ink">
+              <span className="sr-only">{`${PROTOTYPE_LABEL.estimatedPrice}: `}</span>
+              {free ? price : `≈ ${price}`}
+              {foreign ? (
+                <span className="text-label-md text-ink-subtle">{` ${item.currency} · not in the ${currency} total`}</span>
+              ) : null}
+            </p>
             {travelRole ? (
               <Badge
                 tone="planned"
@@ -212,26 +232,19 @@ export function ItineraryItemCard({
           </div>
 
           {travelRole ? (
-            <p className="mt-2 text-body-sm text-ink-subtle">
+            <p className="mt-3 rounded-control bg-surface-low px-3 py-2 text-body-sm text-ink-muted">
               {placeholderTime
                 ? `Placeholder time: Tourist does not know your flight or train. Edit this stop to your real ${travelRole} time. It is never swapped for an activity.`
                 : 'Travel stop, timed by you. It is never swapped for an activity.'}
             </p>
           ) : null}
 
-          {item.location ? (
-            <p className="mt-2 flex items-start gap-1.5 text-body-sm text-ink-muted">
-              <Icon name="place" size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
-              <span className="min-w-0 break-words">{item.location}</span>
-            </p>
-          ) : null}
-
           {item.description ? (
-            <p className="mt-1.5 break-words text-body-sm text-ink-muted">{item.description}</p>
+            <p className="mt-3 break-words text-body-sm text-ink-muted">{item.description}</p>
           ) : null}
 
           {item.notes ? (
-            <p className="mt-1.5 break-words text-body-sm text-ink-subtle">
+            <p className="mt-2 break-words text-body-sm text-ink-subtle">
               <span className="font-semibold">Note:</span> {item.notes}
             </p>
           ) : null}
@@ -254,7 +267,10 @@ export function ItineraryItemCard({
       </div>
 
       {moving && moveOptions.length > 0 ? (
-        <div ref={movePanelRef} className="mt-3 flex flex-wrap items-end gap-2">
+        <div
+          ref={movePanelRef}
+          className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4"
+        >
           <SelectField
             label={`Move ${item.title} to another day`}
             options={moveOptions}

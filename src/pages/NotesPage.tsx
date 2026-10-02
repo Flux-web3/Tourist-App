@@ -131,7 +131,7 @@ export default function NotesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Notes"
         title={trip.name}
@@ -186,14 +186,11 @@ export default function NotesPage() {
 
           {groups.map((group) => (
             <section key={group.key} aria-labelledby={`notes-${group.key}`} className="flex flex-col gap-3">
-              <div className="flex items-center gap-1.5 text-ink-subtle">
+              <div className="flex items-center gap-1.5 text-terracotta">
                 {group.key === 'pinned' ? (
                   <Icon name="push_pin" size={14} className="shrink-0" />
                 ) : null}
-                <h2
-                  id={`notes-${group.key}`}
-                  className="text-label-md uppercase tracking-wider text-ink-subtle"
-                >
+                <h2 id={`notes-${group.key}`} className="eyebrow">
                   {group.title}
                 </h2>
               </div>
@@ -213,14 +210,14 @@ export default function NotesPage() {
                     <li key={note.id}>
                       <Card
                         as="article"
-                        className={`flex flex-col gap-2 ${
+                        className={`flex flex-col gap-3 ${
                           note.pinned ? 'border-terracotta/40 bg-surface-bright' : ''
                         }`}
                       >
-                        <div className="flex items-start gap-2">
+                        <div className="flex items-start gap-3">
                           <div className="min-w-0 flex-1">
                             <h3 className="text-headline-sm break-words">{title}</h3>
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body-sm text-ink-subtle">
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-body-sm text-ink-subtle">
                               {note.pinned ? (
                                 <Badge tone="accent" icon={<Icon name="push_pin" size={12} />}>
                                   Pinned
@@ -253,7 +250,7 @@ export default function NotesPage() {
                           />
                         </div>
 
-                        <p className="whitespace-pre-wrap break-words text-body-md text-ink-muted">
+                        <p className="whitespace-pre-wrap break-words text-body-md text-ink">
                           {note.body}
                         </p>
                       </Card>

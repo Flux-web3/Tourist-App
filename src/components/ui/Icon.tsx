@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import { useImageAttempts } from '@/lib/useImageAttempts'
 
 export interface IconProps {
   /** Material Symbols ligature name, e.g. `flight_takeoff`. */
@@ -34,9 +35,6 @@ export interface MediaFrameProps {
   children?: ReactNode
 }
 
-/** How many times a photo is requested before the frame gives up on it. */
-const MAX_IMAGE_ATTEMPTS = 2
-
 /**
  * Editorial photography with a fixed frame and lazy loading. The frame keeps
  * its shape whatever happens to the photo, so a dead image never collapses the
@@ -59,19 +57,14 @@ export function MediaFrame({
   loading = 'lazy',
   children,
 }: MediaFrameProps) {
-  const [load, setLoad] = useState({ src, attempts: 0 })
-  // A different photo starts from nothing, including one the frame gave up on
-  // earlier: coming back to a place is a fresh chance for its photo to load.
-  if (load.src !== src) setLoad({ src, attempts: 0 })
-  const attempts = load.src === src ? load.attempts : 0
-  const gaveUp = attempts >= MAX_IMAGE_ATTEMPTS
+  const image = useImageAttempts(src)
 
   return (
     <div
       className={`image-fallback relative overflow-hidden ${rounded} ${className}`}
       style={{ aspectRatio: ratio }}
     >
-      {gaveUp ? (
+      {image.gaveUp ? (
         <div
           role="img"
           aria-label={`${alt} (photo unavailable)`}
@@ -82,14 +75,13 @@ export function MediaFrame({
         </div>
       ) : (
         <img
-          // A new key remounts the element, which is what makes the browser ask again.
-          key={`${src}#${attempts}`}
+          key={image.key}
           src={src}
           alt={alt}
           loading={loading}
           decoding="async"
           className="h-full w-full object-cover"
-          onError={() => setLoad({ src, attempts: attempts + 1 })}
+          onError={image.onError}
         />
       )}
       {children}

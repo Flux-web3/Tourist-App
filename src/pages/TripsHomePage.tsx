@@ -8,7 +8,8 @@ import { TripCover } from '@/components/ui/TripCover'
 import { Dialog } from '@/components/ui/Dialog'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { EmptyState, Skeleton } from '@/components/ui/EmptyState'
-import { Icon } from '@/components/ui/Icon'
+import { Icon, MediaFrame } from '@/components/ui/Icon'
+import { destinationPhoto } from '@/data/destinationPhotos'
 import { formatDateRange, tripLengthInDays } from '@/domain/format'
 import { formatAmount } from '@/domain/money'
 import { PROTOTYPE_LABEL } from '@/lib/labels'
@@ -34,9 +35,13 @@ function isSampleTrip(trip: Trip): boolean {
 
 function BudgetFigure({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' }) {
   return (
-    <div className="rounded-control bg-surface-low px-2 py-2">
+    // Stacked as label-and-figure rows on a narrow phone, three columns once
+    // there is room, so a six-figure amount is never squeezed or clipped.
+    <div className="flex min-w-0 items-baseline justify-between gap-3 rounded-control bg-surface px-2.5 py-2 min-[26rem]:block">
       <p className="text-label-sm uppercase tracking-wider text-ink-subtle">{label}</p>
-      <p className={`tnum mt-0.5 text-headline-sm ${tone === 'danger' ? 'text-danger' : 'text-ink'}`}>{value}</p>
+      <p className={`tnum min-w-0 break-words text-headline-sm min-[26rem]:mt-0.5 ${tone === 'danger' ? 'text-danger' : 'text-ink'}`}>
+        {value}
+      </p>
     </div>
   )
 }
@@ -46,29 +51,51 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
   const overBudget = remaining < 0
   const length = tripLengthInDays(trip.startDate, trip.endDate)
   const ready = trip.status === 'itinerary_ready'
+  // Only a destination Tourist holds a licensed photograph of gets one; every
+  // other trip keeps the drawn cover, never a picture of somewhere else.
+  const photo = destinationPhoto(trip.destinationId)
 
   return (
     <li className="list-none">
-      <Card as="article" className="flex h-full flex-col gap-3">
+      <Card as="article" className="flex h-full flex-col gap-4 overflow-hidden">
         {/*
-          Trips go wherever the traveller types and Tourist has photographs of
-          exactly one city, so this is a drawing seeded from the destination
-          rather than a stock photo implying knowledge the product lacks. Same
-          destination, same cover, which is what makes a trip recognisable in a
-          list at a glance.
-        */}
-        {/*
-          Capped, not just proportional: at a single-column desktop width a
-          21/9 cover is ~300px tall and swamps the trip it is supposed to
-          introduce. The SVG slices, so the crop stays centred at any height.
-        */}
-        <TripCover
-          destination={trip.destination}
-          ratio="21 / 9"
-          className="-mx-1 -mt-1 max-h-28 sm:max-h-32"
-        />
+          The cover runs edge to edge across the top of the card, the way the
+          landing page opens on a picture. Trips go wherever the traveller types
+          and Tourist has photographs of exactly one city, so a trip to
+          anywhere else gets a drawing seeded from its destination, never a
+          stock photo implying knowledge the product lacks. Same destination,
+          same cover, which is what makes a trip recognisable in a list.
 
-        <div className="flex flex-col gap-2">
+          Capped, not just proportional: a 21/9 cover on a wide card is tall
+          enough to swamp the trip it introduces. Both the photo and the drawing
+          crop from the centre, so the cap loses nothing important.
+        */}
+        <div className="-mx-5 -mt-5 flex flex-col">
+          {photo ? (
+            <MediaFrame
+              src={photo.src}
+              alt={photo.alt}
+              ratio="21 / 9"
+              rounded="rounded-none"
+              className="max-h-36 sm:max-h-40"
+            />
+          ) : (
+            <TripCover
+              destination={trip.destination}
+              ratio="21 / 9"
+              rounded="rounded-none"
+              className="max-h-36 sm:max-h-40"
+            />
+          )}
+          {photo ? (
+            <p className="border-b border-line bg-surface-low px-5 py-2 text-label-md text-ink-subtle">
+              {photo.caption}
+              {photo.credit ? `. Photo by ${photo.credit.author} (${photo.credit.license}).` : '.'}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-3">
           <div className="min-w-0">
             <h2 className="text-headline-md">{trip.name}</h2>
             <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-body-md text-ink-muted">
@@ -121,12 +148,12 @@ function TripCard({ trip, summary }: { trip: Trip; summary: TripSummary }) {
           actually been spent and what is left are different kinds of fact. The
           currency is stated once for the card instead of against each number.
         */}
-        <div className="rounded-card border border-line bg-surface-low p-2.5">
+        <div className="rounded-control border border-line bg-surface-low p-2.5">
           <p className="flex items-baseline justify-between gap-2 px-1 text-label-sm uppercase tracking-wider text-ink-subtle">
             <span>Budget</span>
             <span className="tnum">{trip.currency}</span>
           </p>
-          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+          <div className="mt-1.5 grid grid-cols-1 gap-1.5 min-[26rem]:grid-cols-3">
             <BudgetFigure label={PROTOTYPE_LABEL.tripBudget} value={formatAmount(trip.budget, trip.currency)} />
             <BudgetFigure label={PROTOTYPE_LABEL.actualSpent} value={formatAmount(actualSpent, trip.currency)} />
             <BudgetFigure
@@ -182,12 +209,12 @@ function TripCardSkeleton() {
   return (
     <li className="list-none">
       <div className="surface-card flex flex-col gap-4 p-5">
+        <Skeleton className="h-28 w-full" />
         <div className="flex items-start justify-between gap-3">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-7 w-48 max-w-full" />
         </div>
-        <Skeleton className="h-4 w-64" />
-        <Skeleton className="h-4 w-72" />
+        <Skeleton className="h-4 w-64 max-w-full" />
+        <Skeleton className="h-4 w-72 max-w-full" />
         <Skeleton className="h-20 w-full" />
         <Skeleton className="h-11 w-full" />
       </div>
@@ -218,7 +245,7 @@ export default function TripsHomePage() {
   const isEmpty = hydrated && trips.length === 0
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       {/*
         The traveller's trips are the page. The device-storage claim and the
         sample-data and reset controls used to sit above them, which turned the
@@ -260,7 +287,7 @@ export default function TripsHomePage() {
       />
 
       {!hydrated ? (
-        <ul className="flex list-none flex-col gap-4">
+        <ul className="grid list-none gap-5 md:grid-cols-2">
           <TripCardSkeleton />
           <TripCardSkeleton />
         </ul>
@@ -292,7 +319,7 @@ export default function TripsHomePage() {
           }
         />
       ) : (
-        <ul className="flex list-none flex-col gap-4">
+        <ul className="grid list-none gap-5 md:grid-cols-2">
           {trips.map((trip) => (
             <TripCard key={trip.id} trip={trip} summary={selectTripSummary(state, trip)} />
           ))}

@@ -104,13 +104,13 @@ function ExpenseForm({
   }, [messageCount, submitted])
 
   return (
-    <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+    <form id={formId} noValidate onSubmit={onSubmit} className="flex flex-col gap-5">
       {messageCount > 0 ? (
         <div
           ref={summaryRef}
           role="alert"
           tabIndex={-1}
-          className="rounded-control border border-danger/40 bg-danger-bg px-4 py-3 text-danger-ink"
+          className="rounded-control border border-danger-line bg-danger-bg px-4 py-3 text-danger-ink"
         >
           <p className="text-label-lg">
             {messageCount === 1 ? '1 field needs attention' : `${messageCount} fields need attention`}
@@ -158,8 +158,8 @@ function ExpenseForm({
         />
       </div>
 
-      <p className="flex items-center gap-1.5 text-body-sm text-ink-subtle">
-        <Icon name="currency_exchange" size={14} className="shrink-0" />
+      <p className="flex items-start gap-2 rounded-control bg-surface-low px-3 py-2.5 text-body-sm text-ink-muted">
+        <Icon name="currency_exchange" size={16} className="mt-px shrink-0" />
         {`Amounts are in ${currency} (${CURRENCY_SYMBOLS[currency]}) and never converted. Anything paid before departure counts too.`}
       </p>
 
@@ -169,7 +169,7 @@ function ExpenseForm({
         plainly that the amount is not part of the trip's totals.
       */}
       {currency === tripCurrency ? null : (
-        <p className="text-body-sm text-ink-subtle">
+        <p className="rounded-control bg-surface-low px-3 py-2.5 text-body-sm text-ink-muted">
           {`This expense was logged in ${currency} and this trip is in ${tripCurrency}, so it is not in the ${tripCurrency} total. Saving keeps it in ${currency}.`}
         </p>
       )}

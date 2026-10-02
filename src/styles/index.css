@@ -1,11 +1,20 @@
 @import 'tailwindcss';
 
 /* ---------------------------------------------------------------------------
-   Warm Editorial Companion - design tokens
-   Source of truth: Stitch export DESIGN.md (warm_editorial_companion_2),
-   cross-checked against warm_editorial_companion_1.
-   Light values are declared in :root; dark values override every token on
-   [data-theme='dark'] so runtime theme switching never needs a reload.
+   Tourist design system - "Golden hour"
+
+   One system, every screen. The look comes from two things the product
+   already owns: the landing photograph (a night-blue sky over a sunset) and
+   the gold-on-black logo. So: a deep night navy for product surfaces and
+   primary actions, gold as the brand note, terracotta for small editorial
+   accents, and warm linen to read on.
+
+   - Light values are declared in :root; dark values override every token on
+     [data-theme='dark'] so runtime theme switching never needs a reload.
+   - .on-photo re-points the same tokens at their on-photograph values, so
+     ordinary components work unchanged over a picture or a night band.
+   - Buttons and badges are pills. Fields, menus and small tiles use the
+     control radius, cards the card radius, sheets and heroes the sheet radius.
 --------------------------------------------------------------------------- */
 
 :root {
@@ -33,8 +42,27 @@
   --ink-inverse: #f2f1ec;
 
   /* Brand roles */
-  --navy: #1e2a38;
-  --navy-hover: #2a3a4d;
+  --navy: #14233a;
+  --navy-hover: #213552;
+  /*
+    The night sky of the landing photograph. It is the ground under every photo
+    hero and night band, and it does not change with the theme: a photograph is
+    as dark in light mode as it is in dark mode.
+  */
+  --night: #0a1626;
+  /*
+    Gold is the logo's colour. --gold is the metal itself, for marks, rules and
+    small fills. --gold-ink is the shade that can carry text on the light
+    surfaces, where the metal itself measures under 3:1.
+  */
+  --gold: #c9951c;
+  --gold-ink: #7a5407;
+  --gold-bg: #fbf1d8;
+  --gold-border: #e6cf96;
+  /* The logo: a gold mark on a night tile. The tile needs an edge only on black. */
+  --brand-tile: #0a1626;
+  --brand-mark: #f2c14e;
+  --brand-edge: transparent;
   /*
     The accent carries small text: page eyebrows at 11px, the active mobile tab
     label, the accent badge and the required-field marker. At #c85a3d it
@@ -49,9 +77,9 @@
   --sage-ink: #264835;
 
   /* Primary / secondary / tertiary action surfaces */
-  --btn-primary: #1e2a38;
+  --btn-primary: #14233a;
   --btn-primary-fg: #ffffff;
-  --btn-primary-hover: #2a3a4d;
+  --btn-primary-hover: #213552;
   --btn-accent: #c85a3d;
   --btn-accent-fg: #ffffff;
   --btn-accent-hover: #b44f34;
@@ -68,7 +96,7 @@
 
   /* Financial partitioning */
   --planned-bg: #f1f3f5;
-  --planned-ink: #1e2a38;
+  --planned-ink: #14233a;
   --planned-border: #d5cebe;
   --actual-bg: #eef4f0;
   --actual-ink: #264835;
@@ -80,7 +108,7 @@
   --danger-bg: #ffdad6;
   /* Was spelled `border-danger/40` at eight call sites. */
   --danger-line: #e0a9a5;
-  --focus: #1e2a38;
+  --focus: #14233a;
   /* Modal backdrop. Was inlined as a color-mix in Dialog.tsx. */
   --scrim: rgba(27, 28, 25, 0.45);
 
@@ -116,6 +144,11 @@
 
   --navy: #d7e3f6;
   --navy-hover: #e4e0d6;
+  --gold: #e3b341;
+  --gold-ink: #f0c865;
+  --gold-bg: #2a2110;
+  --gold-border: #5c4718;
+  --brand-edge: #5c4718;
   --terracotta: #e58b73;
   --terracotta-hover: #ee9c87;
   --sage: #9ed2b3;
@@ -177,6 +210,12 @@
   --color-navy-hover: var(--navy-hover);
   --color-terracotta: var(--terracotta);
   --color-terracotta-hover: var(--terracotta-hover);
+  --color-night: var(--night);
+  --color-gold: var(--gold);
+  --color-gold-ink: var(--gold-ink);
+  --color-gold-bg: var(--gold-bg);
+  --color-gold-border: var(--gold-border);
+  --color-brand-edge: var(--brand-edge);
   --color-sage: var(--sage);
   --color-sage-ink: var(--sage-ink);
 
@@ -209,34 +248,44 @@
   --color-focus: var(--focus);
   --color-scrim: var(--scrim);
 
-  --radius-control: 0.625rem;
-  --radius-badge: 0.5rem;
-  --radius-card: 1rem;
-  --radius-sheet: 1.5rem;
+  --radius-control: 0.75rem;
+  --radius-badge: 9999px;
+  --radius-card: 1.25rem;
+  --radius-sheet: 1.75rem;
   --radius-pill: 9999px;
 
   --shadow-card: var(--shadow-card);
   --shadow-raised: var(--shadow-raised);
   --shadow-overlay: var(--shadow-overlay);
 
+  /*
+    The landing headline. It scales with the viewport so "Then plan the days"
+    holds one line from a 320px phone up, and stops growing at desktop size.
+  */
+  --text-hero: clamp(2rem, 10.2vw, 3.75rem);
+  --text-hero--line-height: 1.06;
+  --text-hero--letter-spacing: -0.03em;
+  --text-hero--font-weight: 800;
+
   --text-display: 2.5rem;
-  --text-display--line-height: 3rem;
-  --text-display--letter-spacing: -0.02em;
-  --text-display--font-weight: 700;
+  --text-display--line-height: 2.875rem;
+  --text-display--letter-spacing: -0.025em;
+  --text-display--font-weight: 800;
 
   --text-headline-lg: 2rem;
-  --text-headline-lg--line-height: 2.5rem;
-  --text-headline-lg--letter-spacing: -0.015em;
-  --text-headline-lg--font-weight: 600;
+  --text-headline-lg--line-height: 2.375rem;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 700;
 
   --text-headline-md: 1.375rem;
   --text-headline-md--line-height: 1.875rem;
-  --text-headline-md--letter-spacing: -0.01em;
-  --text-headline-md--font-weight: 600;
+  --text-headline-md--letter-spacing: -0.015em;
+  --text-headline-md--font-weight: 700;
 
   --text-headline-sm: 1.125rem;
   --text-headline-sm--line-height: 1.625rem;
-  --text-headline-sm--font-weight: 600;
+  --text-headline-sm--letter-spacing: -0.01em;
+  --text-headline-sm--font-weight: 700;
 
   --text-body-lg: 1.0625rem;
   --text-body-lg--line-height: 1.625rem;
@@ -393,6 +442,116 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-raised);
+  }
+
+  /*
+    On-photograph scope. Everything inside reads the ordinary tokens, and here
+    they mean "on a dark picture": white ink, a white primary button, smoked
+    glass for secondary surfaces, a lighter coral and gold. It is the same in
+    both themes on purpose.
+  */
+  .on-photo {
+    color-scheme: dark;
+    --canvas: var(--night);
+    --surface: rgba(10, 22, 38, 0.58);
+    --surface-low: rgba(255, 255, 255, 0.14);
+    --surface-high: rgba(255, 255, 255, 0.2);
+    --border: rgba(255, 255, 255, 0.28);
+    --border-strong: rgba(255, 255, 255, 0.5);
+    --ink: #ffffff;
+    --ink-muted: rgba(255, 255, 255, 0.9);
+    --ink-subtle: rgba(255, 255, 255, 0.8);
+    --ink-inverse: #0a1626;
+    --navy: #ffffff;
+    --terracotta: #ffa489;
+    --terracotta-hover: #ffb7a1;
+    --gold: #f2c14e;
+    --gold-ink: #f7d47c;
+    --btn-primary: #ffffff;
+    --btn-primary-fg: #0a1626;
+    --btn-primary-hover: #f3ecdf;
+    --brand-tile: #ffffff;
+    --brand-mark: #0a1626;
+    --brand-edge: transparent;
+    --focus: #ffffff;
+    color: var(--ink);
+  }
+
+  .brand-tile {
+    background-color: var(--brand-tile);
+    border: 1px solid var(--brand-edge);
+  }
+
+  /* The logo is a shape; the colour comes from the token. */
+  .brand-mark {
+    background-color: var(--brand-mark);
+    -webkit-mask: url('/logo-mark.png') center / contain no-repeat;
+    mask: url('/logo-mark.png') center / contain no-repeat;
+  }
+
+  .photo-hero {
+    background-color: var(--night);
+    background-image:
+      radial-gradient(120% 70% at 85% 105%, rgba(201, 149, 28, 0.38) 0%, transparent 60%),
+      linear-gradient(180deg, #0a1626 0%, #14233a 100%);
+  }
+
+  /* Heaviest behind the words at the top, clear over the subject, a foot for the credit. */
+  .photo-hero-scrim {
+    background-image: linear-gradient(
+      180deg,
+      rgba(10, 22, 38, 0.86) 0%,
+      rgba(10, 22, 38, 0.66) 38%,
+      rgba(10, 22, 38, 0.12) 68%,
+      rgba(10, 22, 38, 0.5) 100%
+    );
+  }
+
+  @media (min-width: 64rem) {
+    /* On a wide screen the words sit to the left, so the shade follows them. */
+    .photo-hero-scrim {
+      background-image:
+        linear-gradient(90deg, rgba(10, 22, 38, 0.88) 0%, rgba(10, 22, 38, 0.6) 42%, rgba(10, 22, 38, 0) 72%),
+        linear-gradient(180deg, rgba(10, 22, 38, 0.45) 0%, rgba(10, 22, 38, 0) 30%, rgba(10, 22, 38, 0.4) 100%);
+    }
+  }
+
+  /* Even shading for a compact hero, where the words cover the whole photo. */
+  .photo-hero-shade {
+    background-image: linear-gradient(180deg, rgba(10, 22, 38, 0.8) 0%, rgba(10, 22, 38, 0.66) 100%);
+  }
+
+  /* Lets a photo anchored to the foot of a hero dissolve up into the night sky. */
+  .photo-fade-top {
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 30%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 30%);
+  }
+
+  @media (min-width: 64rem) {
+    .photo-fade-top {
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
+
+  .photo-credit {
+    background-color: rgba(10, 22, 38, 0.72);
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  /* A page header inside a stack that already has a gap needs no margin of its own. */
+  :where(.gap-4, .gap-5, .gap-6) > .page-header {
+    margin-bottom: 0;
+  }
+
+  /* Small uppercase line above a title. One definition, used on every screen. */
+  .eyebrow {
+    font-size: var(--text-label-sm);
+    line-height: var(--text-label-sm--line-height);
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--terracotta);
   }
 
   /* Fallback wash used behind editorial photography that fails to load. */

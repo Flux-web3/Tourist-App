@@ -26,10 +26,13 @@ export function EmptyState({
     <div
       className={`flex flex-col items-center gap-3 rounded-card border border-dashed border-line-strong bg-surface-low px-6 py-10 text-center ${className}`}
     >
-      <Icon name={icon} size={28} className="text-ink-subtle" />
-      <Title className="text-headline-sm">{title}</Title>
+      {/* The same icon tile the landing page uses, so an empty screen reads as designed, not missing. */}
+      <span className="mb-1 grid h-12 w-12 place-items-center rounded-control bg-navy text-btn-primary-fg">
+        <Icon name={icon} size={24} />
+      </span>
+      <Title className="text-headline-md">{title}</Title>
       {description ? (
-        <p className="max-w-sm text-body-sm text-ink-muted">{description}</p>
+        <p className="max-w-sm text-body-md text-ink-muted">{description}</p>
       ) : null}
       {action}
     </div>

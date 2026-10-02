@@ -14,8 +14,10 @@ import type { Experience, ImageCredit, ItineraryCategory, VisitWindow } from '@/
  * Lagos have places; the other catalogue destinations intentionally have none
  * yet, and Explore says so rather than borrowing another city's places.
  *
- * Paris photography comes from Wikimedia Commons and is attributed per record.
- * London and Lagos have no licensed photos in `public/images`, so those
+ * Photography comes from Wikimedia Commons, is served from `public/images` and
+ * is attributed per record. Each photo was looked at before it was added and
+ * shows the place it is filed under. Three Lagos places have none (the only
+ * candidates were of somewhere else, of people, or of artworks), so those
  * records have `imageUrl: null` and render a drawn cover described by
  * `imageAlt`, never a photo of somewhere else.
  */
@@ -128,6 +130,105 @@ const IMAGES = {
     url: '/images/metro-art.jpg',
     alt: 'A Paris Metro entrance with its decorative Art Nouveau signage',
     credit: commons('Bellomonte', 'CC0', 'File:Paris_Metro_2_Porte_Dauphine_Libellule.JPG'),
+  },
+  towerOfLondon: {
+    url: '/images/london-tower-of-london.jpg',
+    alt: 'The White Tower of the Tower of London behind its riverside walls, seen from the Thames on a clear day',
+    credit: commons(
+      'Bob Collowan',
+      'CC BY-SA 3.0',
+      'File:Tower_of_London_viewed_from_the_River_Thames.jpg',
+    ),
+  },
+  britishMuseum: {
+    url: '/images/london-british-museum.jpg',
+    alt: 'The columned portico and carved pediment of the British Museum, with visitors on the front steps',
+    credit: commons(
+      'Yair Haklai',
+      'CC BY-SA 4.0',
+      'File:Exterior_of_the_British_Museum-London.jpg',
+    ),
+  },
+  boroughMarket: {
+    url: '/images/london-borough-market.jpg',
+    alt: 'The green iron and glass roof of Borough Market above its stalls, with shoppers below',
+    credit: commons(
+      'Robert Lamb',
+      'CC BY-SA 2.0',
+      'File:View_into_Borough_Market_from_Stoney_Street_-_geograph.org.uk_-_5512958.jpg',
+    ),
+  },
+  hydePark: {
+    url: '/images/london-hyde-park.jpg',
+    alt: 'The Serpentine lake in Hyde Park under a grey sky, with the lakeside cafe and spring trees on the far bank',
+    credit: commons(
+      'Tristan Surtel',
+      'CC BY-SA 4.0',
+      'File:The_Serpentine,_Hyde_Park.jpg',
+    ),
+  },
+  tateModern: {
+    url: '/images/london-tate-modern.jpg',
+    alt: 'Tate Modern and its brick chimney on the south bank of the Thames, with the Millennium Bridge crossing in front',
+    credit: commons(
+      'The wub',
+      'CC BY-SA 4.0',
+      'File:Tate_Modern_and_Millennium_Bridge_2025-09-20.jpg',
+    ),
+  },
+  camdenMarket: {
+    url: '/images/london-camden-market.jpg',
+    alt: 'A crowd among the street food stalls at Camden Lock Market, seen from above with a tall tree in the middle of the yard',
+    credit: commons(
+      'Mr Ignavy',
+      'CC BY-SA 2.0',
+      'File:Camden_Lock_Market_-_geograph.org.uk_-_8002346.jpg',
+    ),
+  },
+  westEnd: {
+    url: '/images/london-west-end.jpg',
+    alt: 'Shaftesbury Avenue in the West End at dusk, with the lit Palace Theatre sign, street lamps and a red bus',
+    credit: commons(
+      'Garry Knight',
+      'CC BY-SA 2.0',
+      'File:Shaftesbury_Avenue_at_dusk.jpg',
+    ),
+  },
+  westminsterAbbey: {
+    url: '/images/london-westminster-abbey.jpg',
+    alt: 'The twin towers and great west window of Westminster Abbey, with the Victoria Tower of Parliament behind',
+    credit: commons(
+      'Ozeye',
+      'CC BY-SA 3.0',
+      'File:The_West_front_of_Westminster_Abbey_and_Victoria_Tower.jpg',
+    ),
+  },
+  lekkiConservation: {
+    url: '/images/lagos-lekki-conservation-centre.jpg',
+    alt: 'The canopy walkway at the Lekki Conservation Centre, a netted suspension bridge running through the treetops',
+    credit: commons(
+      'Ashinze',
+      'CC BY-SA 4.0',
+      'File:LEKKI_CONSERVATION_CENTRE_(LCC)_10.jpg',
+    ),
+  },
+  tarkwaBay: {
+    url: '/images/lagos-tarkwa-bay.jpg',
+    alt: 'The sand of Tarkwa Bay Beach with thatched shelters along one side, a red kayak, and Lagos towers across the water',
+    credit: commons(
+      'Liesel81',
+      'CC BY-SA 4.0',
+      'File:Tarkwa_Bay_Beach_Front.jpg',
+    ),
+  },
+  afrikaShrine: {
+    url: '/images/lagos-new-afrika-shrine.jpg',
+    alt: 'The painted front of the New Afrika Shrine in Ikeja, with its sign on an orange gable above a yellow and blue wall',
+    credit: commons(
+      'Comradeayobami',
+      'CC BY-SA 4.0',
+      'File:New_Afrika_Shrine.jpg',
+    ),
   },
 } as const satisfies Record<string, SeedImage>
 
@@ -449,8 +550,7 @@ const LONDON_SPECS: SeedSpec[] = [
       'Nearly a thousand years of fortress by the Thames. See the Crown Jewels first, before the queue builds, then join a Yeoman Warder tour and finish with a walk across Tower Bridge.',
     durationMinutes: 180,
     priceFrom: 35,
-    image: null,
-    coverAlt: 'A drawn cover for the Tower of London, not a photograph',
+    image: 'towerOfLondon',
     tags: ['castle', 'history', 'crown jewels'],
     hoursNote: 'Demo hours: roughly 09:00 - 17:30, shorter in winter',
     visitWindow: { opens: '09:00', closes: '17:30' },
@@ -467,8 +567,7 @@ const LONDON_SPECS: SeedSpec[] = [
     durationMinutes: 150,
     priceFrom: 0,
     isFree: true,
-    image: null,
-    coverAlt: 'A drawn cover for the British Museum, not a photograph',
+    image: 'britishMuseum',
     tags: ['museum', 'free', 'history'],
     hoursNote: 'Demo hours: roughly 10:00 - 17:00 daily, later on Fridays',
     visitWindow: { opens: '10:00', closes: '17:00' },
@@ -484,8 +583,7 @@ const LONDON_SPECS: SeedSpec[] = [
       'Free to wander; the estimate is a street-food lunch. Graze the stalls under the railway arches, then walk it off along the South Bank towards Tate Modern.',
     durationMinutes: 90,
     priceFrom: 15,
-    image: null,
-    coverAlt: 'A drawn cover for Borough Market, not a photograph',
+    image: 'boroughMarket',
     tags: ['market', 'street food', 'lunch'],
     hoursNote: 'Demo hours: roughly 10:00 - 17:00, shorter on Sundays',
     visitWindow: { opens: '10:00', closes: '17:00' },
@@ -502,8 +600,7 @@ const LONDON_SPECS: SeedSpec[] = [
     durationMinutes: 120,
     priceFrom: 0,
     isFree: true,
-    image: null,
-    coverAlt: 'A drawn cover for Hyde Park and Kensington Gardens, not a photograph',
+    image: 'hydePark',
     tags: ['free', 'park', 'relaxed'],
     hoursNote: 'Demo hours: roughly 05:00 - midnight daily',
     visitWindow: { opens: '05:00', closes: '00:00' },
@@ -520,8 +617,7 @@ const LONDON_SPECS: SeedSpec[] = [
     durationMinutes: 120,
     priceFrom: 0,
     isFree: true,
-    image: null,
-    coverAlt: 'A drawn cover for Tate Modern, not a photograph',
+    image: 'tateModern',
     tags: ['museum', 'free', 'modern art'],
     hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
     visitWindow: { opens: '10:00', closes: '18:00' },
@@ -538,8 +634,7 @@ const LONDON_SPECS: SeedSpec[] = [
     durationMinutes: 120,
     priceFrom: 0,
     isFree: true,
-    image: null,
-    coverAlt: 'A drawn cover for Camden Market, not a photograph',
+    image: 'camdenMarket',
     tags: ['free', 'market', 'vintage'],
     hoursNote: 'Demo hours: roughly 10:00 - 18:00 daily',
     visitWindow: { opens: '10:00', closes: '18:00' },
@@ -555,8 +650,7 @@ const LONDON_SPECS: SeedSpec[] = [
       'Book ahead for the big musicals, or try the TKTS booth in Leicester Square for same-day seats. The estimate is an upper-circle ticket; stalls seats cost far more.',
     durationMinutes: 180,
     priceFrom: 30,
-    image: null,
-    coverAlt: 'A drawn cover for a West End theatre night, not a photograph',
+    image: 'westEnd',
     tags: ['theatre', 'evening', 'musicals'],
     hoursNote: 'Demo hours: evening shows typically from 19:30, some matinées',
     visitWindow: { opens: '19:30', closes: null },
@@ -572,8 +666,7 @@ const LONDON_SPECS: SeedSpec[] = [
       'Follow the included audio guide through the royal tombs and Poets’ Corner, then walk out past the Houses of Parliament and across Westminster Bridge.',
     durationMinutes: 90,
     priceFrom: 30,
-    image: null,
-    coverAlt: 'A drawn cover for Westminster Abbey, not a photograph',
+    image: 'westminsterAbbey',
     tags: ['church', 'history', 'architecture'],
     hoursNote: 'Demo hours: roughly 09:30 - 15:30 Mon - Sat, services only on Sundays',
     visitWindow: { opens: '09:30', closes: '15:30' },
@@ -594,8 +687,7 @@ const LAGOS_SPECS: SeedSpec[] = [
       'A protected patch of wetland and forest on the Lekki peninsula. Walk the boardwalks looking for monkeys and birds, then take on the canopy walkway if you have a head for heights.',
     durationMinutes: 150,
     priceFrom: 5000,
-    image: null,
-    coverAlt: 'A drawn cover for the Lekki Conservation Centre, not a photograph',
+    image: 'lekkiConservation',
     tags: ['nature', 'canopy walk', 'wildlife'],
     hoursNote: 'Demo hours: roughly 08:00 - 17:00 daily',
     visitWindow: { opens: '08:00', closes: '17:00' },
@@ -647,8 +739,7 @@ const LAGOS_SPECS: SeedSpec[] = [
       'Take a boat from a jetty on Lagos Island or Victoria Island to a calmer, sheltered beach. The estimate is the return boat ride; loungers and food cost extra.',
     durationMinutes: 300,
     priceFrom: 8000,
-    image: null,
-    coverAlt: 'A drawn cover for Tarkwa Bay Beach, not a photograph',
+    image: 'tarkwaBay',
     tags: ['beach', 'boat', 'day out'],
     hoursNote: 'Demo hours: boats roughly 08:00 - 17:00, daylight only',
     visitWindow: { opens: '08:00', closes: '17:00' },
@@ -664,8 +755,7 @@ const LAGOS_SPECS: SeedSpec[] = [
       'The home of Afrobeat, run by Fela Kuti’s children. Go on a show night for a long, loud set; the estimate is the door charge on those nights.',
     durationMinutes: 240,
     priceFrom: 3000,
-    image: null,
-    coverAlt: 'A drawn cover for the New Afrika Shrine, not a photograph',
+    image: 'afrikaShrine',
     tags: ['live music', 'afrobeat', 'evening'],
     hoursNote: 'Demo hours: evenings, with live shows typically late on weekends',
     visitWindow: null,

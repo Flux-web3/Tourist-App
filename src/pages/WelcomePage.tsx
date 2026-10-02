@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
-import { Card } from '@/components/ui/Card'
+import { Card, PageHeader } from '@/components/ui/Card'
 import { Disclosure } from '@/components/ui/Disclosure'
 import { TextField } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
@@ -47,13 +47,11 @@ export default function WelcomePage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-lg flex-col gap-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-headline-lg">Name your trips, or skip</h1>
-        <p className="text-body-md text-ink-muted">
-          A name is the only thing a profile does here. Add one, or go straight to planning.
-        </p>
-      </header>
+    <div className="mx-auto flex w-full max-w-lg flex-col gap-5">
+      <PageHeader
+        title="Name your trips, or skip"
+        description="A name is the only thing a profile does here. Add one, or go straight to planning."
+      />
 
       <Card className="flex flex-col gap-4">
         {!state.user.isGuest ? (
@@ -95,7 +93,7 @@ export default function WelcomePage() {
 
         <div className="flex items-center gap-3" aria-hidden="true">
           <span className="h-px flex-1 bg-line" />
-          <span className="text-label-sm uppercase tracking-widest text-ink-subtle">or</span>
+          <span className="text-label-sm font-bold uppercase tracking-widest text-ink-subtle">or</span>
           <span className="h-px flex-1 bg-line" />
         </div>
 
@@ -132,7 +130,7 @@ export default function WelcomePage() {
         <ol className="flex list-none flex-col gap-2">
           {NEXT_STEPS.map((step, index) => (
             <li key={step} className="flex gap-2.5">
-              <span className="tnum grid h-6 w-6 shrink-0 place-items-center rounded-badge bg-surface-high text-label-md text-navy">
+              <span className="tnum grid h-6 w-6 shrink-0 place-items-center rounded-pill border border-gold-border bg-gold-bg text-label-md text-gold-ink">
                 {index + 1}
               </span>
               <span className="min-w-0 flex-1">{step}</span>

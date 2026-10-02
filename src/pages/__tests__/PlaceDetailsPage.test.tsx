@@ -306,20 +306,39 @@ describe('PlaceDetailsPage', () => {
   })
 
   describe('places outside Paris', () => {
-    it('shows a London place with its own city, a drawn cover and no photo credit', async () => {
+    it('shows a London place with its own city, its own photo and that photo’s credit', async () => {
       renderPlace('exp_london_tower_of_london')
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Tower of London' })).toBeInTheDocument()
       expect(screen.getByText('Tower Hill · London, United Kingdom')).toBeInTheDocument()
+      expect(screen.getByRole('img', { name: /White Tower of the Tower of London/ })).toHaveAttribute(
+        'src',
+        '/images/london-tower-of-london.jpg',
+      )
+      expect(screen.getByText('Photo: Bob Collowan ·')).toBeInTheDocument()
       expect(
-        screen.getByRole('img', { name: 'A drawn cover for the Tower of London, not a photograph' }),
+        screen.getByRole('link', { name: /CC BY-SA 3\.0 source on Wikimedia Commons/ }),
+      ).toHaveAttribute(
+        'href',
+        'https://commons.wikimedia.org/wiki/File:Tower_of_London_viewed_from_the_River_Thames.jpg',
+      )
+      expect(screen.getByText('£35')).toBeInTheDocument()
+      expect(screen.getByText(`GBP · ${PROTOTYPE_LABEL.informationMayChange}`)).toBeInTheDocument()
+      expect(document.body.textContent).not.toMatch(/Paris|€/)
+    })
+
+    it('gives a place with no honest photo a drawn cover and no credit', async () => {
+      renderPlace('exp_lagos_glover_court_suya')
+
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Glover Court Suya' }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole('img', { name: 'A drawn cover for Glover Court Suya, not a photograph' }),
       ).toBeInTheDocument()
       expect(document.querySelector('img')).toBeNull()
       expect(screen.queryByText(/^Photo:/)).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: /Wikimedia Commons/ })).not.toBeInTheDocument()
-      expect(screen.getByText('£35')).toBeInTheDocument()
-      expect(screen.getByText(`GBP · ${PROTOTYPE_LABEL.informationMayChange}`)).toBeInTheDocument()
-      expect(document.body.textContent).not.toMatch(/Paris|€/)
     })
 
     it('prices a Lagos place in naira', async () => {

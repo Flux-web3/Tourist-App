@@ -7,7 +7,7 @@ const TONE_BORDER: Record<StatTone, string> = {
   planned: 'border-planned-border bg-planned-bg text-planned-ink',
   actual: 'border-actual-border bg-actual-bg text-actual-ink',
   accent: 'border-ai-border bg-ai-bg text-ai-ink',
-  danger: 'border-danger/40 bg-danger-bg text-danger-ink',
+  danger: 'border-danger-line bg-danger-bg text-danger-ink',
 }
 
 export function StatTile({

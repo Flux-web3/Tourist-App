@@ -397,15 +397,49 @@ describe('catalogue image metadata', () => {
     assertImageMetadata(records)
   })
 
-  it('has a photo for every Paris place and none borrowed for London or Lagos', () => {
-    // Only Paris has licensed photography. Anything else is a drawn cover,
-    // never a photo of another city passed off as this one.
+  it('has a photo for every Paris and London place', () => {
     for (const experience of EXPERIENCES) {
-      if (experience.destinationId === 'paris') {
-        expect(experience.imageUrl).not.toBeNull()
+      if (experience.destinationId === 'paris' || experience.destinationId === 'london') {
+        expect(experience.imageUrl, experience.id).not.toBeNull()
+      }
+    }
+  })
+
+  it('never lends one place another place’s photo', () => {
+    // A photograph stands for exactly one place. Reusing one would put a
+    // picture of somewhere else on a place, which is the thing a drawn cover
+    // exists to avoid.
+    const owner = new Map<string, string>()
+    for (const experience of PHOTOGRAPHED) {
+      const url = experience.imageUrl ?? ''
+      expect(owner.get(url), `${experience.id} reuses ${url}`).toBeUndefined()
+      owner.set(url, experience.id)
+    }
+  })
+
+  it('files each photo under the city it was taken in', () => {
+    // File names carry their city, so a London file on a Lagos place (or the
+    // reverse) is caught here rather than by a traveller.
+    for (const experience of PHOTOGRAPHED) {
+      for (const other of ['london', 'lagos']) {
+        if (experience.destinationId === other) continue
+        expect(experience.imageUrl, experience.id).not.toContain(`/${other}-`)
+      }
+    }
+  })
+
+  it('credits every photo, and gives a place without one a drawn cover that says so', () => {
+    for (const experience of EXPERIENCES) {
+      if (experience.imageUrl === null) {
+        expect(experience.imageCredit, experience.id).toBeNull()
+        expect(experience.imageAlt, experience.id).toMatch(/drawn cover.*not a photograph/)
       } else {
-        expect(experience.imageUrl).toBeNull()
-        expect(experience.imageCredit).toBeNull()
+        expect(experience.imageCredit?.author, experience.id).toBeTruthy()
+        expect(experience.imageCredit?.license, experience.id).toMatch(/^CC/)
+        expect(experience.imageCredit?.sourceUrl, experience.id).toMatch(
+          /^https:\/\/commons\.wikimedia\.org\/wiki\/File:/,
+        )
+        expect(experience.imageAlt, experience.id).not.toMatch(/drawn cover/)
       }
     }
   })

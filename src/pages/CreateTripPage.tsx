@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ButtonLink } from '@/components/ui/ButtonLink'
-import { Card, CardTitle, PageHeader } from '@/components/ui/Card'
+import { Card, PageHeader } from '@/components/ui/Card'
 import { DestinationCombobox } from '@/components/ui/DestinationCombobox'
 import { Disclosure } from '@/components/ui/Disclosure'
 import {
@@ -50,6 +50,30 @@ const DATE_PRESETS = [
   { label: 'One week', days: 7 },
   { label: 'Two weeks', days: 14 },
 ] as const
+
+/**
+ * A section header for the form: the gold step numeral from the landing page's
+ * "How it works", then the title and, where there is one, the hint beneath it.
+ * The numeral is decoration; the heading keeps its own text.
+ */
+function StepHeader({ step, children, hint }: { step?: number; children: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      {step !== undefined ? (
+        <span
+          aria-hidden="true"
+          className="tnum grid h-9 w-9 shrink-0 place-items-center rounded-pill border border-gold-border bg-gold-bg text-label-lg text-gold-ink"
+        >
+          {step}
+        </span>
+      ) : null}
+      <div className="min-w-0 pt-px">
+        <h2 className="text-headline-sm">{children}</h2>
+        {hint ? <p className="mt-1 text-body-sm text-ink-subtle">{hint}</p> : null}
+      </div>
+    </div>
+  )
+}
 
 export default function CreateTripPage() {
   const navigate = useNavigate()
@@ -205,13 +229,13 @@ export default function CreateTripPage() {
         {`${PROTOTYPE_LABEL.noAccount}. The trip, its draft itinerary and every expense stay in this browser, and nothing is sent to a server.`}
       </Disclosure>
 
-      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {messages.length > 0 ? (
           <div
             ref={summaryRef}
             role="alert"
             tabIndex={-1}
-            className="rounded-control border border-danger/40 bg-danger-bg px-4 py-3 text-danger-ink"
+            className="rounded-control border border-danger-line bg-danger-bg px-4 py-3 text-danger-ink"
           >
             <p className="text-label-lg">
               {messages.length === 1 ? 'Check 1 detail below' : `Check ${messages.length} details below`}
@@ -224,8 +248,8 @@ export default function CreateTripPage() {
           </div>
         ) : null}
 
-        <Card className="flex flex-col gap-4">
-          <CardTitle>Where and when</CardTitle>
+        <Card className="flex flex-col gap-5">
+          <StepHeader step={1}>Where and when</StepHeader>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField
@@ -254,7 +278,7 @@ export default function CreateTripPage() {
             one and both date fields below are already answered.
           */}
           <div role="group" aria-label="Quick date presets" className="flex flex-wrap items-center gap-2">
-            <span className="text-label-md uppercase tracking-wider text-ink-subtle">Quick pick</span>
+            <span className="eyebrow">Quick pick</span>
             {DATE_PRESETS.map((preset) => {
               const active = isPresetActive(preset.days)
               return (
@@ -317,16 +341,19 @@ export default function CreateTripPage() {
           </div>
         </Card>
 
-        <Card className="flex flex-col gap-4">
+        <Card className="flex flex-col gap-5">
           {/*
             The currency caveat used to be a hint under the Currency field. It
             is a fact about the whole card, not about that one control, and as a
             field hint it both repeated this sentence and stopped the two short
             controls from sharing a row on a phone.
           */}
-          <CardTitle hint="One currency and one ceiling for the whole trip, with no live conversion. You log real spending against it later.">
+          <StepHeader
+            step={2}
+            hint="One currency and one ceiling for the whole trip, with no live conversion. You log real spending against it later."
+          >
             Travellers and budget
-          </CardTitle>
+          </StepHeader>
 
           {/*
             Travellers is a two-digit count and Currency is a four-character
@@ -375,8 +402,8 @@ export default function CreateTripPage() {
           />
         </Card>
 
-        <Card className="flex flex-col gap-4">
-          <CardTitle>What the draft should lean towards</CardTitle>
+        <Card className="flex flex-col gap-5">
+          <StepHeader step={3}>What the draft should lean towards</StepHeader>
 
           <CheckboxChipGroup<TravelInterest>
             legend="Interests"
@@ -404,8 +431,8 @@ export default function CreateTripPage() {
           the old expanded card so the message stays visible next to its field.
         */}
         {errors.name ? (
-          <Card className="flex flex-col gap-4">
-            <CardTitle hint="Both optional.">Name and notes</CardTitle>
+          <Card className="flex flex-col gap-5">
+            <StepHeader hint="Both optional.">Name and notes</StepHeader>
             {optionalAnswers}
           </Card>
         ) : (
@@ -423,7 +450,7 @@ export default function CreateTripPage() {
           </Disclosure>
         )}
 
-        <div className="surface-card flex flex-col gap-3 p-5">
+        <div className="surface-card flex flex-col gap-4 p-5">
           <p className="text-body-sm text-ink-subtle">
             We draft a first itinerary from these answers. You can change every part of it afterwards.
           </p>

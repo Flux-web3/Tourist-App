@@ -49,17 +49,16 @@ export function SegmentedControl<T extends string>({
             <label
               htmlFor={id}
               /*
-                The selected pill used to be `bg-surface shadow-card`. In dark
-                mode that is 1.08:1 against the track and the card shadow is
-                nearly nothing, so the selected option was invisible — on the
-                control that switches the theme. `surface-bright` plus a real
-                border reads in both themes.
+                Selected is the product colour, as on every other selected
+                state. The old `bg-surface shadow-card` was 1.08:1 against the
+                track in dark mode, so the chosen theme was invisible on the
+                control that switches it; the primary fill reads in both.
               */
               className={`flex min-h-9 cursor-pointer items-center gap-1.5 rounded-pill border font-semibold capitalize transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus ${
                 size === 'sm' ? 'px-3 py-1 text-label-sm' : 'px-3.5 py-1.5 text-label-md'
               } ${
                 checked
-                  ? 'border-line-strong bg-surface-bright text-ink shadow-card'
+                  ? 'border-transparent bg-btn-primary text-btn-primary-fg'
                   : 'border-transparent text-ink-muted hover:text-ink'
               }`}
             >
@@ -134,7 +133,7 @@ export function Tabs({
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(option.value)}
-            className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-label-lg transition-colors ${
+            className={`-mb-px min-h-11 shrink-0 border-b-2 px-3 py-2.5 text-label-lg transition-colors ${
               selected
                 ? 'border-terracotta text-ink'
                 : 'border-transparent text-ink-subtle hover:border-line-strong hover:text-ink'
