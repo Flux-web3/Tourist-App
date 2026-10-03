@@ -480,6 +480,7 @@ export default function ItineraryPage() {
                 <span className="tnum">
                   {formatAmount(planEstimate, trip.currency, { showCode: true })}
                 </span>
+                <span>per person</span>
               </Badge>
               {uncountedStops > 0 ? (
                 <span className="text-ink-subtle">

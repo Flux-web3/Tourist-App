@@ -90,6 +90,15 @@ describe('TripOverviewPage', () => {
     expect(screen.getByText('€1,115')).toBeInTheDocument()
   })
 
+  it('says the estimate is per person where it sits beside the whole-trip budget', () => {
+    // The estimate adds up one adult's prices, the budget is the whole party's.
+    // Side by side with no word about it, the tile read as the trip's cost.
+    renderOverview()
+
+    const tile = screen.getByText(PROTOTYPE_LABEL.aiDraftEstimate).closest('div')?.parentElement as HTMLElement
+    expect(tile).toHaveTextContent(/per person/i)
+  })
+
   it('states the currency once for the section instead of against every figure', () => {
     renderOverview()
 

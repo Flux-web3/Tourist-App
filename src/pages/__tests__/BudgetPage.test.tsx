@@ -157,6 +157,8 @@ describe('BudgetPage', () => {
     renderBudget()
 
     expect(figure(PROTOTYPE_LABEL.aiDraftEstimate)).toHaveTextContent('a projection')
+    // On the same screen as the whole-trip budget, not only inside a disclosure.
+    expect(figure(PROTOTYPE_LABEL.aiDraftEstimate)).toHaveTextContent('per person')
     expect(figure(PROTOTYPE_LABEL.actualSpent)).toHaveTextContent('settled')
     expect(figure(PROTOTYPE_LABEL.tripBudget)).toHaveTextContent('your ceiling')
   })

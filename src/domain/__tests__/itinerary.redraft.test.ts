@@ -10,7 +10,11 @@ import {
   mergeGeneratedDays,
   nextEmptySlotStartTime,
   updateItemInDays,
+  SAME_PLACE_DRAFT_TITLES,
 } from '@/domain/itinerary'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { EXPERIENCES_BY_ID } from '@/data/experiences'
 import { buildItinerary } from '@/services/itineraryGenerator'
 import type { ItineraryDay, ItineraryItem, Trip } from '@/domain/types'
 
@@ -625,3 +629,92 @@ describe('nextEmptySlotStartTime on a day with a departure', () => {
     expect(nextEmptySlotStartTime(day(2, [item({ id: 'museum', startTime: '10:00', endTime: '12:00' })]))).toBe('11:30')
   })
 })
+
+describe('mergeGeneratedDays and a place added from Explore', () => {
+  const GENERATOR = readFileSync(join(process.cwd(), 'src/services/itineraryGenerator.ts'), 'utf8')
+
+  function fromExplore(experienceId: string, dayStart: string, id: string): ItineraryItem {
+    const place = EXPERIENCES_BY_ID.get(experienceId)
+    if (!place) throw new Error(`no place ${experienceId}`)
+    return item({
+      id,
+      title: place.name,
+      source: 'catalog',
+      experienceId,
+      startTime: dayStart,
+      endTime: null,
+      estimatedCost: place.priceFrom,
+      currency: place.currency,
+    })
+  }
+
+  it('never drafts the same place again under its template title', () => {
+    // Every Explore place that has a twin in a draft bank, every length, several
+    // variants: after adding the place and regenerating, the twin is gone.
+    let checked = 0
+    for (const [experienceId, titles] of Object.entries(SAME_PLACE_DRAFT_TITLES)) {
+      const place = EXPERIENCES_BY_ID.get(experienceId)
+      if (!place) throw new Error(`no place ${experienceId}`)
+      for (const length of [2, 4, 7]) {
+        for (const variant of [0, 1, 2, 3]) {
+          const trip = {
+            ...TRIP_FOR_PLACE(place.destinationId),
+            id: `trip_${experienceId}_${String(length)}`,
+            endDate: addDays('2026-11-02', length - 1),
+          }
+          const first = buildItinerary(trip, variant, NOW)
+          const target = first[Math.min(1, first.length - 1)]
+          const withPlace = insertItemAt(first, target.id, fromExplore(experienceId, '21:30', 'itm_added'), 0)
+          for (const next of [variant + 1, variant + 2]) {
+            const merged = mergeGeneratedDays(withPlace, buildItinerary(trip, next, LATER))
+            const all = merged.flatMap((d) => d.items)
+            for (const title of titles) {
+              expect(all.some((stop) => stop.source === 'ai' && stop.title === title), `${title} drafted beside ${place.name}`).toBe(false)
+            }
+            expect(all.filter((stop) => stop.experienceId === experienceId)).toHaveLength(1)
+            checked += 1
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
+  })
+
+  it('names only real draft templates and real Explore places', () => {
+    for (const [experienceId, titles] of Object.entries(SAME_PLACE_DRAFT_TITLES)) {
+      expect(EXPERIENCES_BY_ID.has(experienceId), experienceId).toBe(true)
+      for (const title of titles) {
+        expect(GENERATOR.includes(`title: '${title}'`), title).toBe(true)
+      }
+    }
+  })
+})
+
+function TRIP_FOR_PLACE(destinationId: string): Trip {
+  const currency = destinationId === 'london' ? 'GBP' : destinationId === 'lagos' ? 'NGN' : 'EUR'
+  const destination =
+    destinationId === 'london'
+      ? 'London, United Kingdom'
+      : destinationId === 'lagos'
+        ? 'Lagos, Nigeria'
+        : 'Paris, France'
+  return {
+    id: 'trip_place',
+    userId: 'usr_1',
+    name: 'Trip',
+    origin: 'Home',
+    destination,
+    destinationId,
+    startDate: '2026-11-02',
+    endDate: '2026-11-05',
+    travelers: 2,
+    budget: 2500,
+    currency,
+    interests: ['culture', 'food', 'outdoors', 'nightlife', 'shopping'],
+    pace: 'packed',
+    notes: '',
+    status: 'itinerary_ready',
+    createdAt: NOW,
+    updatedAt: NOW,
+  }
+}

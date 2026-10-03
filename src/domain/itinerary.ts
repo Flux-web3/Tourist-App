@@ -20,6 +20,40 @@ import type {
  * leaves out its `timestamp`, it reads the clock for that stamp.
  */
 
+/**
+ * The draft stops that visit the same place as an Explore entry, by the Explore
+ * id. Only places that really are the same are listed: a market breakfast is
+ * not the Marché food walk, and suya on Victoria Island is not Glover Court. A
+ * test holds every title here to a real draft template, so a renamed template
+ * cannot quietly stop matching.
+ */
+export const SAME_PLACE_DRAFT_TITLES: Readonly<Record<string, readonly string[]>> = {
+  exp_eiffel_tower: ['Eiffel Tower summit slot'],
+  exp_louvre_museum: ['Louvre Museum, Denon wing highlights'],
+  exp_musee_dorsay: ['Musée d’Orsay, impressionist floor'],
+  exp_sainte_chapelle: ['Sainte-Chapelle and its stained glass'],
+  exp_sacre_coeur: ['Montmartre before the crowds'],
+  exp_luxembourg_gardens: ['Luxembourg Gardens and the Medici Fountain'],
+  exp_seine_cruise: ['Seine cruise from Pont de l’Alma'],
+  exp_notre_dame: ['Notre-Dame Cathedral'],
+  exp_versailles: ['Versailles, palace and gardens'],
+  exp_canal_saint_martin: ['Canal Saint-Martin towpath walk'],
+  exp_marais_walk: ['Le Marais courtyards and galleries'],
+  exp_london_tower_of_london: ['Tower of London and the Crown Jewels'],
+  exp_london_british_museum: ['British Museum, Egyptian galleries and the Great Court'],
+  exp_london_borough_market: ['Lunch at Borough Market'],
+  exp_london_hyde_park: ['Hyde Park and Kensington Gardens'],
+  exp_london_tate_modern: ['Tate Modern and the Turbine Hall'],
+  exp_london_camden_market: ['Camden Market and the Regent’s Canal'],
+  exp_london_west_end_show: ['A West End show'],
+  exp_london_westminster_abbey: ['Westminster Abbey'],
+  exp_lagos_lekki_conservation_centre: ['Lekki Conservation Centre canopy walkway'],
+  exp_lagos_nike_art_gallery: ['Nike Art Gallery'],
+  exp_lagos_lekki_arts_market: ['Lekki Arts and Crafts Market'],
+  exp_lagos_tarkwa_bay: ['Boat to Tarkwa Bay beach'],
+  exp_lagos_new_afrika_shrine: ['Live Afrobeat at the New Afrika Shrine'],
+}
+
 export function isPreservedOnRegenerate(item: ItineraryItem): boolean {
   return item.source !== 'ai' || item.editedByUser
 }
@@ -304,6 +338,15 @@ export function mergeGeneratedDays(
 
   const { kept, anchors } = settleKeptAnchors(paired)
   const keptTitles = new Set(kept.flat().map((item) => titleKey(item.title)))
+  // A place added from Explore keeps its catalogue name ("British Museum"),
+  // while the draft calls the same place something longer ("British Museum,
+  // Egyptian galleries and the Great Court"). Matching titles alone let a
+  // regenerate put the place on the plan twice and count it twice.
+  for (const item of kept.flat()) {
+    for (const title of SAME_PLACE_DRAFT_TITLES[item.experienceId ?? ''] ?? []) {
+      keptTitles.add(titleKey(title))
+    }
+  }
   const lastIndex = generated.length - 1
 
   return generated.map((day, index) => {

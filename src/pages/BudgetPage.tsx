@@ -281,7 +281,7 @@ export default function BudgetPage() {
             tone="ai"
             icon="auto_awesome"
             label={PROTOTYPE_LABEL.aiDraftEstimate}
-            note="a projection"
+            note="per person, a projection"
             amount={budget.itineraryEstimate}
             currency={currency}
           />

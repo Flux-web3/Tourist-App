@@ -400,10 +400,10 @@ export default function TripOverviewPage() {
             value={formatAmount(budget.itineraryEstimate, trip.currency)}
             caption={
               budget.mixedEstimateCurrency
-                ? `A projection. ${budget.uncountedEstimateCount} ${
+                ? `Per person, a projection. ${budget.uncountedEstimateCount} ${
                     budget.uncountedEstimateCount === 1 ? 'stop' : 'stops'
                   } in ${budget.otherEstimateCurrencies.join(', ')} not included`
-                : 'A projection, not a booking'
+                : 'Per person, a projection, not a booking'
             }
             tone="accent"
             icon={<Icon name="auto_awesome" size={14} />}

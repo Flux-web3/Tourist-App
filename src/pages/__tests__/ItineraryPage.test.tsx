@@ -921,6 +921,14 @@ describe('ItineraryPage money', () => {
     expect(await screen.findByText('€129 EUR')).toBeInTheDocument()
   })
 
+  it('says the plan estimate is per person on the badge itself', async () => {
+    renderItinerary()
+
+    const badge = (await screen.findByText(PROTOTYPE_LABEL.aiDraftEstimate)).closest('span') as HTMLElement
+    // The badge lays its parts out with a gap, so the text runs together here.
+    expect(badge).toHaveTextContent(/€129 EUR\s*per person/)
+  })
+
   it('names the currency of the AED cost field once', async () => {
     renderItinerary(
       fixtureState({
